@@ -1,0 +1,58 @@
+{
+  "mode": "NAVIER_STOKES",
+  "mesh": {
+    "nx": 64,
+    "ny": 128,
+    "lx": 1.0,
+    "ly": 2.0
+  },
+  "physics": {
+    "enable_two_phase": true,
+    "enable_surface_tension": true,
+    "enable_convection": true,
+    "sigma": 0.05,
+    "gx": 0.0,
+    "gy": -9.81,
+    "fluid1": {
+      "rho": 1000.0,
+      "mu": 0.01
+    },
+    "fluid2": {
+      "rho": 100.0,
+      "mu": 0.001
+    }
+  },
+  "initial_condition": {
+    "type": "RAYLEIGH_TAYLOR",
+    "center_y": 1.0,
+    "pert_amp": 0.05,
+    "pert_k": 1.0
+  },
+  "time": {
+    "dt": 0.002,
+    "t_final": 0.8,
+    "adaptive_dt": false
+  },
+  "boundary_conditions": {
+    "left":   { "type": "FREE_SLIP" },
+    "right":  { "type": "FREE_SLIP" },
+    "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
+    "top":    { "type": "DIRICHLET", "u": 0.0, "v": 0.0 }
+  },
+  "solver": {
+    "type": "AUGMENTED_LAGRANGIAN",
+    "tol": 1e-6,
+    "max_iter": 300,
+    "r_al": 200.0,
+    "uzawa_iter": 1,
+    "use_precond": true,
+    "precond_type": "JACOBI"
+  },
+  "output": {
+    "output_dir": "output_rayleigh_taylor",
+    "case_name": "rayleigh_taylor",
+    "vtk_interval": 40,
+    "log_interval": 20,
+    "write_csv_history": true
+  }
+}

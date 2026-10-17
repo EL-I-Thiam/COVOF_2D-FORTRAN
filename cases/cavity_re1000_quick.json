@@ -1,0 +1,69 @@
+{
+  "mode": "NAVIER_STOKES",
+  "steady_state_tol": 1e-05,
+  "mesh": {
+    "nx": 128,
+    "ny": 128,
+    "lx": 1.0,
+    "ly": 1.0
+  },
+  "physics": {
+    "enable_two_phase": false,
+    "enable_surface_tension": false,
+    "enable_convection": true,
+    "sigma": 0.0,
+    "gx": 0.0,
+    "gy": 0.0,
+    "fluid1": {
+      "rho": 1.0,
+      "mu": 0.001
+    }
+  },
+  "time": {
+    "dt": 0.01,
+    "t_final": 0.05,
+    "cfl_max": 0.8,
+    "adaptive_dt": false
+  },
+  "boundary_conditions": {
+    "left": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "right": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "bottom": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "top": {
+      "type": "DIRICHLET",
+      "u": 1.0,
+      "v": 0.0
+    }
+  },
+  "initial_condition": {
+    "type": "SINGLE_PHASE"
+  },
+  "solver": {
+    "type": "AUGMENTED_LAGRANGIAN",
+    "tol": 1e-05,
+    "max_iter": 300,
+    "r_al": 100.0,
+    "uzawa_iter": 1,
+    "use_precond": true,
+    "precond_type": "JACOBI"
+  },
+  "output": {
+    "output_dir": "output_cavity_re1000",
+    "case_name": "cavity_re1000",
+    "vtk_interval": 50,
+    "log_interval": 10,
+    "write_csv_history": true
+  }
+}

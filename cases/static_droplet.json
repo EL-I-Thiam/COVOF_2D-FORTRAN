@@ -1,0 +1,58 @@
+{
+  "mesh": {
+    "nx": 64,
+    "ny": 64,
+    "lx": 1.0,
+    "ly": 1.0
+  },
+  "physics": {
+    "enable_two_phase": true,
+    "enable_surface_tension": true,
+    "enable_convection": false,
+    "sigma": 1.0,
+    "gx": 0.0,
+    "gy": 0.0,
+    "fluid1": {
+      "rho": 1.0,
+      "mu": 1.0
+    },
+    "fluid2": {
+      "rho": 1.0,
+      "mu": 1.0
+    }
+  },
+  "time": {
+    "dt": 0.005,
+    "t_final": 0.05,
+    "cfl_max": 0.3,
+    "adaptive_dt": false
+  },
+  "boundary_conditions": {
+    "left":   { "type": "FREE_SLIP", "u": 0.0, "v": 0.0 },
+    "right":  { "type": "FREE_SLIP", "u": 0.0, "v": 0.0 },
+    "bottom": { "type": "FREE_SLIP", "u": 0.0, "v": 0.0 },
+    "top":    { "type": "FREE_SLIP", "u": 0.0, "v": 0.0 }
+  },
+  "initial_condition": {
+    "type": "DROPLET",
+    "center_x": 0.5,
+    "center_y": 0.5,
+    "radius": 0.25
+  },
+  "solver": {
+    "type": "AUGMENTED_LAGRANGIAN",
+    "tol": 1.0e-5,
+    "max_iter": 200,
+    "r_al": 100.0,
+    "uzawa_iter": 1,
+    "use_precond": true,
+    "precond_type": "JACOBI"
+  },
+  "output": {
+    "output_dir": "output_droplet",
+    "case_name": "droplet",
+    "vtk_interval": 2,
+    "log_interval": 1,
+    "write_csv_history": true
+  }
+}

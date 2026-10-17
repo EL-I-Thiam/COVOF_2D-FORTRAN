@@ -1,0 +1,80 @@
+{
+  "mode": "NAVIER_STOKES",
+  "steady_state_tol": 1e-05,
+  "mesh": {
+    "nx": 128,
+    "ny": 32,
+    "lx": 40.0,
+    "ly": 2.0612244898
+  },
+  "physics": {
+    "enable_two_phase": false,
+    "enable_surface_tension": false,
+    "enable_convection": true,
+    "sigma": 0.0,
+    "gx": 0.0,
+    "gy": 0.0,
+    "fluid1": {
+      "rho": 1.0,
+      "mu": 0.02061224
+    }
+  },
+  "obstacles": [
+    {
+      "type": "BOX",
+      "x0": 0.0,
+      "y0": 0.0,
+      "x1": 4.0,
+      "y1": 1.0,
+      "permeability": 1e-40
+    }
+  ],
+  "time": {
+    "dt": 0.05,
+    "t_final": 15.0,
+    "cfl_max": 0.8,
+    "adaptive_dt": false
+  },
+  "boundary_conditions": {
+    "left": {
+      "type": "DIRICHLET",
+      "profile": "POISEUILLE_STEP",
+      "u_mean": 1.0,
+      "y_step": 1.0
+    },
+    "right": {
+      "type": "NEUMANN",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "bottom": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "top": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    }
+  },
+  "initial_condition": {
+    "type": "SINGLE_PHASE"
+  },
+  "solver": {
+    "type": "AUGMENTED_LAGRANGIAN",
+    "tol": 1.0e-5,
+    "max_iter": 300,
+    "r_al": 100.0,
+    "uzawa_iter": 1,
+    "use_precond": true,
+    "precond_type": "JACOBI"
+  },
+  "output": {
+    "output_dir": "output_step",
+    "case_name": "backward_facing_step",
+    "vtk_interval": 20,
+    "log_interval": 10,
+    "write_csv_history": true
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "mode": "NAVIER_STOKES",
+  "mesh": {
+    "nx": 16,
+    "ny": 64,
+    "lx": 0.16,
+    "ly": 0.16
+  },
+  "physics": {
+    "enable_two_phase": false,
+    "enable_surface_tension": false,
+    "enable_convection": false,
+    "sigma": 0.0,
+    "gx": 0.0555,
+    "gy": 0.0,
+    "fluid1": {
+      "rho": 1.0,
+      "mu": 0.01
+    }
+  },
+  "time": {
+    "dt": 0.01,
+    "t_final": 1.0,
+    "cfl_max": 0.5,
+    "adaptive_dt": false
+  },
+  "boundary_conditions": {
+    "left":   { "type": "PERIODIC", "u": 0.0, "v": 0.0 },
+    "right":  { "type": "PERIODIC", "u": 0.0, "v": 0.0 },
+    "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
+    "top":    { "type": "DIRICHLET", "u": 0.0, "v": 0.0 }
+  },
+  "initial_condition": {
+    "type": "SINGLE_PHASE"
+  },
+  "solver": {
+    "type": "AUGMENTED_LAGRANGIAN",
+    "tol": 1.0e-7,
+    "max_iter": 500,
+    "r_al": 100.0,
+    "uzawa_iter": 1,
+    "steady_state_tol": 0.0,
+    "use_precond": true,
+    "precond_type": "JACOBI"
+  },
+  "output": {
+    "output_dir": "output_poiseuille_unsteady",
+    "case_name": "poiseuille_unsteady",
+    "vtk_interval": 20,
+    "log_interval": 10,
+    "write_csv_history": true
+  }
+}

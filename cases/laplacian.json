@@ -1,0 +1,52 @@
+{
+  "mode": "LAPLACIAN",
+  "mesh": {
+    "nx": 64,
+    "ny": 32,
+    "lx": 1.0,
+    "ly": 0.5
+  },
+  "physics": {
+    "enable_two_phase": false,
+    "enable_surface_tension": false,
+    "enable_convection": false,
+    "sigma": 0.0,
+    "gx": 0.0,
+    "gy": 0.0,
+    "fluid1": {
+      "rho": 1.0,
+      "mu": 1.0
+    }
+  },
+  "time": {
+    "dt": 1.0,
+    "t_final": 1.0,
+    "cfl_max": 0.5,
+    "adaptive_dt": false
+  },
+  "boundary_conditions": {
+    "left":   { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
+    "right":  { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
+    "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
+    "top":    { "type": "DIRICHLET", "u": 0.0, "v": 0.0 }
+  },
+  "initial_condition": {
+    "type": "SINGLE_PHASE"
+  },
+  "solver": {
+    "type": "CONJUGATE_GRADIENT",
+    "tol": 1.0e-12,
+    "max_iter": 5000,
+    "r_al": 100.0,
+    "uzawa_iter": 1,
+    "use_precond": true,
+    "precond_type": "JACOBI"
+  },
+  "output": {
+    "output_dir": "output_laplacian",
+    "case_name": "laplacian",
+    "vtk_interval": 1,
+    "log_interval": 1,
+    "write_csv_history": true
+  }
+}

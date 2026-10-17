@@ -1,0 +1,20 @@
+# Fortran modules and objects
+*.mod
+*.o
+*.a
+*.so
+*.dylib
+
+# Build directories and executables
+build/
+bin/
+CMakeCache.txt
+CMakeFiles/
+
+# OS files
+.DS_Store
+
+# Simulation output directories (VTK and CSV runs)
+output*/
+
+__pycache__/
