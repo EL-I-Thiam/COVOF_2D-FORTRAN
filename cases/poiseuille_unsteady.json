@@ -37,7 +37,7 @@
     "type": "AUGMENTED_LAGRANGIAN",
     "tol": 1.0e-7,
     "max_iter": 500,
-    "r_al": 100.0,
+    "r_al": 0.0,
     "uzawa_iter": 1,
     "steady_state_tol": 0.0,
     "use_precond": true,

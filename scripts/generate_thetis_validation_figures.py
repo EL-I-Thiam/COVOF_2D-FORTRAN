@@ -139,35 +139,40 @@ plt.close(fig)
 # 3. CAS 3.8 : POISEUILLE INSTATIONNAIRE DE SZYMANSKI
 # ==============================================================================
 print("3. Tracé des profils transitoires de Szymanski Cas 3.8...")
-fig, ax = plt.subplots(figsize=(7, 5))
+fig, ax = plt.subplots(figsize=(7.5, 5.5))
 ly = 0.16
 e = ly / 2.0
 z = np.linspace(-e, e, 100)
 G = 0.0555
 rho = 1.0
 mu = 0.01
-colors = ['#5bc0de', '#0275d8', '#f0ad4e', '#d9534f']
-times = [0.2, 0.4, 0.7, 1.0]
+times = [0.2, 0.4, 0.6, 0.8, 1.0]
+colors = ['#17a2b8', '#007bff', '#fd7e14', '#6f42c1', '#d9534f']
 
 for idx, t in enumerate(times):
+    # Série de Fourier de Szymanski
     u_sz = (G * e**2 / (2.0 * mu)) * (1.0 - (z / e)**2)
-    for n in range(40):
+    for n in range(50):
         an = -16.0 * G * (e**2) * ((-1)**n) / (mu * (np.pi**3) * (2*n + 1)**3)
         decay = np.exp(-((2*n + 1)**2 * np.pi**2 * mu / (4.0 * rho * e**2)) * t)
         u_sz += an * decay * np.cos((2*n + 1) * np.pi * z / (2.0 * e))
-    ax.plot(u_sz, z + e, label=f'Analytique $t = {t}$ s', color=colors[idx], linestyle='--')
+    ax.plot(u_sz, z + e, color=colors[idx], linestyle='--', linewidth=1.5,
+            label=f'Analytique $t = {t}$ s')
 
-u_unsteady, nx, ny = reconstruct_global_field("output_poiseuille_unsteady", "poiseuille_unsteady", "Velocity")
-if u_unsteady is not None:
-    u_mat = u_unsteady[:, :, 0] if u_unsteady.ndim == 3 else u_unsteady[:, 0::3]
-    ys = np.linspace(e / ny, ly - e / ny, ny)
-    ax.plot(u_mat[:, nx // 2], ys, 'k-', linewidth=2.2, label='FUGU 2D ($t = 1.0$ s)')
+    # Extraction du pas de temps numérique correspondant
+    step = int(round(t / 0.01))
+    u_inst, nx, ny = reconstruct_global_field("output_poiseuille_unsteady", "poiseuille_unsteady", "Velocity", step=step)
+    if u_inst is not None:
+        u_mat = u_inst[:, :, 0] if u_inst.ndim == 3 else u_inst[:, 0::3]
+        ys = (np.arange(ny) + 0.5) * (ly / ny)
+        ax.plot(u_mat[:, nx // 2], ys, color=colors[idx], linestyle='-', marker='o',
+                markersize=3.5, markevery=4, label=f'FUGU 2D $t = {t}$ s')
 
-ax.set_xlabel('Vitesse axiale $u(y, t)$ [m/s]')
-ax.set_ylabel('Position transversale $y$ [m]')
-ax.set_title('Cas 3.8 : Évolution temporelle de Poiseuille (Série de Szymanski)')
-ax.legend(frameon=True)
-ax.grid(True)
+ax.set_xlabel('Vitesse axiale $u(y, t)$ [m/s]', fontsize=11)
+ax.set_ylabel('Position transversale $y$ [m]', fontsize=11)
+ax.set_title('Cas 3.8 : Évolution temporelle de Poiseuille (Série de Szymanski)', fontsize=12, fontweight='bold')
+ax.legend(loc='lower right', fontsize=8.5, ncol=2, frameon=True)
+ax.grid(True, linestyle=':', alpha=0.6)
 fig.tight_layout()
 fig.savefig(os.path.join(FIG_DIR, "fig_cas3_8_szymanski_unsteady.png"), dpi=300)
 plt.close(fig)
@@ -176,7 +181,7 @@ plt.close(fig)
 # 4. CAS 3.9 : POISEUILLE A VISCOSITE VARIABLE EXPONENTIELLE
 # ==============================================================================
 print("4. Tracé du profil à viscosité variable Cas 3.9...")
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5))
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 5))
 e = 0.01
 a = 2.0
 mu0 = 1.85e-5
@@ -184,30 +189,30 @@ k = 0.294207317
 y_span = np.linspace(0, 2*e, 100)
 z_span = y_span - e
 mu_profile = mu0 * np.exp(a * (z_span**2) / (e**2))
-u_exact = (k * e**2 / (2.0 * a * mu0)) * (1.0 - np.exp(-a * (1.0 - (z_span**2) / (e**2))))
+u_exact = (k * e**2 / (2.0 * a * mu0)) * (np.exp(-a * (z_span**2) / (e**2)) - np.exp(-a))
 
 # Profil de viscosité
-ax1.plot(mu_profile * 1e5, y_span * 1e3, 'b-', linewidth=2)
-ax1.set_xlabel(r'Viscosité dynamique $\mu(y) \times 10^5$ [Pa.s]')
-ax1.set_ylabel('Hauteur $y$ [mm]')
-ax1.set_title('Profil de viscosité $\\mu_0 \\exp(a z^2 / e^2)$ (Fig. 1 Thétis)')
-ax1.grid(True)
+ax1.plot(mu_profile * 1e5, y_span * 1e3, 'b-', linewidth=2.2)
+ax1.set_xlabel(r'Viscosité dynamique $\mu(y) \times 10^5$ [Pa.s]', fontsize=11)
+ax1.set_ylabel('Hauteur $y$ [mm]', fontsize=11)
+ax1.set_title('Profil de viscosité $\\mu_0 \\exp(a z^2 / e^2)$ (Fig. 1 Thétis)', fontsize=11, fontweight='bold')
+ax1.grid(True, linestyle=':', alpha=0.6)
 
-# Profil de vitesse FUGU 2D vs Théorie
+# Profil de vitesse FUGU 2D vs Théorie (valeurs physiques absolues réelles sans mise à l'échelle)
 u_varmu, nx, ny = reconstruct_global_field("output_poiseuille_variable_viscosity", "poiseuille_var_mu", "Velocity")
 if u_varmu is not None:
     u_mat = u_varmu[:, :, 0] if u_varmu.ndim == 3 else u_varmu[:, 0::3]
-    ys_num = np.linspace(e / ny, 2*e - e / ny, ny)
+    ys_num = (np.arange(ny) + 0.5) * (2.0 * e / ny)
     u_num = u_mat[:, nx // 2]
-    # Normalisation du profil numérique pour comparaison géométrique directe
-    ax2.plot(u_num, ys_num * 1e3, 'r-', label='FUGU 2D (Calculé)')
-ax2.plot(u_exact[::3] * (np.max(u_num)/np.max(u_exact) if u_varmu is not None else 1.0),
-         y_span[::3] * 1e3, 'ko', fillstyle='none', label='Solution théorique exacte')
-ax2.set_xlabel('Vitesse axiale $u(y)$ [m/s]')
-ax2.set_ylabel('Hauteur $y$ [mm]')
-ax2.set_title('Cas 3.9 : Vitesse axiale à viscosité variable (Fig. 2 Thétis)')
-ax2.legend(frameon=True)
-ax2.grid(True)
+    ax2.plot(u_num, ys_num * 1e3, 'r-', linewidth=2.2, label='FUGU 2D (Calculé)')
+
+ax2.plot(u_exact[::3], y_span[::3] * 1e3, 'ko', fillstyle='none', markersize=6,
+         markeredgewidth=1.2, label='Solution théorique exacte')
+ax2.set_xlabel('Vitesse axiale $u(y)$ [m/s]', fontsize=11)
+ax2.set_ylabel('Hauteur $y$ [mm]', fontsize=11)
+ax2.set_title('Cas 3.9 : Vitesse axiale à viscosité variable (Fig. 2 Thétis)', fontsize=11, fontweight='bold')
+ax2.legend(loc='lower right', fontsize=10, frameon=True)
+ax2.grid(True, linestyle=':', alpha=0.6)
 
 fig.tight_layout()
 fig.savefig(os.path.join(FIG_DIR, "fig_cas3_9_variable_viscosity.png"), dpi=300)

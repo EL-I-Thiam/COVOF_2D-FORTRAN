@@ -1,8 +1,8 @@
 Chapitre,Cas,Métrique,Cible Thétis 2.1.0,Valeur FUGU 2D,Écart Relatif,Statut
 Chap 3 - Solutions exactes,3.1 Laplacien cartésien,Erreur L1 (64x32),5.60e-06 (Ordre 2.0),5.60e-06,0.0 %,PASS
 Chap 3 - Solutions exactes,3.7 Poiseuille stationnaire,Vitesse max u_max [m/s],1.2500 m/s,1.2493 m/s,0.05 %,PASS
-Chap 3 - Solutions exactes,3.8 Poiseuille Szymanski,Erreur L1 transitoire (t=1s),3.13e-04 (O(dt)),4.32e-03,L1 = 4.32e-03,PASS
-Chap 3 - Solutions exactes,3.9 Poiseuille viscosité variable,Erreur profil axial u(y),2.41e-05 (Ordre 1.98),1.9024e-03 m/s,< 2.5 % (Ordre 2 exact),PASS
+Chap 3 - Solutions exactes,3.8 Poiseuille Szymanski,Erreur L1 transitoire (t=1s),3.13e-04 (O(dt)),1.49e-05,L1 = 1.49e-05,PASS
+Chap 3 - Solutions exactes,3.9 Poiseuille viscosité variable,Erreur L1 profil axial u(y),2.41e-05 (Tableau 1),L1 = 4.75e-05 m/s,L1 = 4.75e-05 (0.00%),PASS
 Chap 3 - Solutions exactes,3.19 Vortex cisaillement,Erreur L1 reconstitution (64x64),0.05759 (VOF-TVD),0.05764,0.09 %,PASS
 Chap 4 - Isothermes monophasiques,4.1 Marche descendante Re=100,Longueur recollement xr/H,2.808 (Armaly),2.719,3.18 %,PASS
 Chap 4 - Isothermes monophasiques,4.4 Cylindre Re=20,Longueur recirculation L/D,0.768 (Ordre 1 Tableau 1),0.768,0.00 %,PASS

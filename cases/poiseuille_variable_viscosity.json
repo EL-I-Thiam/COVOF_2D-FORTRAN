@@ -21,13 +21,13 @@
     }
   },
   "time": {
-    "dt": 0.005,
-    "t_final": 2.0,
+    "dt": 0.02,
+    "t_final": 25.0,
     "adaptive_dt": false
   },
   "boundary_conditions": {
-    "left":   { "type": "NEUMANN" },
-    "right":  { "type": "NEUMANN" },
+    "left":   { "type": "PERIODIC", "u": 0.0, "v": 0.0 },
+    "right":  { "type": "PERIODIC", "u": 0.0, "v": 0.0 },
     "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
     "top":    { "type": "DIRICHLET", "u": 0.0, "v": 0.0 }
   },
@@ -35,16 +35,16 @@
     "type": "AUGMENTED_LAGRANGIAN",
     "tol": 1e-8,
     "max_iter": 500,
-    "r_al": 100.0,
+    "r_al": 0.0,
     "uzawa_iter": 1,
     "use_precond": true,
     "precond_type": "JACOBI"
   },
-  "steady_state_tol": 1e-9,
+  "steady_state_tol": 1e-7,
   "output": {
     "output_dir": "output_poiseuille_variable_viscosity",
     "case_name": "poiseuille_var_mu",
-    "vtk_interval": 20,
+    "vtk_interval": 50,
     "log_interval": 10,
     "write_csv_history": true
   }

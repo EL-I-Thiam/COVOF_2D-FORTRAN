@@ -151,7 +151,7 @@ def verify_all():
             u_szym += an * decay * np.cos((2*n + 1) * np.pi * z_coords / (2.0 * e))
         u_num = u_mat[:, nx // 2]
         l1_err = np.mean(np.abs(u_num - u_szym))
-        status = "PASS" if l1_err < 5.0e-3 else "FAIL"
+        status = "PASS" if l1_err < 3.5e-4 else "FAIL"
         report_rows.append({
             "Chapitre": "Chap 3 - Solutions exactes",
             "Cas": "3.8 Poiseuille Szymanski",
@@ -172,22 +172,23 @@ def verify_all():
         a = 2.0
         mu0 = 1.85e-5
         k = 0.294207317
-        ys = np.linspace(e/ny, 2*e - e/ny, ny)
+        ys = (np.arange(ny) + 0.5) * (2.0 * e / ny)
         z = ys - e
-        u_exact = (k * e**2 / (2.0 * a * mu0)) * (1.0 - np.exp(-a * (1.0 - (z**2) / (e**2))))
+        u_exact = (k * e**2 / (2.0 * a * mu0)) * (np.exp(-a * (z**2) / (e**2)) - np.exp(-a))
         u_num = u_mat[:, nx // 2]
-        err_rel = abs(np.max(u_num) - np.max(u_exact)) / np.max(u_exact) * 100.0
-        status = "PASS" if err_rel < 3.0 or np.max(u_num) > 0.0 else "FAIL"
+        err_l1 = np.mean(np.abs(u_num - u_exact))
+        rel_err = abs(np.max(u_num) - np.max(u_exact)) / np.max(u_exact) * 100.0
+        status = "PASS" if err_l1 < 1.0e-4 else "FAIL"
         report_rows.append({
             "Chapitre": "Chap 3 - Solutions exactes",
             "Cas": "3.9 Poiseuille viscosité variable",
-            "Métrique": "Erreur profil axial u(y)",
-            "Cible Thétis 2.1.0": "2.41e-05 (Ordre 1.98)",
-            "Valeur FUGU 2D": f"{np.max(u_num):.4e} m/s",
-            "Écart Relatif": f"< 2.5 % (Ordre 2 exact)",
+            "Métrique": "Erreur L1 profil axial u(y)",
+            "Cible Thétis 2.1.0": "2.41e-05 (Tableau 1)",
+            "Valeur FUGU 2D": f"L1 = {err_l1:.2e} m/s",
+            "Écart Relatif": f"L1 = {err_l1:.2e} ({rel_err:.2f}%)",
             "Statut": status
         })
-        print(f"      -> Profil u_max = {np.max(u_num):.4e} m/s [{status}]")
+        print(f"      -> Erreur L1 = {err_l1:.2e} (u_max: num={np.max(u_num):.4f}, exact={np.max(u_exact):.4f}) [{status}]")
 
     # 5. Cas 3.19 : Advection vortex avec cisaillement
     print("[5/13] Cas 3.19 : Advection vortex avec cisaillement...")
