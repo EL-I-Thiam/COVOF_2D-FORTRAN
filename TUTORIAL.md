@@ -1,6 +1,6 @@
-# Tutoriel Pratique Exhaustif FUGU 2D (Fortran 2018 / OpenMPI)
+# Tutoriel Pratique Exhaustif COVOF 2D (Fortran 2018 / OpenMPI)
 
-Ce document constitue le **guide d'apprentissage complet pas à pas** pour configurer, compiler, exécuter, analyser et développer des cas de calcul en mécanique des fluides numérique avec la version **Modern Fortran 2018 modulaire** du solveur **FUGU 2D**.
+Ce document constitue le **guide d'apprentissage complet pas à pas** pour configurer, compiler, exécuter, analyser et développer des cas de calcul en mécanique des fluides numérique avec la version **Modern Fortran 2018 modulaire** du solveur **COVOF 2D**.
 
 ---
 
@@ -25,7 +25,7 @@ Ce document constitue le **guide d'apprentissage complet pas à pas** pour confi
 ## 1. Introduction et Notions Fondamentales
 
 ### 1.1. Maillage Décalé MAC et Convention Mémoire Fortran
-Le solveur FUGU 2D repose sur la discrétisation spatiale sur grille décalée de Harlow & Welch (1965) :
+Le solveur COVOF 2D repose sur la discrétisation spatiale sur grille décalée de Harlow & Welch (1965) :
 * **Composante $u$ de vitesse** : discrétisée aux faces verticales $(i \pm \frac{1}{2}, j)$.
 * **Composante $v$ de vitesse** : discrétisée aux faces horizontales $(i, j \pm \frac{1}{2})$.
 * **Champs scalaires ($p, T, C$)** : positionnés au centre des cellules $(i, j)$.
@@ -54,7 +54,7 @@ end do
 ```
 
 ### 1.2. Formulation par Lagrangien Augmenté et Itérations d'Uzawa
-Pour résoudre les équations de Navier-Stokes incompressibles avec une précision machine sur la divergence $\nabla \cdot \mathbf{u} = 0$, FUGU 2D utilise la méthode du Lagrangien Augmenté :
+Pour résoudre les équations de Navier-Stokes incompressibles avec une précision machine sur la divergence $\nabla \cdot \mathbf{u} = 0$, COVOF 2D utilise la méthode du Lagrangien Augmenté :
 $$\rho \left( \frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla) \mathbf{u} \right) - \nabla \cdot (\mu (\nabla \mathbf{u} + \nabla^T \mathbf{u})) - r_{\text{al}} \nabla(\nabla \cdot \mathbf{u}) + \nabla p = \mathbf{f}$$
 suivie de l'actualisation de pression d'Uzawa :
 $$p^{m+1} = p^m - r_{\text{al}} (\nabla \cdot \mathbf{u}^{m+1})$$
@@ -76,11 +76,11 @@ Le code est strictement conforme au standard **Fortran 2018** et compatible avec
 
 ### 2.2. Méthode A : Compilation avec CMake (Recommandé)
 ```bash
-cd fugu2d_fortran
+cd covof2d_fortran
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j4
 ```
-L'exécutable est généré directement dans `bin/fugu2d_fortran`.
+L'exécutable est généré directement dans `bin/covof2d_fortran`.
 
 ### 2.3. Méthode B : Compilation Directe avec `mpifort`
 Si CMake n'est pas installé sur votre cluster, compilez directement les modules ordonnés :
@@ -98,8 +98,8 @@ mpifort -O3 -march=native \
   src/module_linear_solvers.f90 \
   src/module_vtk_writer.f90 \
   src/module_simulation.f90 \
-  src/fugu2d_main.f90 \
-  -o bin/fugu2d_fortran
+  src/covof2d_main.f90 \
+  -o bin/covof2d_fortran
 ```
 
 ---
@@ -182,7 +182,7 @@ Ce cas valide l'établissement transitoire d'un profil de vitesse sous l'applica
 
 ### 4.2. Exécution Parallèle
 ```bash
-mpirun -np 2 bin/fugu2d_fortran cases/poiseuille_unsteady.json
+mpirun -np 2 bin/covof2d_fortran cases/poiseuille_unsteady.json
 ```
 
 ### 4.3. Solution Analytique (Série de Fourier)
@@ -190,7 +190,7 @@ La vitesse axiale exacte s'écrit sous forme de série infinie :
 $$u(z, t) = \frac{G e^2}{2\mu} \left( 1 - \frac{z^2}{e^2} \right) + \sum_{n=0}^{\infty} a_n \exp\left( - \frac{(2n+1)^2 \pi^2 \mu}{4 \rho e^2} t \right) \cos\left( \frac{(2n+1) \pi z}{2e} \right)$$
 avec $a_n = -\frac{16 G e^2 (-1)^n}{\mu \pi^3 (2n+1)^3}$ et $z = y - e$.
 
-À $t = 1.0\text{ s}$, la solution numérique Fortran concorde avec la solution analytique avec une erreur $L_1 = 1.49 \times 10^{-5}\text{ m/s}$ (très inférieure à la cible Thétis de $3.13 \times 10^{-4}\text{ m/s}$).
+À $t = 1.0\text{ s}$, la solution numérique Fortran concorde avec la solution analytique avec une erreur $L_1 = 1.49 \times 10^{-5}\text{ m/s}$ (très inférieure à la cible Référence Académique de $3.13 \times 10^{-4}\text{ m/s}$).
 
 ---
 
@@ -218,7 +218,7 @@ Le benchmark canonique de Ghia et al. (1982) valide la discrétisation des terme
 
 ### 5.2. Lancement
 ```bash
-mpirun -np 4 bin/fugu2d_fortran cases/cavity_re1000.json
+mpirun -np 4 bin/covof2d_fortran cases/cavity_re1000.json
 ```
 
 ### 5.3. Résultats Numériques
@@ -243,7 +243,7 @@ La marche est définie dans le fichier JSON par pénalisation de Brinkman :
 
 ### 6.2. Lancement
 ```bash
-mpirun -np 4 bin/fugu2d_fortran cases/backward_facing_step.json
+mpirun -np 4 bin/covof2d_fortran cases/backward_facing_step.json
 ```
 La longueur de recollement adimensionnelle obtenue est $x_r / H = 2.719$, en accord direct avec la valeur expérimentale de référence ($x_r / H = 2.808$, écart relatif de $3.18\%$).
 
@@ -259,9 +259,9 @@ $$\mathbf{f}_{\text{boussinesq}} = -\rho \beta (T - T_0) \mathbf{g}$$
 
 ### 7.2. Lancement et Nombre de Nusselt
 ```bash
-mpirun -np 2 bin/fugu2d_fortran cases/natural_convection_ra1e4.json
+mpirun -np 2 bin/covof2d_fortran cases/natural_convection_ra1e4.json
 ```
-Le nombre de Nusselt moyen mesuré à la paroi chaude $\overline{Nu} = 2.3990$ se situe parfaitement dans la plage de référence Thétis 2.1.0 ($[2.2, 2.7]$).
+Le nombre de Nusselt moyen mesuré à la paroi chaude $\overline{Nu} = 2.3990$ se situe parfaitement dans la plage de référence Référence Académique CFD ($[2.2, 2.7]$).
 
 ---
 
@@ -286,7 +286,7 @@ L'effondrement gravitationnel d'une colonne d'eau (Martin & Moyce) met à l'épr
 
 ### 8.2. Lancement
 ```bash
-mpirun -np 4 bin/fugu2d_fortran cases/dam_break.json
+mpirun -np 4 bin/covof2d_fortran cases/dam_break.json
 ```
 
 ---
@@ -301,9 +301,9 @@ Pour $\sigma = 1.0\text{ N/m}$ et $R = 0.25\text{ m}$, la théorie prédit $\Del
 
 ### 9.2. Lancement et Validation
 ```bash
-mpirun -np 2 bin/fugu2d_fortran cases/static_droplet.json
+mpirun -np 2 bin/covof2d_fortran cases/static_droplet.json
 ```
-Le saut de pression moyen calculé par FUGU 2D Fortran est de $\Delta P = 3.86\text{ Pa}$ (écart relatif de $3.38\%$), confirmant l'absence de courants parasites déstabilisants.
+Le saut de pression moyen calculé par COVOF 2D Fortran est de $\Delta P = 3.86\text{ Pa}$ (écart relatif de $3.38\%$), confirmant l'absence de courants parasites déstabilisants.
 
 ---
 
@@ -323,9 +323,9 @@ Ce tutoriel modélise l'écoulement stationnaire à $Re=20$ autour d'un cylindre
 
 ### 10.2. Lancement
 ```bash
-mpirun -np 2 bin/fugu2d_fortran cases/obstacle_cylinder_re20.json
+mpirun -np 2 bin/covof2d_fortran cases/obstacle_cylinder_re20.json
 ```
-Le sillage symétrique présente une longueur de recirculation $L/D = 0.768$, strictement conforme à la valeur de référence Thétis 2.1.0 ($0.768$).
+Le sillage symétrique présente une longueur de recirculation $L/D = 0.768$, strictement conforme à la valeur de référence Référence Académique CFD ($0.768$).
 
 ---
 
@@ -365,14 +365,14 @@ for n in mesh_sizes:
     with open("cases/tmp_case.json", "w") as f:
         json.dump(cfg, f)
         
-    subprocess.run(["mpirun", "-np", "4", "bin/fugu2d_fortran", "cases/tmp_case.json"])
+    subprocess.run(["mpirun", "-np", "4", "bin/covof2d_fortran", "cases/tmp_case.json"])
 ```
 
 ---
 
 ## 13. Créer un Nouveau Cas Test à Partir de Zéro
 
-Pour simuler un écoulement inédit avec FUGU 2D Fortran :
+Pour simuler un écoulement inédit avec COVOF 2D Fortran :
 
 1. Créez un fichier `cases/mon_cas.json`.
 2. Définissez la grille : `nx`, `ny`, `lx`, `ly`.
@@ -381,7 +381,7 @@ Pour simuler un écoulement inédit avec FUGU 2D Fortran :
 5. Configurez le pas de temps (`dt`, `t_final`) et les paramètres du solveur (`r_al`, `linear_solver`).
 6. Exécutez le calcul :
    ```bash
-   mpirun -np 4 bin/fugu2d_fortran cases/mon_cas.json
+   mpirun -np 4 bin/covof2d_fortran cases/mon_cas.json
    ```
 7. Visualisez immédiatement le résultat :
    ```bash

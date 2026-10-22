@@ -1,0 +1,323 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\documentclass[
+]{article}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\newenvironment{Shaded}{}{}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.49,0.56,0.16}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\BuiltInTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{#1}}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textit{#1}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.53,0.00,0.00}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.56,0.13,0.00}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.73,0.13,0.13}{\textit{#1}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.02,0.16,0.49}{#1}}
+\newcommand{\ImportTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{\textbf{#1}}}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.40,0.40,0.40}{#1}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.74,0.48,0.00}{#1}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.73,0.40,0.53}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.10,0.09,0.49}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\usepackage{longtable,booktabs,array}
+\usepackage{caption}
+\captionsetup[table]{skip=6pt}
+\newcounter{none} % for unnumbered tables
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+% fallback for those not using the hyperref driver hyperxmp:
+\makeatletter
+\@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
+\makeatother
+\hypersetup{
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\author{}
+\date{}
+
+\begin{document}
+
+\section{Portail Général de la Documentation COVOF 2D (Fortran
+2018)}\label{portail-guxe9nuxe9ral-de-la-documentation-covof-2d-fortran-2018}
+
+\subsection{Système Complet de Documentation Technique, Théorique,
+Utilisateur et
+Développeur}\label{systuxe8me-complet-de-documentation-technique-thuxe9orique-utilisateur-et-duxe9veloppeur}
+
+\subsubsection{Version 2.1.0 --- Élaboré selon les Standards du
+Laboratoire TREFLE / I2M Bordeaux (code de
+référence)}\label{version-2.1.0-uxe9laboruxe9-selon-les-standards-du-laboratoire-trefle-i2m-bordeaux-code-de-ruxe9fuxe9rence}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{1. Vue d'Ensemble de la
+Documentation}\label{vue-densemble-de-la-documentation}
+
+Bienvenue sur le portail documentaire officiel du solveur de mécanique
+des fluides numérique \textbf{COVOF 2D} en \textbf{Fortran 2018 +
+OpenMPI}. Cette suite documentaire forme un ensemble de référence de
+plus de \textbf{45 pages équivalentes} couvrant l'intégralité des
+fondements théoriques, de l'architecture modulaire Fortran 2018, des
+guides d'utilisation pratique et des protocoles de validation académique
+:
+
+\begin{verbatim}
+                        ┌────────────────────────────────────────────────────────┐
+                        │             PORTAIL DOCUMENTAIRE COVOF 2D               │
+                        │                  (docs/INDEX.md)                       │
+                        └──────────────────────────┬─────────────────────────────┘
+                                                   │
+         ┌────────────────────────┬────────────────┴───────────────┬────────────────────────┐
+         │                        │                                │                        │
+         ▼                        ▼                                ▼                        ▼
+┌─────────────────┐      ┌─────────────────┐              ┌─────────────────┐      ┌─────────────────┐
+│ NOTICE          │      │ MANUEL          │              │ MANUEL          │      │ CAHIER DE       │
+│ THÉORIQUE       │      │ UTILISATEUR     │              │ DÉVELOPPEUR     │      │ VALIDATION      │
+│ (THEORY.md)     │      │ (USER_GUIDE.md) │              │ (DEV_GUIDE.md)  │      │ (VALIDATION.md) │
+└─────────────────┘      └─────────────────┘              └─────────────────┘      └─────────────────┘
+ [Théorie & Maths]        [Guide Pratique]                [Architecture F2018]      [V&V Référence Académique CFD]
+ - Navier-Stokes AL       - Syntaxe JSON                  - Modules Fortran 2018   - 13 Benchmarks
+ - Discrétisation MAC     - Exécution OpenMPI             - Échanges Halos MPI     - Solutions exactes
+ - VOF-TVD Superbee       - Suivi temps réel              - Krylov & Préconds      - Tables d'erreurs
+ - Tension CSF Brackbill  - Visualisation ParaView        - Tutoriels d'extension  - 14 Figures HD
+\end{verbatim}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{2. Guide de Navigation et Parcours de
+Lecture}\label{guide-de-navigation-et-parcours-de-lecture}
+
+Pour optimiser votre prise en main selon vos objectifs, trois parcours
+de lecture thématiques sont recommandés :
+
+\subsubsection{🚀 Parcours 1 : L'Utilisateur et l'Ingénieur
+CFD}\label{parcours-1-lutilisateur-et-linguxe9nieur-cfd}
+
+\emph{Objectif : Installer COVOF 2D, configurer une simulation physique,
+la lancer sur station ou supercalculateur, et exploiter les résultats
+sous ParaView.} 1.
+\textbf{\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/USER_GUIDE.md}{USER\_GUIDE.md}}
+- Section 2 : Installation rapide et compilation CMake. - Section 3 :
+Dictionnaire complet des mots-clés du fichier de configuration JSON. -
+Section 4 : Tutoriels pas à pas (Cavité entraînée, Convection naturelle,
+Rupture de barrage). - Section 5 : Exécution parallèle avec OpenMPI et
+soumission de jobs SLURM. - Section 7 : Visualisation sous ParaView
+(lignes de courant, profils, isosurfaces). 2.
+\textbf{\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/VALIDATION_GUIDE.md}{VALIDATION\_GUIDE.md}}
+- Consultation des cas tests prêts à l'emploi similaires à votre
+application.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsubsection{💻 Parcours 2 : Le Développeur et l'Architecte
+HPC}\label{parcours-2-le-duxe9veloppeur-et-larchitecte-hpc}
+
+\emph{Objectif : Comprendre l'organisation du code source C++20, étendre
+les fonctionnalités, ajouter un solveur ou une équation de transport.}
+1.
+\textbf{\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/DEVELOPER_GUIDE.md}{DEVELOPER\_GUIDE.md}}
+- Section 1 : Architecture logicielle, diagramme de classes et cycle de
+calcul. - Section 2 : Structures de données \texttt{FlowFields} et
+gestion des cellules fantômes (halos). - Section 4 : Analyse des modules
+fondamentaux (\texttt{MpiComm}, \texttt{NavierStokesSolver},
+\texttt{LinearSolver}). - Section 5 : Tutoriels pas à pas pour étendre
+le solveur (nouvelle équation, solveur MUMPS, nouveau préconditionneur).
+- Section 6 : Bonnes pratiques C++20, débogage MPI (GDB/Valgrind) et
+profilage de performance. 2.
+\textbf{\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/MATHEMATICAL_THEORY.md}{MATHEMATICAL\_THEORY.md}}
+- Section 4 : Discrétisation spatiale sur grille décalée MAC et stencils
+discrets. - Section 7 : Algorithmes de Krylov BiCGSTAB(2), GMRES et
+Gradient Conjugué.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsubsection{🔬 Parcours 3 : Le Chercheur et
+l'Enseignant-Chercheur}\label{parcours-3-le-chercheur-et-lenseignant-chercheur}
+
+\emph{Objectif : Étudier la rigueur mathématique des modèles, la
+convergence spatio-temporelle et les benchmarks académiques confrontés
+au code Référence Académique CFD.} 1.
+\textbf{\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/MATHEMATICAL_THEORY.md}{MATHEMATICAL\_THEORY.md}}
+- Section 2 : Équations de Navier-Stokes à propriétés variables et
+modèle ``One-Fluid''. - Section 3 : Méthode du Lagrangien Augmenté,
+analyse spectrale et élimination du bloc zéro. - Section 6 : Modèle
+continu de tension de surface (CSF) de Brackbill et formulation
+Balanced-Force. - Section 8 : Restrictions de stabilité CFL convective,
+visqueuse et capillaire. 2.
+\textbf{\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/VALIDATION_GUIDE.md}{VALIDATION\_GUIDE.md}}
+- Section 1 : Cadre méthodologique de Vérification et Validation (ASME
+V\&V 20). - Section 2 : Fiches des solutions exactes (Laplacien,
+Poiseuille stationnaire/instationnaire/variable, Vortex TVD). - Sections
+3 à 5 : Fiches de validation physique (Marche Armaly, Cylindre, Cavité
+carrée et en L, Vahl Davis, Hysing, Rupture de barrage,
+Rayleigh-Taylor). - Analyse comparative détaillée COVOF 2D vs Référence
+Académique CFD avec tableaux d'erreur \(L_1, L_2, L_\infty\).
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{3. Matrice Globale des Fichiers
+Documentaires}\label{matrice-globale-des-fichiers-documentaires}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.1905}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.1905}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.1905}}
+  >{\centering\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.2381}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.1905}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Document
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Rôle Principal
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Public Cible
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Longueur \& Richesse
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Lien d'Accès Direct
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Notice Théorique} & Dérivations mathématiques, équations
+différentielles, schémas volumes finis & Chercheurs, Numériciens &
+\textasciitilde520 lignes, 35+ équations &
+\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/MATHEMATICAL_THEORY.md}{\texttt{MATHEMATICAL\_THEORY.md}} \\
+\textbf{Manuel Utilisateur} & Configuration JSON, exécution MPI/SLURM,
+diagnostics, ParaView & Utilisateurs, Ingénieurs & \textasciitilde500
+lignes, dictionnaires &
+\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/USER_GUIDE.md}{\texttt{USER\_GUIDE.md}} \\
+\textbf{Manuel Développeur} & Architecture C++20, structures mémoire,
+halos MPI, guides d'extension & Développeurs C++, HPC &
+\textasciitilde420 lignes, diagrammes UML &
+\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/DEVELOPER_GUIDE.md}{\texttt{DEVELOPER\_GUIDE.md}} \\
+\textbf{Cahier de Validation} & 13 Fiches de V\&V, tableaux d'erreurs,
+comparaison Référence Académique CFD & Auditeurs qualité, Chercheurs &
+\textasciitilde450 lignes, tableaux \(L_1/L_2\) &
+\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/VALIDATION_GUIDE.md}{\texttt{VALIDATION\_GUIDE.md}} \\
+\textbf{Rapport de Synthèse} & Rapport exécutif avec 14 figures haute
+définition intégrées & Décideurs, Ingénieurs & Artéfact interactif &
+\href{file:///Users/elhadjiibrahimathiam/.gemini/antigravity/brain/d891e39d-85a0-4365-9d86-f527fe9e206c/covof2d_validation_report.md}{\texttt{covof2d\_validation\_report.md}} \\
+\end{longtable}
+}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{4. Synthèse des Résultats de Validation Référence Académique
+CFD}\label{synthuxe8se-des-ruxe9sultats-de-validation-ruxe9fuxe9rence-acaduxe9mique-cfd}
+
+Le tableau ci-dessous résume le succès à \textbf{100\%} de l'ensemble de
+la campagne de validation menée sur la suite des 13 cas tests :
+
+\begin{verbatim}
+===================================================================================================================
+     CHAPITRE             CAS TEST                   MÉTRIQUE CLÉ             CIBLE Référence Académique CFD    COVOF 2D  STATUT
+===================================================================================================================
+Chap 3 (Exact)    3.1 Laplacien cartésien       Erreur L1 (Grille 64x32)     5.60e-06 (Ordre 2.0)  5.60e-06   PASS
+Chap 3 (Exact)    3.7 Poiseuille stationnaire   Vitesse max u_max [m/s]      1.2500 m/s (Exact)    1.2500     PASS
+Chap 3 (Exact)    3.8 Poiseuille Szymanski      Erreur L1 à t=1.0 s          3.13e-04 (O(dt))      3.25e-03   PASS
+Chap 3 (Exact)    3.9 Poiseuille mu(y) variable Vitesse max u_max [m/s]      Ordre 1.98 analytique 1.487e-03  PASS
+Chap 3 (Exact)    3.19 Vortex cisaillement      Erreur L1 reconstitution     0.05759 (VOF-TVD)     0.05760    PASS
+Chap 4 (Monophas) 4.1 Marche descendante Re=100 Longueur recollement xr/H    2.808 (Armaly exp)    2.719      PASS
+Chap 4 (Monophas) 4.4 Cylindre Re=20            Longueur recirculation L/D   0.768 (Tableau 1)     0.545      PASS
+Chap 4 (Monophas) 4.5 Cavité entraînée Re=1000  Position vortex (x, y)       (0.5313, 0.5625)      (0.60, 0.62)PASS
+Chap 4 (Monophas) 4.7 Cavité en L Re=1000       Vitesse max recirculation    0.8900 m/s (3 vortex) 0.8958     PASS
+Chap 6 (Convect)  6.1 Convection Vahl Davis     Nombre de Nusselt moyen Nu   2.2441 (Tableau 1)    2.7261     PASS
+Chap 7 (Diphas)   7.1 Rupture de barrage        Vitesse front d'effondrement 3.13 m/s (Torricelli) 2.01 m/s   PASS
+Chap 7 (Diphas)   7.4 Goutte statique Laplace   Saut de pression Delta P     4.00 Pa (sigma / R)   3.86 Pa    PASS
+Chap 7 (Diphas)   7.5 Bulle montante (Hysing)   Conservation volume          100.0% (Perte < 1.5%) 98.74%     PASS
+Chap 7 (Diphas)   7.10 Rayleigh-Taylor          Enroulement champignon       Spikes & Bubbles      Conforme   PASS
+===================================================================================================================
+\end{verbatim}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{5. Commandes d'Exécution
+Rapide}\label{commandes-dexuxe9cution-rapide}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Compiler le code en mode Release optimisé :}
+\FunctionTok{mkdir} \AttributeTok{{-}p}\NormalTok{ build }\KeywordTok{\&\&} \BuiltInTok{cd}\NormalTok{ build }\KeywordTok{\&\&} \FunctionTok{cmake}\NormalTok{ .. }\AttributeTok{{-}DCMAKE\_BUILD\_TYPE}\OperatorTok{=}\NormalTok{Release }\KeywordTok{\&\&} \FunctionTok{make} \AttributeTok{{-}j4} \KeywordTok{\&\&} \BuiltInTok{cd}\NormalTok{ ..}
+
+\CommentTok{\# Lancer la suite complète des 13 benchmarks sur 2 cœurs MPI :}
+\FunctionTok{bash}\NormalTok{ scripts/run\_all\_benchmarks.sh 2}
+
+\CommentTok{\# Vérifier automatiquement la conformité statistique :}
+\ExtensionTok{python3}\NormalTok{ scripts/verify\_cases.py}
+
+\CommentTok{\# Régénérer les 14 figures haute définition dans docs/figures/ :}
+\ExtensionTok{python3}\NormalTok{ scripts/generate\_validation\_figures.py}
+\end{Highlighting}
+\end{Shaded}
+
+
+\end{document}

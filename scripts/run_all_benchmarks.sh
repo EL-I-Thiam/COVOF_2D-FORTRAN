@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
 # FUGU 2D (Fortran 2018 + OpenMPI) - Lancement de la Suite Complète de Validation
-# Couvre TOUS les cas des Chapitres 3, 4, 6 et 7 du Cahier de Validation Thétis 2.1.0
+# Couvre TOUS les cas des Chapitres 3, 4, 6 et 7 du Cahier de Validation et Vérification CFD 2D
 # ==============================================================================
 
 set -e
@@ -93,9 +93,9 @@ python3 scripts/verify_cases.py
 
 echo ""
 echo "================================================================================"
-echo "          GENERATION DES FIGURES COMPARATIVES DU CAHIER THETIS                 "
+echo "          GENERATION DES FIGURES COMPARATIVES DU Cahier de Validation de Référence                 "
 echo "================================================================================"
-python3 scripts/generate_thetis_validation_figures.py
+python3 scripts/generate_validation_figures.py
 
 echo ""
 echo ">>> SUITE DE BENCHMARKS ET VALIDATIONS TERMINEE AVEC SUCCES <<<"

@@ -1,4 +1,4 @@
-# Manuel de Référence Théorique et Mathématique - Solveur FUGU 2D
+# Manuel de Référence Théorique et Mathématique - Solveur COVOF 2D
 ## Modélisation Mathématique des Écoulements Incompressibles Monophasiques, Diphasiques et Convectifs
 
 ---
@@ -52,9 +52,9 @@
 
 ## 1. Introduction et Principes Fondamentaux
 
-Le code **FUGU 2D** est un solveur de Mécanique des Fluides Numérique (CFD) à haute performance conçu pour la simulation directe des écoulements incompressibles, laminaires ou instationnaires, monophasiques, thermoconvectifs et diphasiques à surface libre.
+Le code **COVOF 2D** est un solveur de Mécanique des Fluides Numérique (CFD) à haute performance conçu pour la simulation directe des écoulements incompressibles, laminaires ou instationnaires, monophasiques, thermoconvectifs et diphasiques à surface libre.
 
-Son architecture théorique repose sur trois piliers fondamentaux hérités des développements du laboratoire **TREFLE / I2M (UMR CNRS 5295)** et documentés dans la thèse de doctorat de référence (*THSE_MEL.pdf*) ainsi que dans les publications sur le code *Thétis* (*article_rev.pdf*, *Cahier de Validation Thétis 2.1.0*) :
+Son architecture théorique repose sur trois piliers fondamentaux hérités des développements du laboratoire **TREFLE / I2M (UMR CNRS 5295)** et documentés dans la thèse de doctorat de référence (*THSE_MEL.pdf*) ainsi que dans les publications sur le code *Référence Académique* (*article_rev.pdf*, *Cahier de Validation et Vérification CFD 2D*) :
 
 1. **La discrétisation spatiale sur grille décalée (Marker-And-Cell - MAC)** : inventée par Harlow et Welch (1965), elle garantit un couplage vitesse-pression intrinsèquement stable sans nécessiter de stabilisation artificielle de type Rhie-Chow, et élimine tout mode parasite de pression en damier (*checkerboard modes*).
 2. **La méthode du Lagrangien Augmenté (Augmented Lagrangian)** : développée initialement par Fortin & Glowinski (1983) et adaptée à la CFD par Caltagirone & Vincent (2001), elle transforme le problème de point-selle indéfini de Navier-Stokes en un système elliptique défini positif strictement coercif, évitant l'inversion d'une équation de Poisson de pression globale mal conditionnée.
@@ -123,7 +123,7 @@ $$F_{b, x} = 0, \quad F_{b, y} = \rho_0 \beta (T - T_0) g$$
 
 ### 2.4. Modélisation des Obstacles et Parois Complexes par Pénalisation de Brinkman
 
-Pour représenter des géométries arbitraires (cylindres circulaires, parois obliques, marches descendantes, cavités en forme de L) sur un maillage cartésien régulier sans remaillage non structuré coûteux, FUGU 2D utilise la méthode de pénalisation de Brinkman (Angot et al. 1999, Caltagirone 1994).
+Pour représenter des géométries arbitraires (cylindres circulaires, parois obliques, marches descendantes, cavités en forme de L) sur un maillage cartésien régulier sans remaillage non structuré coûteux, COVOF 2D utilise la méthode de pénalisation de Brinkman (Angot et al. 1999, Caltagirone 1994).
 
 Le domaine solide $\Omega_s \subset \Omega$ est assimilé à un milieu poreux rigide de perméabilité intrinsèque quasi-nulle $K \to 0$ :
 $$\mathbf{F}_{pen} = - \frac{\mu}{K(\mathbf{x})} \mathbf{u}$$
@@ -169,7 +169,7 @@ $$p^{n+1} = p^n - r \nabla \cdot \mathbf{u}^{n+1}$$
 
 Si l'incompressibilité n'est pas suffisamment satisfaite après un seul pas ($\|\nabla \cdot \mathbf{u}^{n+1}\|_\infty > \epsilon_{div}$), on réitère la boucle d'Uzawa :
 $$p^{n+1, k+1} = p^{n+1, k} - r \nabla \cdot \mathbf{u}^{n+1, k+1}$$
-Dans FUGU 2D, grâce au choix optimal de $r$, une à deux itérations d'Uzawa suffisent pour obtenir une divergence résiduelle $\|\nabla \cdot \mathbf{u}\| < 10^{-4}\text{ s}^{-1}$.
+Dans COVOF 2D, grâce au choix optimal de $r$, une à deux itérations d'Uzawa suffisent pour obtenir une divergence résiduelle $\|\nabla \cdot \mathbf{u}\| < 10^{-4}\text{ s}^{-1}$.
 
 ### 3.4. Analyse Spectrale et Choix Optimal du Paramètre d'Augmentation
 
@@ -183,7 +183,7 @@ Caltagirone et Vincent (2001) ont démontré que pour minimiser le conditionneme
 
 $$r_{opt} \approx \frac{\rho}{\Delta t} \left( \frac{L}{2\pi} \right)^2 \quad \text{ou empiriquement} \quad r_{opt} \sim 10^2 \text{ à } 10^4 \times \frac{\mu}{\rho}$$
 
-Dans FUGU 2D, la valeur par défaut $r = 100\text{ à }1000$ fournit une convergence ultrarapide du solveur BiCGSTAB(2).
+Dans COVOF 2D, la valeur par défaut $r = 100\text{ à }1000$ fournit une convergence ultrarapide du solveur BiCGSTAB(2).
 
 ### 3.5. Analogies Physiques : Compressibilité Artificielle et Vitesse du Son Numérique
 
@@ -330,7 +330,7 @@ $$\frac{\partial C}{\partial t} + \nabla \cdot (C \mathbf{u}) = 0$$
 
 ### 6.2. Schémas TVD à Limiteurs de Flux (Superbee, Minmod, Van Leer)
 
-Pour empêcher la diffusion de l'interface tout en évitant toute oscillation dispersive non physique ($C < 0$ ou $C > 1$), FUGU 2D met en œuvre la famille des schémas Total Variation Diminishing (TVD) :
+Pour empêcher la diffusion de l'interface tout en évitant toute oscillation dispersive non physique ($C < 0$ ou $C > 1$), COVOF 2D met en œuvre la famille des schémas Total Variation Diminishing (TVD) :
 
 $$F_{i+1/2} = u_{i+1/2} \left[ C_{up} + \frac{1}{2} (1 - |\nu|) \Phi(\theta) (C_{down} - C_{up}) \right]$$
 
@@ -368,7 +368,7 @@ $$\nabla p = \mathbf{F}_\sigma = \sigma \kappa \nabla C$$
 
 Si le gradient discret de pression $\nabla p$ et le gradient discret de fraction volumique $\nabla C$ ne sont pas évalués **exactement aux mêmes positions stencil** (aux faces décalées), un déséquilibre numérique se crée, générant des tourbillons artificiels appelés **courants parasites**.
 
-Dans FUGU 2D, l'approximation "Balanced-Force" de François et al. (2006) est strictement respectée :
+Dans COVOF 2D, l'approximation "Balanced-Force" de François et al. (2006) est strictement respectée :
 $$F_{\sigma, x, i, j} = \sigma \left( \frac{\kappa_{i-1, j} + \kappa_{i, j}}{2} \right) \left( \frac{C_{i, j} - C_{i-1, j}}{\Delta x} \right)$$
 $$F_{\sigma, y, i, j} = \sigma \left( \frac{\kappa_{i, j-1} + \kappa_{i, j}}{2} \right) \left( \frac{C_{i, j} - C_{i, j-1}}{\Delta y} \right)$$
 
@@ -397,7 +397,7 @@ $$\mathbf{A}_{uv} \sim -(\mu + r) \frac{\partial^2}{\partial x \partial y}$$
 
 ### 7.2. Algorithme BiCGSTAB(2) (Stabilized Bi-Conjugate Gradient Order 2)
 
-Le solveur principal de FUGU 2D est le **BiCGSTAB(2)** de Sleijpen et van der Vorst (1993). Contrairement au BiCGSTAB standard qui minimise les résidus avec un polynôme linéaire de degré 1 à chaque pas (ce qui provoque des stagnations lorsque le spectre comporte des valeurs propres imaginaires conjuguées dominées par la convection), BiCGSTAB(2) utilise un polynôme quadratique de minimisation sur deux sous-pas.
+Le solveur principal de COVOF 2D est le **BiCGSTAB(2)** de Sleijpen et van der Vorst (1993). Contrairement au BiCGSTAB standard qui minimise les résidus avec un polynôme linéaire de degré 1 à chaque pas (ce qui provoque des stagnations lorsque le spectre comporte des valeurs propres imaginaires conjuguées dominées par la convection), BiCGSTAB(2) utilise un polynôme quadratique de minimisation sur deux sous-pas.
 
 #### Algorithme Complet :
 1. **Initialisation** :
@@ -430,7 +430,7 @@ Pour les cas à très forte convection non symétrique, l'algorithme GMRES avec 
 
 ### 7.4. Algorithme du Gradient Conjugué Préconditionné (PCG)
 
-Pour l'équation de Poisson du Laplacien cartésien (Cas 3.1) où la matrice discrète $\mathbf{A} = -\nabla^2$ est strictement symétrique définie positive (SPD), FUGU 2D emploie le Gradient Conjugué standard préconditionné par Jacobi.
+Pour l'équation de Poisson du Laplacien cartésien (Cas 3.1) où la matrice discrète $\mathbf{A} = -\nabla^2$ est strictement symétrique définie positive (SPD), COVOF 2D emploie le Gradient Conjugué standard préconditionné par Jacobi.
 
 ### 7.5. Techniques de Préconditionnement
 
@@ -455,7 +455,7 @@ $$\Delta t_{conv} \le CFL_{conv} \times \left( \frac{|u|_{max}}{\Delta x} + \fra
 avec usuellement $CFL_{conv} \le 0.5$ pour les schémas explicites d'interface VOF.
 
 ### 8.2. Restriction Visqueuse
-Dans FUGU 2D, l'opérateur visqueux étant discrétisé de façon totalement implicite dans le Lagrangien Augmenté, la condition de stabilité classique de diffusion explicite :
+Dans COVOF 2D, l'opérateur visqueux étant discrétisé de façon totalement implicite dans le Lagrangien Augmenté, la condition de stabilité classique de diffusion explicite :
 $$\Delta t_{visc} \le \frac{\rho \Delta x^2 \Delta y^2}{2 \mu (\Delta x^2 + \Delta y^2)}$$
 est **inconditionnellement contournée**. Le solveur reste stable même pour des pas de temps $\Delta t \gg \Delta t_{visc}$.
 
@@ -508,7 +508,7 @@ Le facteur $1.1$ limite l'accroissement maximal par pas à $+10\%$ afin de prév
 4. **Brackbill, J. U., Kothe, D. B., & Zemach, C. (1992)**. *A continuum method for modeling surface tension*. Journal of Computational Physics, 100(2), 335-354.
 5. **François, M. M., Cummins, S. J., Dendy, E. D., et al. (2006)**. *A balanced-force algorithm for continuous and sharp surface tension models within a volume tracking framework*. Journal of Computational Physics, 213(1), 141-173.
 6. **Sleijpen, G. L., & van der Vorst, H. A. (1993)**. *BiCGSTAB(2) for linear equations involving unsymmetric matrices with complex spectrum*. Electronic Transactions on Numerical Analysis, 1, 11-32.
-7. **Laboratoire TREFLE / I2M (2007)**. *Cahier de Validation Thétis 2.1.0*. UMR CNRS 5295, Université de Bordeaux.
+7. **Laboratoire TREFLE / I2M (2007)**. *Cahier de Validation et Vérification CFD 2D*. UMR CNRS 5295, Université de Bordeaux.
 8. **Vincent, S. (1999)**. *Modélisation d'écoulements turbulents multiphasiques en mécanique des fluides numérique*. Thèse de doctorat, Université Bordeaux I.
 
 
@@ -560,7 +560,7 @@ $$\|\mathbf{M}_r\|_2 = \frac{1}{1 + r \lambda_{min}(\mathbf{B} \mathbf{A}_0^{-1}
 où $\lambda_{min}$ désigne la plus petite valeur propre non nulle du complément de Schur de Stokes.
 Par conséquent, lorsque $r \to \infty$, le rayon spectral satisfait asymptotiquement :
 $$\rho(\mathbf{M}_r) \approx \frac{C}{r} \longrightarrow 0$$
-Ce résultat fondamental démontre que **la convergence d'Uzawa devient instantanée (en 1 à 2 itérations)** lorsque le paramètre d'augmentation $r$ est suffisamment grand, validant théoriquement l'architecture sans inversion de Poisson de FUGU 2D.
+Ce résultat fondamental démontre que **la convergence d'Uzawa devient instantanée (en 1 à 2 itérations)** lorsque le paramètre d'augmentation $r$ est suffisamment grand, validant théoriquement l'architecture sans inversion de Poisson de COVOF 2D.
 
 ### 11.3. Estimation d'Erreur de la Pénalisation de Brinkman
 
@@ -574,7 +574,7 @@ Pour un écoulement incompressible régulier, la solution pénalisée $\mathbf{u
 $$\|\mathbf{u} - \mathbf{u}_K\|_{L^2(0, T; \mathbf{L}^2(\Omega_f))} \le C_1 \sqrt{K_{solid}}$$
 $$\|\mathbf{u}_K\|_{L^2(0, T; \mathbf{L}^2(\Omega_s))} \le C_2 K_{solid}$$
 
-En choisissant $K_{solid} = 10^{-40}\text{ m}^2$ dans FUGU 2D, l'erreur de modélisation géométrique de l'obstacle :
+En choisissant $K_{solid} = 10^{-40}\text{ m}^2$ dans COVOF 2D, l'erreur de modélisation géométrique de l'obstacle :
 $$\|\mathbf{u} - \mathbf{u}_K\| \sim 10^{-20}$$
 est **incommensurablement plus faible que l'erreur de discrétisation spatiale** $O(\Delta x^2) \sim 10^{-4}$, garantissant une précision géométrique optimale sans maillage déformé.
 
@@ -600,6 +600,6 @@ $$\Phi(\theta) \le \min(2\theta, 2) \quad \text{pour } \theta > 0, \quad \Phi(\t
        0     0.5    1     2
 ```
 
-Le limiteur **Superbee de Roe** utilisé dans FUGU 2D longe la frontière supérieure de la région de Sweby :
+Le limiteur **Superbee de Roe** utilisé dans COVOF 2D longe la frontière supérieure de la région de Sweby :
 $$\Phi_{Superbee}(\theta) = \max \left( 0, \max(\min(2\theta, 1), \min(\theta, 2)) \right)$$
 Cette propriété confère au solveur de transport d'interface sa capacité démontrée à maintenir les sauts de fraction volumique sur 1 à 2 mailles sans diffusion ni dispersion oscillatoire.

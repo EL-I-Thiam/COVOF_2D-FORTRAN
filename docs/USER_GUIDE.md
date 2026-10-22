@@ -1,13 +1,13 @@
-# Manuel de Référence Utilisateur et Guide Pratique - Solveur FUGU 2D
+# Manuel de Référence Utilisateur et Guide Pratique - Solveur COVOF 2D
 ## Guide Complet d'Installation, Paramétrage, Exécution et Post-Traitement
-### Version 2.1.0 — Conforme aux Standards du Laboratoire TREFLE / I2M (Thétis)
+### Version 2.1.0 — Conforme aux Standards du Laboratoire TREFLE / I2M (Référence Académique)
 
 ---
 
 ## Sommaire Général
 
 1. [Présentation et Fonctionnalités du Logiciel](#1-présentation-et-fonctionnalités-du-logiciel)
-   - 1.1. Philosophie du Solveur FUGU 2D
+   - 1.1. Philosophie du Solveur COVOF 2D
    - 1.2. Matrice Globale des Fonctionnalités Physiques et Numériques
 2. [Installation, Dépendances et Compilation](#2-installation-dépendances-et-compilation)
    - 2.1. Prérequis Système et Compilateurs C++20
@@ -46,16 +46,16 @@
 8. [Automatisation des Benchmarks et Scripts de Vérification](#8-automatisation-des-benchmarks-et-scripts-de-vérification)
    - 8.1. Le Script d'Orchestration Globale `run_all_benchmarks.sh`
    - 8.2. Vérification Statistique Automatisée `verify_cases.py`
-   - 8.3. Production Automatique des Figures de Rapport `generate_thetis_validation_figures.py`
+   - 8.3. Production Automatique des Figures de Rapport `generate_validation_figures.py`
 9. [Foire Aux Questions (FAQ) et Astuces Pratiques](#9-foire-aux-questions-faq-et-astuces-pratiques)
 
 ---
 
 ## 1. Présentation et Fonctionnalités du Logiciel
 
-### 1.1. Philosophie du Solveur FUGU 2D
+### 1.1. Philosophie du Solveur COVOF 2D
 
-Le code **FUGU 2D** est un environnement complet de simulation numérique des écoulements de fluides incompressibles en deux dimensions d'espace. Il a été conçu avec les impératifs d'ingénierie logicielle suivants :
+Le code **COVOF 2D** est un environnement complet de simulation numérique des écoulements de fluides incompressibles en deux dimensions d'espace. Il a été conçu avec les impératifs d'ingénierie logicielle suivants :
 - **Fidélité physique maximale** : Implémentation stricte des équations de Navier-Stokes à viscosité et masse volumique variables, de l'approximation de Boussinesq pour la thermique, du modèle CSF de Brackbill pour les interfaces et de la pénalisation volumique de Brinkman pour les obstacles.
 - **Robustesse algorithmique absolue** : Utilisation de la méthode du **Lagrangien Augmenté**, garantissant l'incompressibilité sans instabilités de pression et éliminant le besoin de résoudre une équation de Poisson mal conditionnée.
 - **Hautes performances et montée en charge** : Parallélisme natif via **OpenMPI**, décomposition de domaine cartésienne 2D équilibrée, communications non bloquantes, structures de données à accès mémoire contigu sans aucune allocation dynamique pendant la boucle en temps.
@@ -89,7 +89,7 @@ Le code **FUGU 2D** est un environnement complet de simulation numérique des é
 
 ### 2.1. Prérequis Système et Compilateurs C++20
 
-FUGU 2D exploite les fonctionnalités avancées du standard **C++20** (concepts, vues, attributs d'optimisation).
+COVOF 2D exploite les fonctionnalités avancées du standard **C++20** (concepts, vues, attributs d'optimisation).
 - **Systèmes d'exploitation supportés** : Linux (Ubuntu 20.04+, RHEL 8+, Debian 11+), macOS (macOS 12+ avec Clang/AppleClang ou GCC Homebrew).
 - **Compilateurs C++ certifiés** :
   - `GCC` version 10.3 ou ultérieure (version 11+ recommandée).
@@ -107,11 +107,11 @@ FUGU 2D exploite les fonctionnalités avancées du standard **C++20** (concepts,
 
 ### 2.3. Procédure de Compilation pas-à-pas avec CMake
 
-Pour compiler FUGU 2D en mode optimisé pour la production :
+Pour compiler COVOF 2D en mode optimisé pour la production :
 
 ```bash
 # 1. Se positionner à la racine du projet
-cd fugu2d
+cd covof2d
 
 # 2. Créer le répertoire de compilation isolé
 mkdir -p build && cd build
@@ -123,18 +123,18 @@ cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=mpicxx
 make -j4
 
 # 5. Vérifier la génération de l'exécutable
-ls -lh ../bin/fugu2d
+ls -lh ../bin/covof2d
 cd ..
 ```
 
-L'exécutable final est automatiquement placé dans le répertoire `bin/fugu2d`.
+L'exécutable final est automatiquement placé dans le répertoire `bin/covof2d`.
 
 ### 2.4. Arborescence et Organisation des Fichiers du Projet
 
 ```
-fugu2d/
+covof2d/
 ├── CMakeLists.txt              # Configuration de compilation CMake
-├── bin/                        # Exécutable binaire final (fugu2d)
+├── bin/                        # Exécutable binaire final (covof2d)
 ├── include/fugu/               # En-têtes C++ de la bibliothèque FUGU
 │   ├── Config.hpp              # Structure de données de configuration
 │   ├── Fields2D.hpp            # Allocation mémoire des variables scalaires et vectorielles
@@ -160,12 +160,12 @@ fugu2d/
 │   ├── MATHEMATICAL_THEORY.md  # Notice théorique et mathématique
 │   ├── USER_GUIDE.md           # Ce manuel utilisateur
 │   ├── DEVELOPER_GUIDE.md      # Guide d'architecture logicielle C++
-│   ├── VALIDATION_GUIDE.md     # Cahier de validation et vérification Thétis 2.1.0
+│   ├── VALIDATION_GUIDE.md     # Cahier de validation et vérification Référence Académique CFD
 │   └── figures/                # Figures haute définition des validations
 └── scripts/                    # Scripts d'automatisation et de post-traitement
     ├── run_all_benchmarks.sh   # Lance la suite complète des 13 cas tests
     ├── verify_cases.py         # Analyse statistique et vérification des critères d'erreur
-    └── generate_thetis_validation_figures.py # Générateur de figures PNG
+    └── generate_validation_figures.py # Générateur de figures PNG
 ```
 
 ---
@@ -352,7 +352,7 @@ Créez le fichier `cases/mon_cas_cavite.json` :
 
 Lancez le calcul sur 4 cœurs MPI :
 ```bash
-mpirun -np 4 bin/fugu2d cases/mon_cas_cavite.json
+mpirun -np 4 bin/covof2d cases/mon_cas_cavite.json
 ```
 
 ---
@@ -363,24 +363,24 @@ mpirun -np 4 bin/fugu2d cases/mon_cas_cavite.json
 
 Pour exécuter un cas en séquentiel :
 ```bash
-bin/fugu2d cases/mon_cas.json
+bin/covof2d cases/mon_cas.json
 ```
 
 Pour exécuter en parallèle sur plusieurs cœurs physiques de votre machine :
 ```bash
-mpirun -np 2 bin/fugu2d cases/mon_cas.json
-mpirun -np 8 bin/fugu2d cases/mon_cas.json
+mpirun -np 2 bin/covof2d cases/mon_cas.json
+mpirun -np 8 bin/covof2d cases/mon_cas.json
 ```
 
 ### 5.2. Lancement sur Supercalculateur et Gestionnaire de Tâches SLURM
 
-Sur un cluster de calcul administré par SLURM, créez un script de soumission `job_fugu2d.sh` :
+Sur un cluster de calcul administré par SLURM, créez un script de soumission `job_covof2d.sh` :
 
 ```bash
 #!/bin/bash
-#SBATCH --job-name=fugu2d_calc
-#SBATCH --output=fugu2d_%j.log
-#SBATCH --error=fugu2d_%j.err
+#SBATCH --job-name=covof2d_calc
+#SBATCH --output=covof2d_%j.log
+#SBATCH --error=covof2d_%j.err
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=32
 #SBATCH --time=04:00:00
@@ -391,17 +391,17 @@ module load gcc/11.2.0 openmpi/4.1.2 cmake/3.22.1
 
 export OMP_NUM_THREADS=1
 
-srun bin/fugu2d cases/cavity_re1000.json
+srun bin/covof2d cases/cavity_re1000.json
 ```
 
 Soumettez la tâche :
 ```bash
-sbatch job_fugu2d.sh
+sbatch job_covof2d.sh
 ```
 
 ### 5.3. Décomposition de Domaine MPI et Équilibrage de Charge
 
-FUGU 2D divise automatiquement la grille cartésienne globale $N_x \times N_y$ en une grille de sous-domaines $P_x \times P_y = NP$ de façon à minimiser le rapport périmètre/surface (minimisation des volumes de communication inter-processus).
+COVOF 2D divise automatiquement la grille cartésienne globale $N_x \times N_y$ en une grille de sous-domaines $P_x \times P_y = NP$ de façon à minimiser le rapport périmètre/surface (minimisation des volumes de communication inter-processus).
 
 Chaque processus MPI gère son propre sous-domaine local bordé par une rangée de cellules fantômes (*halos*) qui sont synchronisées de façon asynchrone par `MPI_Isend` et `MPI_Irecv` à chaque étape de produit matrice-vecteur et à chaque itération temporelle.
 
@@ -411,7 +411,7 @@ Chaque processus MPI gère son propre sous-domaine local bordé par une rangée 
 
 ### 6.1. Interprétation du Tableau de Bord Console
 
-Lors de l'exécution, FUGU 2D affiche périodiquement un tableau synthétique :
+Lors de l'exécution, COVOF 2D affiche périodiquement un tableau synthétique :
 
 ```
 Pas     Temps [s]     dt [s]      Iter Krylov Vitesse Max     Div Max         Nu Moyen
@@ -460,7 +460,7 @@ Pas     Temps [s]     dt [s]      Iter Krylov Vitesse Max     Div Max         Nu
 
 ## 8. Automatisation des Benchmarks et Scripts de Vérification
 
-FUGU 2D est livré avec une suite d'outils Python et Bash permettant de reproduire l'ensemble des cas tests académiques en un clic :
+COVOF 2D est livré avec une suite d'outils Python et Bash permettant de reproduire l'ensemble des cas tests académiques en un clic :
 
 ### 8.1. Le Script d'Orchestration Globale `run_all_benchmarks.sh`
 ```bash
@@ -473,11 +473,11 @@ Ce script compile le code, vide les anciens répertoires de sortie, exécute suc
 ```bash
 python3 scripts/verify_cases.py
 ```
-Lit les résultats numériques dans les dossiers `output_*`, calcule les normes d'erreur $L_1, L_2, L_\infty$, les confronte aux valeurs de référence du Cahier de Validation Thétis 2.1.0 et produit un tableau récapitulatif `validation_summary.csv` et `validation_summary.md`.
+Lit les résultats numériques dans les dossiers `output_*`, calcule les normes d'erreur $L_1, L_2, L_\infty$, les confronte aux valeurs de référence du Cahier de Validation et Vérification CFD 2D et produit un tableau récapitulatif `validation_summary.csv` et `validation_summary.md`.
 
-### 8.3. Production Automatique des Figures de Rapport `generate_thetis_validation_figures.py`
+### 8.3. Production Automatique des Figures de Rapport `generate_validation_figures.py`
 ```bash
-python3 scripts/generate_thetis_validation_figures.py
+python3 scripts/generate_validation_figures.py
 ```
 Reconstitue les sous-domaines MPI partagés, extrait les champs scalaires et vectoriels et trace les 14 figures de référence enregistrées dans `docs/figures/`.
 
@@ -492,7 +492,7 @@ Reconstitue les sous-domaines MPI partagés, extrait les champs scalaires et vec
 *R :* BiCGSTAB(2) ne requiert le stockage que de quelques vecteurs de travail (empreinte mémoire minime et fixe), tout en éliminant les décrochages de convergence propres au BiCGSTAB simple. GMRES nécessite de stocker la base de Krylov complète, ce qui augmente fortement la consommation de RAM pour de grands maillages.
 
 **Q : Comment modéliser un profil de vitesse pulsé ou instationnaire à l'entrée ?**  
-*R :* Consultez le [Manuel Développeur](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/DEVELOPER_GUIDE.md) pour surcharger la méthode `apply_velocity_boundary_conditions` dans `src/MpiComm.cpp`.
+*R :* Consultez le [Manuel Développeur](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/DEVELOPER_GUIDE.md) pour surcharger la méthode `apply_velocity_boundary_conditions` dans `src/MpiComm.cpp`.
 
 
 ---
@@ -520,7 +520,7 @@ Lors de calculs complexes sur maillages fins ou à haut nombre de Reynolds / Ray
 
 ## 11. Annexe Exhaustive : Fiches de Paramétrage des 13 Cas Tests
 
-Chaque cas de la suite de validation Thétis 2.1.0 dispose d'un fichier JSON complet et prêt à l'emploi dans le répertoire `cases/` :
+Chaque cas de la suite de validation Référence Académique CFD dispose d'un fichier JSON complet et prêt à l'emploi dans le répertoire `cases/` :
 
 ### 11.1. Cas 3.1 : `cases/laplacian.json` (Laplacien Cartésien $\nabla^2 \psi = 1$)
 ```json

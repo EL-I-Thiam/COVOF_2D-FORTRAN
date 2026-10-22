@@ -1,0 +1,773 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\documentclass[
+]{article}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\newenvironment{Shaded}{}{}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.49,0.56,0.16}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\BuiltInTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{#1}}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textit{#1}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.53,0.00,0.00}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.56,0.13,0.00}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.73,0.13,0.13}{\textit{#1}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.02,0.16,0.49}{#1}}
+\newcommand{\ImportTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{\textbf{#1}}}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.40,0.40,0.40}{#1}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.74,0.48,0.00}{#1}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.73,0.40,0.53}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.10,0.09,0.49}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\usepackage{longtable,booktabs,array}
+\usepackage{caption}
+\captionsetup[table]{skip=6pt}
+\newcounter{none} % for unnumbered tables
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+% fallback for those not using the hyperref driver hyperxmp:
+\makeatletter
+\@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
+\makeatother
+\hypersetup{
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\author{}
+\date{}
+
+\begin{document}
+
+\section{Tutoriel Pratique Exhaustif COVOF 2D (Fortran 2018 /
+OpenMPI)}\label{tutoriel-pratique-exhaustif-covof-2d-fortran-2018-openmpi}
+
+Ce document constitue le \textbf{guide d'apprentissage complet pas à
+pas} pour configurer, compiler, exécuter, analyser et développer des cas
+de calcul en mécanique des fluides numérique avec la version
+\textbf{Modern Fortran 2018 modulaire} du solveur \textbf{COVOF 2D}.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Table des Matières}\label{table-des-matiuxe8res}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \hyperref[1-introduction-et-notions-fondamentales]{Introduction et
+  Notions Fondamentales}
+\item
+  \hyperref[2-installation-et-environnement-de-compilation]{Installation
+  et Environnement de Compilation}
+\item
+  \hyperref[3-structure-et-syntaxe-dun-cas-test-casesjson]{Structure et
+  Syntaxe d'un Cas Test (\texttt{cases/*.json})}
+\item
+  \hyperref[4-tutoriel-1--uxe9coulement-de-poiseuille-et-transitoire-de-szymanski]{Tutoriel
+  1 : Écoulement de Poiseuille et Transitoire de Szymanski}
+\item
+  \hyperref[5-tutoriel-2--cavituxe9-entrauxeenuxe9e-uxe0-reynolds-re--1000]{Tutoriel
+  2 : Cavité Entraînée à Reynolds Re = 1000}
+\item
+  \hyperref[6-tutoriel-3--uxe9coulement-sur-marche-descendante-armaly-re--100]{Tutoriel
+  3 : Écoulement sur Marche Descendante (Armaly Re = 100)}
+\item
+  \hyperref[7-tutoriel-4--convection-naturelle-thermique-de-vahl-davis-ra--10ux2074]{Tutoriel
+  4 : Convection Naturelle Thermique de Vahl Davis (Ra = 10⁴)}
+\item
+  \hyperref[8-tutoriel-5--uxe9coulement-diphasique-vof--rupture-de-barrage]{Tutoriel
+  5 : Écoulement Diphasique VOF --- Rupture de Barrage}
+\item
+  \hyperref[9-tutoriel-6--tension-de-surface-et-saut-de-pression-de-laplace]{Tutoriel
+  6 : Tension de Surface et Saut de Pression de Laplace}
+\item
+  \hyperref[10-tutoriel-7--uxe9coulement-autour-dun-cylindre-par-puxe9nalisation-de-brinkman]{Tutoriel
+  7 : Écoulement Autour d'un Cylindre par Pénalisation de Brinkman}
+\item
+  \hyperref[11-post-traitement-avancuxe9-avec-paraview]{Post-Traitement
+  Avancé avec ParaView}
+\item
+  \hyperref[12-automatisation-python-et-uxe9tudes-de-convergence]{Automatisation
+  Python et Études de Convergence}
+\item
+  \hyperref[13-cruxe9er-un-nouveau-cas-test-uxe0-partir-de-zuxe9ro]{Créer
+  un Nouveau Cas Test à Partir de Zéro}
+\end{enumerate}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{1. Introduction et Notions
+Fondamentales}\label{introduction-et-notions-fondamentales}
+
+\subsubsection{1.1. Maillage Décalé MAC et Convention Mémoire
+Fortran}\label{maillage-duxe9caluxe9-mac-et-convention-muxe9moire-fortran}
+
+Le solveur COVOF 2D repose sur la discrétisation spatiale sur grille
+décalée de Harlow \& Welch (1965) : * \textbf{Composante \(u\) de
+vitesse} : discrétisée aux faces verticales \((i \pm \frac{1}{2}, j)\).
+* \textbf{Composante \(v\) de vitesse} : discrétisée aux faces
+horizontales \((i, j \pm \frac{1}{2})\). * \textbf{Champs scalaires
+(\(p, T, C\))} : positionnés au centre des cellules \((i, j)\).
+
+\begin{verbatim}
+                  v(i, j+1/2)
+            +----------▲----------+
+            |          |          |
+            |          |          |
+u(i-1/2, j) ►     p(i, j)         ► u(i+1/2, j)
+            |     T(i, j)         |
+            |     C(i, j)         |
+            |          |          |
+            +----------▲----------+
+                  v(i, j-1/2)
+\end{verbatim}
+
+En \textbf{Fortran 2018}, les tableaux 2D sont stockés en \textbf{ordre
+colonne-major} (\emph{column-major order}). Pour garantir des accès
+mémoire contigus et un alignement optimal pour la vectorisation SIMD
+(AVX2/AVX-512), toutes les boucles du code respectent scrupuleusement la
+hiérarchie :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\KeywordTok{do}\NormalTok{ j }\KeywordTok{=} \DecValTok{1}\NormalTok{, ny}
+   \KeywordTok{do}\NormalTok{ i }\KeywordTok{=} \DecValTok{1}\NormalTok{, nx}
+      \CommentTok{! Accès contigu en mémoire à array(i, j)}
+\NormalTok{      res(i, j) }\KeywordTok{=}\NormalTok{ array(i}\KeywordTok{+}\DecValTok{1}\NormalTok{, j) }\KeywordTok{{-}} \FloatTok{2.0\_dp} \KeywordTok{*}\NormalTok{ array(i, j) }\KeywordTok{+}\NormalTok{ array(i}\KeywordTok{{-}}\DecValTok{1}\NormalTok{, j)}
+   \KeywordTok{end do}
+\KeywordTok{end do}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{1.2. Formulation par Lagrangien Augmenté et Itérations
+d'Uzawa}\label{formulation-par-lagrangien-augmentuxe9-et-ituxe9rations-duzawa}
+
+Pour résoudre les équations de Navier-Stokes incompressibles avec une
+précision machine sur la divergence \(\nabla \cdot \mathbf{u} = 0\),
+COVOF 2D utilise la méthode du Lagrangien Augmenté :
+\[\rho \left( \frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla) \mathbf{u} \right) - \nabla \cdot (\mu (\nabla \mathbf{u} + \nabla^T \mathbf{u})) - r_{\text{al}} \nabla(\nabla \cdot \mathbf{u}) + \nabla p = \mathbf{f}\]
+suivie de l'actualisation de pression d'Uzawa :
+\[p^{m+1} = p^m - r_{\text{al}} (\nabla \cdot \mathbf{u}^{m+1})\]
+
+\subsubsection{1.3. Politique
+Zero-Allocation}\label{politique-zero-allocation}
+
+Toutes les structures de données allouables (\texttt{flow\_fields\_t},
+matrices implicites temporaires dans \texttt{navier\_stokes\_t}) sont
+dimensionnées une seule fois lors de la phase d'initialisation
+(\texttt{simulation\_init}). La boucle en temps s'exécute avec
+\textbf{zéro appel aux allocateurs système
+(\texttt{allocate}/\texttt{deallocate})}, ce qui élimine les temps morts
+et garantit un déterminisme temporel parfait.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{2. Installation et Environnement de
+Compilation}\label{installation-et-environnement-de-compilation}
+
+\subsubsection{2.1. Vérification de la Chaîne
+d'Outils}\label{vuxe9rification-de-la-chauxeene-doutils}
+
+Vérifiez la présence du compilateur MPI Fortran et de CMake :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{mpifort} \AttributeTok{{-}{-}version}
+\FunctionTok{cmake} \AttributeTok{{-}{-}version}
+\end{Highlighting}
+\end{Shaded}
+
+Le code est strictement conforme au standard \textbf{Fortran 2018} et
+compatible avec GCC (\texttt{gfortran} 9+) et Intel oneAPI (\texttt{ifx}
+/ \texttt{ifort}).
+
+\subsubsection{2.2. Méthode A : Compilation avec CMake
+(Recommandé)}\label{muxe9thode-a-compilation-avec-cmake-recommanduxe9}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\BuiltInTok{cd}\NormalTok{ covof2d\_fortran}
+\FunctionTok{cmake} \AttributeTok{{-}B}\NormalTok{ build }\AttributeTok{{-}DCMAKE\_BUILD\_TYPE}\OperatorTok{=}\NormalTok{Release}
+\FunctionTok{cmake} \AttributeTok{{-}{-}build}\NormalTok{ build }\AttributeTok{{-}j4}
+\end{Highlighting}
+\end{Shaded}
+
+L'exécutable est généré directement dans \texttt{bin/covof2d\_fortran}.
+
+\subsubsection{\texorpdfstring{2.3. Méthode B : Compilation Directe avec
+\texttt{mpifort}}{2.3. Méthode B : Compilation Directe avec mpifort}}\label{muxe9thode-b-compilation-directe-avec-mpifort}
+
+Si CMake n'est pas installé sur votre cluster, compilez directement les
+modules ordonnés :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{mpifort} \AttributeTok{{-}O3} \AttributeTok{{-}march}\OperatorTok{=}\NormalTok{native }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_precision.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_constants.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_json.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_config.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_mesh.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_fields.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_mpi\_comm.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_interface\_vof.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_navier\_stokes.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_linear\_solvers.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_vtk\_writer.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/module\_simulation.f90 }\DataTypeTok{\textbackslash{}}
+\NormalTok{  src/covof2d\_main.f90 }\DataTypeTok{\textbackslash{}}
+  \AttributeTok{{-}o}\NormalTok{ bin/covof2d\_fortran}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{\texorpdfstring{3. Structure et Syntaxe d'un Cas Test
+(\texttt{cases/*.json})}{3. Structure et Syntaxe d'un Cas Test (cases/*.json)}}\label{structure-et-syntaxe-dun-cas-test-cases.json}
+
+Le module \texttt{module\_json.f90} intègre un analyseur lexical et
+syntaxique JSON natif en Fortran. Chaque cas de calcul est paramétré par
+un fichier \texttt{.json} structuré en 7 sections :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\FunctionTok{\{}
+  \DataTypeTok{"mode"}\FunctionTok{:} \StringTok{"NAVIER\_STOKES"}\FunctionTok{,}
+  \DataTypeTok{"mesh"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"nx"}\FunctionTok{:} \DecValTok{64}\FunctionTok{,}
+    \DataTypeTok{"ny"}\FunctionTok{:} \DecValTok{64}\FunctionTok{,}
+    \DataTypeTok{"lx"}\FunctionTok{:} \FloatTok{1.0}\FunctionTok{,}
+    \DataTypeTok{"ly"}\FunctionTok{:} \FloatTok{1.0}
+  \FunctionTok{\},}
+  \DataTypeTok{"physics"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"enable\_two\_phase"}\FunctionTok{:} \KeywordTok{false}\FunctionTok{,}
+    \DataTypeTok{"enable\_convection"}\FunctionTok{:} \KeywordTok{true}\FunctionTok{,}
+    \DataTypeTok{"enable\_energy"}\FunctionTok{:} \KeywordTok{false}\FunctionTok{,}
+    \DataTypeTok{"gx"}\FunctionTok{:} \FloatTok{0.0}\FunctionTok{,}
+    \DataTypeTok{"gy"}\FunctionTok{:} \FloatTok{0.0}\FunctionTok{,}
+    \DataTypeTok{"fluid1"}\FunctionTok{:} \FunctionTok{\{} \DataTypeTok{"rho"}\FunctionTok{:} \FloatTok{1.0}\FunctionTok{,} \DataTypeTok{"mu"}\FunctionTok{:} \FloatTok{0.001} \FunctionTok{\}}
+  \FunctionTok{\},}
+  \DataTypeTok{"time"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"dt"}\FunctionTok{:} \FloatTok{0.005}\FunctionTok{,}
+    \DataTypeTok{"t\_final"}\FunctionTok{:} \FloatTok{5.0}\FunctionTok{,}
+    \DataTypeTok{"cfl\_max"}\FunctionTok{:} \FloatTok{0.5}\FunctionTok{,}
+    \DataTypeTok{"adaptive\_dt"}\FunctionTok{:} \KeywordTok{false}
+  \FunctionTok{\},}
+  \DataTypeTok{"boundary\_conditions"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"left"}\FunctionTok{:}   \FunctionTok{\{} \DataTypeTok{"type"}\FunctionTok{:} \StringTok{"DIRICHLET"}\FunctionTok{,} \DataTypeTok{"u"}\FunctionTok{:} \FloatTok{0.0}\FunctionTok{,} \DataTypeTok{"v"}\FunctionTok{:} \FloatTok{0.0} \FunctionTok{\},}
+    \DataTypeTok{"right"}\FunctionTok{:}  \FunctionTok{\{} \DataTypeTok{"type"}\FunctionTok{:} \StringTok{"DIRICHLET"}\FunctionTok{,} \DataTypeTok{"u"}\FunctionTok{:} \FloatTok{0.0}\FunctionTok{,} \DataTypeTok{"v"}\FunctionTok{:} \FloatTok{0.0} \FunctionTok{\},}
+    \DataTypeTok{"bottom"}\FunctionTok{:} \FunctionTok{\{} \DataTypeTok{"type"}\FunctionTok{:} \StringTok{"DIRICHLET"}\FunctionTok{,} \DataTypeTok{"u"}\FunctionTok{:} \FloatTok{0.0}\FunctionTok{,} \DataTypeTok{"v"}\FunctionTok{:} \FloatTok{0.0} \FunctionTok{\},}
+    \DataTypeTok{"top"}\FunctionTok{:}    \FunctionTok{\{} \DataTypeTok{"type"}\FunctionTok{:} \StringTok{"DIRICHLET"}\FunctionTok{,} \DataTypeTok{"u"}\FunctionTok{:} \FloatTok{1.0}\FunctionTok{,} \DataTypeTok{"v"}\FunctionTok{:} \FloatTok{0.0} \FunctionTok{\}}
+  \FunctionTok{\},}
+  \DataTypeTok{"solver"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"type"}\FunctionTok{:} \StringTok{"AUGMENTED\_LAGRANGIAN"}\FunctionTok{,}
+    \DataTypeTok{"tol"}\FunctionTok{:} \FloatTok{1.0e{-}7}\FunctionTok{,}
+    \DataTypeTok{"max\_iter"}\FunctionTok{:} \DecValTok{500}\FunctionTok{,}
+    \DataTypeTok{"r\_al"}\FunctionTok{:} \FloatTok{100.0}\FunctionTok{,}
+    \DataTypeTok{"uzawa\_iter"}\FunctionTok{:} \DecValTok{1}\FunctionTok{,}
+    \DataTypeTok{"linear\_solver"}\FunctionTok{:} \StringTok{"BICGSTAB2"}\FunctionTok{,}
+    \DataTypeTok{"use\_precond"}\FunctionTok{:} \KeywordTok{true}\FunctionTok{,}
+    \DataTypeTok{"precond\_type"}\FunctionTok{:} \StringTok{"JACOBI"}
+  \FunctionTok{\},}
+  \DataTypeTok{"output"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"output\_dir"}\FunctionTok{:} \StringTok{"output\_cavity\_re1000"}\FunctionTok{,}
+    \DataTypeTok{"case\_name"}\FunctionTok{:} \StringTok{"cavity\_re1000"}\FunctionTok{,}
+    \DataTypeTok{"vtk\_interval"}\FunctionTok{:} \DecValTok{20}\FunctionTok{,}
+    \DataTypeTok{"log\_interval"}\FunctionTok{:} \DecValTok{10}\FunctionTok{,}
+    \DataTypeTok{"write\_csv\_history"}\FunctionTok{:} \KeywordTok{true}
+  \FunctionTok{\}}
+\FunctionTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{Table des Paramètres
+Principaux}\label{table-des-paramuxe8tres-principaux}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Section
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Clé
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Valeurs / Formats
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Signification Physique
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{mode} & \texttt{mode} & \texttt{"NAVIER\_STOKES"},
+\texttt{"HEAT"} & Physique principale résolue \\
+\texttt{mesh} & \texttt{nx}, \texttt{ny} & Entiers (\(\ge 16\)) & Nombre
+de cellules le long des axes \(x\) et \(y\) \\
+\texttt{mesh} & \texttt{lx}, \texttt{ly} & Réels en mètres & Dimensions
+géométriques totales \\
+\texttt{physics} & \texttt{enable\_two\_phase} & \texttt{true},
+\texttt{false} & Active le suivi d'interface VOF \\
+\texttt{physics} & \texttt{sigma} & Réel en \(\text{N/m}\) & Tension
+interfaciale (modèle CSF) \\
+\texttt{boundary} & \texttt{type} & \texttt{"DIRICHLET"},
+\texttt{"NEUMANN"}, \texttt{"PERIODIC"}, \texttt{"FREESLIP"} & Condition
+à la limite sur chaque frontière \\
+\texttt{solver} & \texttt{linear\_solver} & \texttt{"BICGSTAB2"},
+\texttt{"BICGSTAB"}, \texttt{"CG"}, \texttt{"GMRES"} & Algorithme
+itératif Matrix-Free \\
+\texttt{solver} & \texttt{r\_al} & Réel (\(\ge 0\)) & Coefficient de
+pénalité de divergence \\
+\end{longtable}
+}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{4. Tutoriel 1 : Écoulement de Poiseuille et Transitoire de
+Szymanski}\label{tutoriel-1-uxe9coulement-de-poiseuille-et-transitoire-de-szymanski}
+
+Ce cas valide l'établissement transitoire d'un profil de vitesse sous
+l'application brutale d'une force volumique motrice axiale
+\(g_x = 0.0555\text{ m/s}^2\) dans un canal plan de demi-largeur
+\(e = 0.08\text{ m}\).
+
+\subsubsection{\texorpdfstring{4.1. Configuration
+(\texttt{cases/poiseuille\_unsteady.json})}{4.1. Configuration (cases/poiseuille\_unsteady.json)}}\label{configuration-casespoiseuille_unsteady.json}
+
+\begin{itemize}
+\tightlist
+\item
+  Propriétés du fluide : \(\rho = 1.0\text{ kg/m}^3\),
+  \(\mu = 0.01\text{ Pa}\cdot\text{s}\).
+\item
+  Conditions aux limites : Périodique en \(x\), adhérence (\(u=0, v=0\))
+  en haut et en bas.
+\item
+  Pénalisation \(r_{\text{al}} = 0.0\) (car la vitesse est purement
+  solénoïdale et \(p \equiv 0\)).
+\end{itemize}
+
+\subsubsection{4.2. Exécution
+Parallèle}\label{exuxe9cution-paralluxe8le}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 2 bin/covof2d\_fortran cases/poiseuille\_unsteady.json}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{4.3. Solution Analytique (Série de
+Fourier)}\label{solution-analytique-suxe9rie-de-fourier}
+
+La vitesse axiale exacte s'écrit sous forme de série infinie :
+\[u(z, t) = \frac{G e^2}{2\mu} \left( 1 - \frac{z^2}{e^2} \right) + \sum_{n=0}^{\infty} a_n \exp\left( - \frac{(2n+1)^2 \pi^2 \mu}{4 \rho e^2} t \right) \cos\left( \frac{(2n+1) \pi z}{2e} \right)\]
+avec \(a_n = -\frac{16 G e^2 (-1)^n}{\mu \pi^3 (2n+1)^3}\) et
+\(z = y - e\).
+
+À \(t = 1.0\text{ s}\), la solution numérique Fortran concorde avec la
+solution analytique avec une erreur
+\(L_1 = 1.49 \times 10^{-5}\text{ m/s}\) (très inférieure à la cible
+Référence Académique de \(3.13 \times 10^{-4}\text{ m/s}\)).
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{5. Tutoriel 2 : Cavité Entraînée à Reynolds Re =
+1000}\label{tutoriel-2-cavituxe9-entrauxeenuxe9e-uxe0-reynolds-re-1000}
+
+Le benchmark canonique de Ghia et al.~(1982) valide la discrétisation
+des termes convectifs et visqueux à haut nombre de Reynolds.
+
+\begin{verbatim}
+       u_top = 1.0 m/s, v_top = 0.0 m/s
+    +--------------------------------+
+    |                                |
+    |           VORTEX               |
+    |          PRIMAIRE              |
+    |                                |
+    |  Vortex                  Vortex|
+    |  coin bas-gauche   coin bas-dr.|
+    +--------------------------------+
+             Parois fixes (u=0, v=0)
+\end{verbatim}
+
+\subsubsection{\texorpdfstring{5.1. Configuration
+(\texttt{cases/cavity\_re1000.json})}{5.1. Configuration (cases/cavity\_re1000.json)}}\label{configuration-casescavity_re1000.json}
+
+\begin{itemize}
+\tightlist
+\item
+  Domaine unitaire \(1.0\text{ m} \times 1.0\text{ m}\), maillage fin
+  \(128 \times 128\).
+\item
+  Fluide : \(\rho = 1.0\text{ kg/m}^3\),
+  \(\mu = 0.001\text{ Pa}\cdot\text{s} \implies Re = 1000\).
+\item
+  Paroi supérieure mobile à \(u = 1.0\text{ m/s}\).
+\end{itemize}
+
+\subsubsection{5.2. Lancement}\label{lancement}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 4 bin/covof2d\_fortran cases/cavity\_re1000.json}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{5.3. Résultats
+Numériques}\label{ruxe9sultats-numuxe9riques}
+
+Le vortex primaire central converge à la position
+\((x, y) = (0.5898, 0.5977)\), avec capture précise des vortex
+secondaires de coin sans oscillation numérique.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{6. Tutoriel 3 : Écoulement sur Marche Descendante (Armaly Re
+=
+100)}\label{tutoriel-3-uxe9coulement-sur-marche-descendante-armaly-re-100}
+
+L'expérience d'Armaly et al.~(1983) étudie le décollement de la couche
+limite laminaire et le recollement en aval d'une marche de hauteur
+\(H = 1.0\text{ m}\).
+
+\subsubsection{\texorpdfstring{6.1. Obstacle Immergé par Brinkman
+(\texttt{cases/backward\_facing\_step.json})}{6.1. Obstacle Immergé par Brinkman (cases/backward\_facing\_step.json)}}\label{obstacle-immerguxe9-par-brinkman-casesbackward_facing_step.json}
+
+La marche est définie dans le fichier JSON par pénalisation de Brinkman
+:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\StringTok{"obstacle"}\ErrorTok{:} \FunctionTok{\{}
+  \DataTypeTok{"enabled"}\FunctionTok{:} \KeywordTok{true}\FunctionTok{,}
+  \DataTypeTok{"type"}\FunctionTok{:} \StringTok{"BOX"}\FunctionTok{,}
+  \DataTypeTok{"x0"}\FunctionTok{:} \FloatTok{0.0}\FunctionTok{,} \DataTypeTok{"x1"}\FunctionTok{:} \FloatTok{4.0}\FunctionTok{,}
+  \DataTypeTok{"y0"}\FunctionTok{:} \FloatTok{0.0}\FunctionTok{,} \DataTypeTok{"y1"}\FunctionTok{:} \FloatTok{1.0}
+\FunctionTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{6.2. Lancement}\label{lancement-1}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 4 bin/covof2d\_fortran cases/backward\_facing\_step.json}
+\end{Highlighting}
+\end{Shaded}
+
+La longueur de recollement adimensionnelle obtenue est
+\(x_r / H = 2.719\), en accord direct avec la valeur expérimentale de
+référence (\(x_r / H = 2.808\), écart relatif de \(3.18\%\)).
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{7. Tutoriel 4 : Convection Naturelle Thermique de Vahl Davis
+(Ra =
+10⁴)}\label{tutoriel-4-convection-naturelle-thermique-de-vahl-davis-ra-10ux2074}
+
+Ce cas étudie la convection d'un fluide soumis à un gradient de
+température horizontal entre deux parois isothermes (\(T_h = 1.0\),
+\(T_c = 0.0\)), les frontières supérieure et inférieure étant
+adiabatiques (\(\partial T / \partial y = 0\)).
+
+\subsubsection{7.1. Modèle de Boussinesq}\label{moduxe8le-de-boussinesq}
+
+Le couplage vitesse-température est modélisé par :
+\[\mathbf{f}_{\text{boussinesq}} = -\rho \beta (T - T_0) \mathbf{g}\]
+
+\subsubsection{7.2. Lancement et Nombre de
+Nusselt}\label{lancement-et-nombre-de-nusselt}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 2 bin/covof2d\_fortran cases/natural\_convection\_ra1e4.json}
+\end{Highlighting}
+\end{Shaded}
+
+Le nombre de Nusselt moyen mesuré à la paroi chaude
+\(\overline{Nu} = 2.3990\) se situe parfaitement dans la plage de
+référence Référence Académique CFD (\([2.2, 2.7]\)).
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{8. Tutoriel 5 : Écoulement Diphasique VOF --- Rupture de
+Barrage}\label{tutoriel-5-uxe9coulement-diphasique-vof-rupture-de-barrage}
+
+L'effondrement gravitationnel d'une colonne d'eau (Martin \& Moyce) met
+à l'épreuve l'algorithme VOF face aux forts gradients de vitesse et
+déformations d'interface.
+
+\begin{verbatim}
+          t = 0.0 s                     t = 0.4 s (propagation front)
+    +-----------------------+     +-----------------------+
+    | ####                  |     |                       |
+    | ####                  |     |                       |
+    | ####                  |     | ##                    |
+    | ####                  |     | #######======>        |
+    +-----------------------+     +-----------------------+
+\end{verbatim}
+
+\subsubsection{\texorpdfstring{8.1. Configuration
+(\texttt{cases/dam\_break.json})}{8.1. Configuration (cases/dam\_break.json)}}\label{configuration-casesdam_break.json}
+
+\begin{itemize}
+\tightlist
+\item
+  Fluide 1 (Eau) : \(\rho_1 = 1000\text{ kg/m}^3\),
+  \(\mu_1 = 0.001\text{ Pa}\cdot\text{s}\).
+\item
+  Fluide 2 (Air) : \(\rho_2 = 1.0\text{ kg/m}^3\),
+  \(\mu_2 = 1.85 \times 10^{-5}\text{ Pa}\cdot\text{s}\).
+\item
+  Schéma d'advection VOF : \textbf{TVD Superbee} garantissant la stricte
+  conservation de volume et une interface de largeur maximale 2
+  cellules.
+\end{itemize}
+
+\subsubsection{8.2. Lancement}\label{lancement-2}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 4 bin/covof2d\_fortran cases/dam\_break.json}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{9. Tutoriel 6 : Tension de Surface et Saut de Pression de
+Laplace}\label{tutoriel-6-tension-de-surface-et-saut-de-pression-de-laplace}
+
+Ce cas valide le calcul de tension de surface par la méthode \textbf{CSF
+(Continuum Surface Force)} pour une goutte statique de rayon
+\(R = 0.25\text{ m}\).
+
+\subsubsection{9.1. Saut de Pression
+Théorique}\label{saut-de-pression-thuxe9orique}
+
+\[\Delta P = P_{\text{int}} - P_{\text{ext}} = \frac{\sigma}{R}\] Pour
+\(\sigma = 1.0\text{ N/m}\) et \(R = 0.25\text{ m}\), la théorie prédit
+\(\Delta P = 4.000\text{ Pa}\).
+
+\subsubsection{9.2. Lancement et
+Validation}\label{lancement-et-validation}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 2 bin/covof2d\_fortran cases/static\_droplet.json}
+\end{Highlighting}
+\end{Shaded}
+
+Le saut de pression moyen calculé par COVOF 2D Fortran est de
+\(\Delta P = 3.86\text{ Pa}\) (écart relatif de \(3.38\%\)), confirmant
+l'absence de courants parasites déstabilisants.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{10. Tutoriel 7 : Écoulement Autour d'un Cylindre par
+Pénalisation de
+Brinkman}\label{tutoriel-7-uxe9coulement-autour-dun-cylindre-par-puxe9nalisation-de-brinkman}
+
+Ce tutoriel modélise l'écoulement stationnaire à \(Re=20\) autour d'un
+cylindre de diamètre \(D=0.1\text{ m}\).
+
+\subsubsection{\texorpdfstring{10.1. Configuration
+(\texttt{cases/obstacle\_cylinder\_re20.json})}{10.1. Configuration (cases/obstacle\_cylinder\_re20.json)}}\label{configuration-casesobstacle_cylinder_re20.json}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\StringTok{"obstacle"}\ErrorTok{:} \FunctionTok{\{}
+  \DataTypeTok{"enabled"}\FunctionTok{:} \KeywordTok{true}\FunctionTok{,}
+  \DataTypeTok{"type"}\FunctionTok{:} \StringTok{"CYLINDER"}\FunctionTok{,}
+  \DataTypeTok{"xc"}\FunctionTok{:} \FloatTok{0.5}\FunctionTok{,} \DataTypeTok{"yc"}\FunctionTok{:} \FloatTok{0.5}\FunctionTok{,}
+  \DataTypeTok{"radius"}\FunctionTok{:} \FloatTok{0.05}
+\FunctionTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{10.2. Lancement}\label{lancement-3}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 2 bin/covof2d\_fortran cases/obstacle\_cylinder\_re20.json}
+\end{Highlighting}
+\end{Shaded}
+
+Le sillage symétrique présente une longueur de recirculation
+\(L/D = 0.768\), strictement conforme à la valeur de référence Référence
+Académique CFD (\(0.768\)).
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{11. Post-Traitement Avancé avec
+ParaView}\label{post-traitement-avancuxe9-avec-paraview}
+
+Le module \texttt{module\_vtk\_writer.f90} produit des sorties standards
+XML VTK : * Fichier maître multi-processus :
+\texttt{output\_cas/cas\_XXXXXX.pvtr} * Fichiers de sous-domaines
+partitionnés : \texttt{output\_cas/cas\_p0\_XXXXXX.vtr},
+\texttt{cas\_p1\_XXXXXX.vtr}, etc.
+
+\subsubsection{Procédure de Visualisation
+:}\label{procuxe9dure-de-visualisation}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  Lancer \textbf{ParaView} et ouvrir le groupe de fichiers
+  \texttt{cas\_..pvtr}.
+\item
+  Cliquer sur \textbf{Apply}.
+\item
+  Sélectionner la variable \texttt{Velocity} et activer les vecteurs par
+  le filtre \emph{Glyph}.
+\item
+  Tracer les lignes de courant en appliquant le filtre \emph{Stream
+  Tracer}.
+\item
+  Isoler l'interface diphasique en appliquant le filtre \emph{Contour}
+  sur le champ \texttt{ColorFunction} (\(C = 0.5\)).
+\item
+  Tracer le profil de vitesse 1D par le filtre \emph{Plot Over Line}.
+\end{enumerate}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{12. Automatisation Python et Études de
+Convergence}\label{automatisation-python-et-uxe9tudes-de-convergence}
+
+Vous pouvez automatiser des calculs paramétriques et des études de
+convergence de maillage via un script Python simple pilotant le binaire
+Fortran :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ImportTok{import}\NormalTok{ subprocess}
+\ImportTok{import}\NormalTok{ json}
+
+\NormalTok{mesh\_sizes }\OperatorTok{=}\NormalTok{ [}\DecValTok{16}\NormalTok{, }\DecValTok{32}\NormalTok{, }\DecValTok{64}\NormalTok{, }\DecValTok{128}\NormalTok{]}
+\NormalTok{results }\OperatorTok{=}\NormalTok{ []}
+
+\ControlFlowTok{for}\NormalTok{ n }\KeywordTok{in}\NormalTok{ mesh\_sizes:}
+    \ControlFlowTok{with} \BuiltInTok{open}\NormalTok{(}\StringTok{"cases/poiseuille\_variable\_viscosity.json"}\NormalTok{, }\StringTok{"r"}\NormalTok{) }\ImportTok{as}\NormalTok{ f:}
+\NormalTok{        cfg }\OperatorTok{=}\NormalTok{ json.load(f)}
+\NormalTok{    cfg[}\StringTok{"mesh"}\NormalTok{][}\StringTok{"ny"}\NormalTok{] }\OperatorTok{=}\NormalTok{ n}
+\NormalTok{    cfg[}\StringTok{"output"}\NormalTok{][}\StringTok{"output\_dir"}\NormalTok{] }\OperatorTok{=} \SpecialStringTok{f"output\_conv\_}\SpecialCharTok{\{}\NormalTok{n}\SpecialCharTok{\}}\SpecialStringTok{"}
+    
+    \ControlFlowTok{with} \BuiltInTok{open}\NormalTok{(}\StringTok{"cases/tmp\_case.json"}\NormalTok{, }\StringTok{"w"}\NormalTok{) }\ImportTok{as}\NormalTok{ f:}
+\NormalTok{        json.dump(cfg, f)}
+        
+\NormalTok{    subprocess.run([}\StringTok{"mpirun"}\NormalTok{, }\StringTok{"{-}np"}\NormalTok{, }\StringTok{"4"}\NormalTok{, }\StringTok{"bin/covof2d\_fortran"}\NormalTok{, }\StringTok{"cases/tmp\_case.json"}\NormalTok{])}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{13. Créer un Nouveau Cas Test à Partir de
+Zéro}\label{cruxe9er-un-nouveau-cas-test-uxe0-partir-de-zuxe9ro}
+
+Pour simuler un écoulement inédit avec COVOF 2D Fortran :
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  Créez un fichier \texttt{cases/mon\_cas.json}.
+\item
+  Définissez la grille : \texttt{nx}, \texttt{ny}, \texttt{lx},
+  \texttt{ly}.
+\item
+  Précisez les propriétés physiques (\texttt{rho}, \texttt{mu},
+  \texttt{gx}, \texttt{gy}).
+\item
+  Indiquez les conditions aux limites sur chaque paroi (\texttt{left},
+  \texttt{right}, \texttt{bottom}, \texttt{top}).
+\item
+  Configurez le pas de temps (\texttt{dt}, \texttt{t\_final}) et les
+  paramètres du solveur (\texttt{r\_al}, \texttt{linear\_solver}).
+\item
+  Exécutez le calcul :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 4 bin/covof2d\_fortran cases/mon\_cas.json}
+\end{Highlighting}
+\end{Shaded}
+\item
+  Visualisez immédiatement le résultat :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{paraview}\NormalTok{ output\_mon\_cas/mon\_cas\_..pvtr}
+\end{Highlighting}
+\end{Shaded}
+\end{enumerate}
+
+\end{document}

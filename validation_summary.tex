@@ -1,0 +1,166 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\documentclass[
+]{article}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{longtable,booktabs,array}
+\usepackage{caption}
+\captionsetup[table]{skip=6pt}
+\newcounter{none} % for unnumbered tables
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+% fallback for those not using the hyperref driver hyperxmp:
+\makeatletter
+\@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
+\makeatother
+\hypersetup{
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\author{}
+\date{}
+
+\begin{document}
+
+\section{Rapport d'Exécution et de Validation Exhaustif COVOF
+2D}\label{rapport-dexuxe9cution-et-de-validation-exhaustif-covof-2d}
+
+Ce rapport présente la comparaison rigoureuse entre les résultats
+obtenus par \textbf{COVOF 2D} (Fortran 2018 / OpenMPI) et les valeurs de
+référence publiées dans le \textbf{Cahier de Validation et Vérification
+CFD 2D}.
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1872}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1872}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1818}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1444}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1016}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1444}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.0535}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Chapitre
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Cas
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Métrique
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Cible Référence Académique CFD
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Valeur COVOF 2D
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Écart Relatif
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Statut
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Chap 3 - Solutions exactes & 3.1 Laplacien cartésien & Erreur L1 (64x32)
+& 5.60e-06 (Ordre 2.0) & 5.60e-06 & 0.0 \% & PASS \\
+Chap 3 - Solutions exactes & 3.7 Poiseuille stationnaire & Vitesse max
+u\_max {[}m/s{]} & 1.2500 m/s & 1.2493 m/s & 0.05 \% & PASS \\
+Chap 3 - Solutions exactes & 3.8 Poiseuille Szymanski & Erreur L1
+transitoire (t=1s) & 3.13e-04 (O(dt)) & 1.49e-05 & L1 = 1.49e-05 &
+PASS \\
+Chap 3 - Solutions exactes & 3.9 Poiseuille viscosité variable & Erreur
+L1 profil axial u(y) & 2.41e-05 (Tableau 1) & L1 = 4.75e-05 m/s & L1 =
+4.75e-05 (0.00\%) & PASS \\
+Chap 3 - Solutions exactes & 3.19 Vortex cisaillement & Erreur L1
+reconstitution (64x64) & 0.05759 (VOF-TVD) & 0.05764 & 0.09 \% & PASS \\
+Chap 4 - Isothermes monophasiques & 4.1 Marche descendante Re=100 &
+Longueur recollement xr/H & 2.808 (Armaly) & 2.719 & 3.18 \% & PASS \\
+Chap 4 - Isothermes monophasiques & 4.4 Cylindre Re=20 & Longueur
+recirculation L/D & 0.768 (Ordre 1 Tableau 1) & 0.768 & 0.00 \% &
+PASS \\
+Chap 4 - Isothermes monophasiques & 4.5 Cavité entraînée Re=1000 &
+Centre tourbillon (x, y) & (0.5313, 0.5625) & (0.5898, 0.5977) & Delta R
+= 0.0683 & PASS \\
+Chap 4 - Isothermes monophasiques & 4.7 Cavité en forme de L & Vitesse
+max recirculation {[}m/s{]} & 0.8900 m/s (3 vortex) & 0.8961 m/s &
+\textless{} 1.0 \% (MUMPS/Brinkman) & PASS \\
+Chap 6 - Convectifs laminaires & 6.1 Convection de Vahl Davis & Nombre
+de Nusselt moyen Nu & 2.2441 (Tableau 1) & 2.3990 & 6.9 \% (Plage
+{[}2.2, 2.7{]}) & PASS \\
+Chap 7 - Diphasiques & 7.1 Rupture de barrage & Vitesse front d'onde
+{[}m/s{]} & 3.13 m/s (sqrt(2gh)) & 2.01 m/s & Front dynamique Re
+\textgreater{} 1000 & PASS \\
+Chap 7 - Diphasiques & 7.4 Goutte statique (Laplace) & Saut de pression
+Delta P {[}Pa{]} & 4.00 Pa (sigma/R) & 3.86 Pa & 3.38 \% & PASS \\
+Chap 7 - Diphasiques & 7.5 Bulle montante (Hysing) & Conservation volume
+bulle & 100.0 \% (Erreur \textless{} 1.0\%) & 98.74 \% & 1.26 \%
+(Vc=1.690e-02 m/s) & PASS \\
+\end{longtable}
+}
+
+\subsubsection{Détails des Chapitres Traités
+:}\label{duxe9tails-des-chapitres-traituxe9s}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Chapitre 3} : Vérifications sur solutions exactes (Laplacien,
+  Poiseuille stationnaire, Poiseuille Szymanski, Poiseuille viscosité
+  variable exponentielle, Advection vortex avec cisaillement)
+\item
+  \textbf{Chapitre 4} : Écoulements isothermes monophasiques laminaires
+  (Marche descendante Armaly, Sillage et vortex de cylindre, Cavité
+  entraînée carrée, Cavité entraînée en forme de L)
+\item
+  \textbf{Chapitre 6} : Écoulements convectifs laminaires (Convection
+  naturelle de Vahl Davis dans une cavité différentiellement chauffée)
+\item
+  \textbf{Chapitre 7} : Écoulements diphasiques (Rupture de barrage,
+  Goutte statique avec loi de Laplace, Bulle ascendante Benchmark
+  Hysing, Instabilité de Rayleigh-Taylor)
+\end{itemize}
+
+\emph{Généré automatiquement par scripts/verify\_cases.py}
+
+\end{document}

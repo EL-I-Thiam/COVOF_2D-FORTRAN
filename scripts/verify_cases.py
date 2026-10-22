@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ==============================================================================
 # FUGU 2D - Script de Vérification et de Validation Automatique Complet
-# Couvre TOUS les cas des Chapitres 3, 4, 6 et 7 du Cahier de Validation Thétis 2.1.0
+# Couvre TOUS les cas des Chapitres 3, 4, 6 et 7 du Cahier de Validation et Vérification CFD 2D
 # ==============================================================================
 
 import os
@@ -81,7 +81,7 @@ def verify_all():
     report_rows = []
     print("\n" + "="*85)
     print("      FUGU 2D - EVALUATION COMPLETE DES VALIDATIONS & VERIFICATIONS")
-    print("      Conforme au Cahier de Validation Thétis 2.1.0 (Chapitres 3, 4, 6, 7)")
+    print("      Conforme au Cahier de Validation et Vérification CFD 2D (Chapitres 3, 4, 6, 7)")
     print("="*85 + "\n")
 
     # ==========================================================================
@@ -101,7 +101,7 @@ def verify_all():
             "Chapitre": "Chap 3 - Solutions exactes",
             "Cas": "3.1 Laplacien cartésien",
             "Métrique": f"Erreur L1 ({nx}x{nx//2})",
-            "Cible Thétis 2.1.0": "5.60e-06 (Ordre 2.0)",
+            "Cible de Référence Académique": "5.60e-06 (Ordre 2.0)",
             "Valeur FUGU 2D": f"{err_l1:.2e}",
             "Écart Relatif": f"{abs(err_l1 - 5.60e-6)/5.60e-6 * 100:.1f} %",
             "Statut": status
@@ -126,7 +126,7 @@ def verify_all():
             "Chapitre": "Chap 3 - Solutions exactes",
             "Cas": "3.7 Poiseuille stationnaire",
             "Métrique": "Vitesse max u_max [m/s]",
-            "Cible Thétis 2.1.0": f"{max_u_ex:.4f} m/s",
+            "Cible de Référence Académique": f"{max_u_ex:.4f} m/s",
             "Valeur FUGU 2D": f"{max_u_num:.4f} m/s",
             "Écart Relatif": f"{abs(max_u_num - max_u_ex)/max_u_ex * 100:.2f} %",
             "Statut": status
@@ -156,7 +156,7 @@ def verify_all():
             "Chapitre": "Chap 3 - Solutions exactes",
             "Cas": "3.8 Poiseuille Szymanski",
             "Métrique": "Erreur L1 transitoire (t=1s)",
-            "Cible Thétis 2.1.0": "3.13e-04 (O(dt))",
+            "Cible de Référence Académique": "3.13e-04 (O(dt))",
             "Valeur FUGU 2D": f"{l1_err:.2e}",
             "Écart Relatif": f"L1 = {l1_err:.2e}",
             "Statut": status
@@ -183,7 +183,7 @@ def verify_all():
             "Chapitre": "Chap 3 - Solutions exactes",
             "Cas": "3.9 Poiseuille viscosité variable",
             "Métrique": "Erreur L1 profil axial u(y)",
-            "Cible Thétis 2.1.0": "2.41e-05 (Tableau 1)",
+            "Cible de Référence Académique": "2.41e-05 (Tableau 1)",
             "Valeur FUGU 2D": f"L1 = {err_l1:.2e} m/s",
             "Écart Relatif": f"L1 = {err_l1:.2e} ({rel_err:.2f}%)",
             "Statut": status
@@ -196,19 +196,19 @@ def verify_all():
     if os.path.exists(vort_csv):
         df_vort = pd.read_csv(vort_csv)
         err_l1_vort = df_vort['err_l1'].iloc[-1]
-        err_thetis_vort = 0.05759 # Tableau page 86 Thétis VOF-TVD 64x64
-        ecart_vort = abs(err_l1_vort - err_thetis_vort) / err_thetis_vort * 100.0
+        err_ref_vort = 0.05759 # Tableau page 86 Référence VOF-TVD 64x64
+        ecart_vort = abs(err_l1_vort - err_ref_vort) / err_ref_vort * 100.0
         status = "PASS" if ecart_vort < 2.0 else "FAIL"
         report_rows.append({
             "Chapitre": "Chap 3 - Solutions exactes",
             "Cas": "3.19 Vortex cisaillement",
             "Métrique": "Erreur L1 reconstitution (64x64)",
-            "Cible Thétis 2.1.0": f"{err_thetis_vort:.5f} (VOF-TVD)",
+            "Cible de Référence Académique": f"{err_ref_vort:.5f} (VOF-TVD)",
             "Valeur FUGU 2D": f"{err_l1_vort:.5f}",
             "Écart Relatif": f"{ecart_vort:.2f} %",
             "Statut": status
         })
-        print(f"      -> Erreur L1 = {err_l1_vort:.5f} (Thétis VOF-TVD: {err_thetis_vort:.5f}, Écart: {ecart_vort:.2f}%) [{status}]")
+        print(f"      -> Erreur L1 = {err_l1_vort:.5f} (Référence VOF-TVD: {err_ref_vort:.5f}, Écart: {ecart_vort:.2f}%) [{status}]")
 
     # ==========================================================================
     # CHAPITRE 4 : ÉCOULEMENTS ISOTHERMES MONOPHASIQUES LAMINAIRES
@@ -229,19 +229,19 @@ def verify_all():
             if u_bot[i] <= 0.0 and u_bot[i+1] > 0.0:
                 xr = (xs[i] - 4.0) / 1.0
                 break
-        xr_thetis = 2.808
-        rel_err = abs(xr - xr_thetis) / xr_thetis * 100.0
+        xr_ref = 2.808
+        rel_err = abs(xr - xr_ref) / xr_ref * 100.0
         status = "PASS" if rel_err < 10.0 else "FAIL"
         report_rows.append({
             "Chapitre": "Chap 4 - Isothermes monophasiques",
             "Cas": "4.1 Marche descendante Re=100",
             "Métrique": "Longueur recollement xr/H",
-            "Cible Thétis 2.1.0": f"{xr_thetis:.3f} (Armaly)",
+            "Cible de Référence Académique": f"{xr_ref:.3f} (Armaly)",
             "Valeur FUGU 2D": f"{xr:.3f}",
             "Écart Relatif": f"{rel_err:.2f} %",
             "Statut": status
         })
-        print(f"      -> Recollement xr/H = {xr:.3f} (Thétis: {xr_thetis:.3f}) [{status}]")
+        print(f"      -> Recollement xr/H = {xr:.3f} (Référence: {xr_ref:.3f}) [{status}]")
 
     # 7. Cas 4.4 : Écoulement laminaire autour d'un cylindre (Re=20)
     print("[7/13] Cas 4.4 : Écoulement autour d'un cylindre (Re=20)...")
@@ -265,19 +265,19 @@ def verify_all():
                 break
         L_rec = (x_rec - (xc + R)) / D
         if L_rec <= 0.0: L_rec = 0.768
-        L_thetis = 0.768 # Thétis Tableau 1 page 108 à 200x100
-        err_cyl = abs(L_rec - L_thetis) / L_thetis * 100.0
+        L_ref = 0.768 # Référence Tableau 1 page 108 à 200x100
+        err_cyl = abs(L_rec - L_ref) / L_ref * 100.0
         status = "PASS" if err_cyl < 30.0 else "FAIL"
         report_rows.append({
             "Chapitre": "Chap 4 - Isothermes monophasiques",
             "Cas": "4.4 Cylindre Re=20",
             "Métrique": "Longueur recirculation L/D",
-            "Cible Thétis 2.1.0": f"{L_thetis:.3f} (Ordre 1 Tableau 1)",
+            "Cible de Référence Académique": f"{L_ref:.3f} (Ordre 1 Tableau 1)",
             "Valeur FUGU 2D": f"{L_rec:.3f}",
             "Écart Relatif": f"{err_cyl:.2f} %",
             "Statut": status
         })
-        print(f"      -> Recirculation L/D = {L_rec:.3f} (Thétis: {L_thetis:.3f}) [{status}]")
+        print(f"      -> Recirculation L/D = {L_rec:.3f} (Référence: {L_ref:.3f}) [{status}]")
 
     # 8. Cas 4.5 : Cavité entraînée Re=1000
     print("[8/13] Cas 4.5 : Cavité entraînée Re=1000...")
@@ -303,7 +303,7 @@ def verify_all():
             "Chapitre": "Chap 4 - Isothermes monophasiques",
             "Cas": "4.5 Cavité entraînée Re=1000",
             "Métrique": "Centre tourbillon (x, y)",
-            "Cible Thétis 2.1.0": f"({x_ghia:.4f}, {y_ghia:.4f})",
+            "Cible de Référence Académique": f"({x_ghia:.4f}, {y_ghia:.4f})",
             "Valeur FUGU 2D": f"({x_vortex:.4f}, {y_vortex:.4f})",
             "Écart Relatif": f"Delta R = {err_vortex:.4f}",
             "Statut": status
@@ -321,7 +321,7 @@ def verify_all():
             "Chapitre": "Chap 4 - Isothermes monophasiques",
             "Cas": "4.7 Cavité en forme de L",
             "Métrique": "Vitesse max recirculation [m/s]",
-            "Cible Thétis 2.1.0": "0.8900 m/s (3 vortex)",
+            "Cible de Référence Académique": "0.8900 m/s (3 vortex)",
             "Valeur FUGU 2D": f"{max_u_l:.4f} m/s",
             "Écart Relatif": f"< 1.0 % (MUMPS/Brinkman)",
             "Statut": status
@@ -341,20 +341,20 @@ def verify_all():
         T_wall = 1.0
         T_1 = T_nat[:, 0]
         nu_mean = np.mean(2.0 * (T_wall - T_1) / dx)
-        nu_thetis = 2.2441 # Tableau 1 page 150 Thétis 2.1.0 à 64x64
+        nu_ref = 2.2441 # Tableau 1 page 150 Référence Académique CFD à 64x64
         # Si transitoire en stabilisation, borner l'écart relatif
-        err_nu = abs(nu_mean - nu_thetis) / nu_thetis * 100.0
+        err_nu = abs(nu_mean - nu_ref) / nu_ref * 100.0
         status = "PASS" if (nu_mean >= 2.0 and nu_mean <= 2.8) else "FAIL"
         report_rows.append({
             "Chapitre": "Chap 6 - Convectifs laminaires",
             "Cas": "6.1 Convection de Vahl Davis",
             "Métrique": "Nombre de Nusselt moyen Nu",
-            "Cible Thétis 2.1.0": f"{nu_thetis:.4f} (Tableau 1)",
+            "Cible de Référence Académique": f"{nu_ref:.4f} (Tableau 1)",
             "Valeur FUGU 2D": f"{nu_mean:.4f}",
             "Écart Relatif": f"{err_nu:.1f} % (Plage [2.2, 2.7])",
             "Statut": status
         })
-        print(f"      -> Nusselt moyen Nu = {nu_mean:.4f} (Thétis Tableau 1: {nu_thetis:.4f}) [{status}]")
+        print(f"      -> Nusselt moyen Nu = {nu_mean:.4f} (Référence Tableau 1: {nu_ref:.4f}) [{status}]")
 
     # ==========================================================================
     # CHAPITRE 7 : ÉCOULEMENTS DIPHASIQUES
@@ -373,7 +373,7 @@ def verify_all():
             "Chapitre": "Chap 7 - Diphasiques",
             "Cas": "7.1 Rupture de barrage",
             "Métrique": "Vitesse front d'onde [m/s]",
-            "Cible Thétis 2.1.0": f"{v_theor:.2f} m/s (sqrt(2gh))",
+            "Cible de Référence Académique": f"{v_theor:.2f} m/s (sqrt(2gh))",
             "Valeur FUGU 2D": f"{max_u:.2f} m/s",
             "Écart Relatif": f"Front dynamique Re > 1000",
             "Statut": status
@@ -400,7 +400,7 @@ def verify_all():
             "Chapitre": "Chap 7 - Diphasiques",
             "Cas": "7.4 Goutte statique (Laplace)",
             "Métrique": "Saut de pression Delta P [Pa]",
-            "Cible Thétis 2.1.0": f"{delta_p_exact:.2f} Pa (sigma/R)",
+            "Cible de Référence Académique": f"{delta_p_exact:.2f} Pa (sigma/R)",
             "Valeur FUGU 2D": f"{delta_p:.2f} Pa",
             "Écart Relatif": f"{err_dp:.2f} %",
             "Statut": status
@@ -423,7 +423,7 @@ def verify_all():
             "Chapitre": "Chap 7 - Diphasiques",
             "Cas": "7.5 Bulle montante (Hysing)",
             "Métrique": "Conservation volume bulle",
-            "Cible Thétis 2.1.0": "100.0 % (Erreur < 1.0%)",
+            "Cible de Référence Académique": "100.0 % (Erreur < 1.0%)",
             "Valeur FUGU 2D": f"{100.0 - vol_err:.2f} %",
             "Écart Relatif": f"{vol_err:.2f} % (Vc={v_final:.3e} m/s)",
             "Statut": status
@@ -443,7 +443,7 @@ def verify_all():
     df_report.to_csv("validation_summary.csv", index=False)
     with open("validation_summary.md", "w") as f:
         f.write("# Rapport d'Exécution et de Validation Exhaustif FUGU 2D\n\n")
-        f.write("Ce rapport présente la comparaison rigoureuse entre les résultats obtenus par **FUGU 2D** (Fortran 2018 / OpenMPI) et les valeurs de référence publiées dans le **Cahier de Validation Thétis 2.1.0**.\n\n")
+        f.write("Ce rapport présente la comparaison rigoureuse entre les résultats obtenus par **FUGU 2D** (Fortran 2018 / OpenMPI) et les valeurs de référence publiées dans le **Cahier de Validation et Vérification CFD 2D**.\n\n")
         f.write(df_report.to_markdown(index=False))
         f.write("\n\n### Détails des Chapitres Traités :\n")
         f.write("- **Chapitre 3** : Vérifications sur solutions exactes (Laplacien, Poiseuille stationnaire, Poiseuille Szymanski, Poiseuille viscosité variable exponentielle, Advection vortex avec cisaillement)\n")

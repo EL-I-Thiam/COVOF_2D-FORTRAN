@@ -1,3 +1,4 @@
+! [Procédure/Module] module module_interface_vof
 module module_interface_vof
   use module_precision, only: dp
   use module_constants
@@ -15,91 +16,142 @@ module module_interface_vof
   public :: compute_curvature_and_csf
 
   type :: interface_vof_t
+     ! Déclaration de variable locale / paramètre de calcul
      type(config_t) :: cfg
   contains
+     ! Affectation et calcul numérique
      procedure :: init => vof_init
+     ! Affectation et calcul numérique
      procedure :: set_initial_condition => vof_set_ic
+     ! Affectation et calcul numérique
      procedure :: advect => vof_advect_step
   end type interface_vof_t
 
 contains
 
+  ! [Procédure/Module] subroutine set_initial_conditions
   subroutine set_initial_conditions(fields, mesh, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
     type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
     type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
     type(config_t), intent(in) :: cfg
 
+    ! Déclaration de variable locale / paramètre de calcul
     integer :: i, j, nx, ny
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: x, y, dist, eps, int_y
 
+    ! Affectation et calcul numérique
     nx = mesh%nx_local
+    ! Affectation et calcul numérique
     ny = mesh%ny_local
+    ! Affectation et calcul numérique
     eps = 1.5_dp * max(mesh%dx, mesh%dy)
 
     ! 1. Initialisation des vitesses (par défaut 0 ou imposé)
     fields%u = cfg%ic_u
+    ! Affectation et calcul numérique
     fields%v = cfg%ic_v
 
     ! 2. Initialisation de la fraction volumique C
     do j = 0, ny + 1
+       ! Affectation et calcul numérique
        y = y_center(mesh, j)
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 0, nx + 1
+          ! Affectation et calcul numérique
           x = x_center(mesh, i)
 
           select case (cfg%ic_type)
           case (IC_UNIFORM)
+             ! Transport / actualisation de la fraction volumique VOF
              fields%C(i, j) = 1.0_dp
 
           case (IC_DROPLET)
+             ! Affectation et calcul numérique
              dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
+             ! Évaluation de la condition logique
              if (dist < -eps) then
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 1.0_dp
+             ! Branche conditionnelle alternative
              else if (dist > eps) then
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 0.0_dp
+             ! Branche par défaut si condition non satisfaite
              else
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 0.5_dp - dist / (2.0_dp * eps) - (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
              end if
 
           case (IC_BUBBLE)
+             ! Affectation et calcul numérique
              dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
+             ! Évaluation de la condition logique
              if (dist < -eps) then
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 0.0_dp ! Intérieur bulle (fluide 2)
+             ! Branche conditionnelle alternative
              else if (dist > eps) then
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 1.0_dp ! Extérieur (fluide 1)
+             ! Branche par défaut si condition non satisfaite
              else
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 0.5_dp + dist / (2.0_dp * eps) + (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
              end if
 
           case (IC_DAM_BREAK)
+             ! Affectation et calcul numérique
              if (x >= cfg%ic_box_x0 .and. x <= cfg%ic_box_x1 .and. &
+                 ! Affectation et calcul numérique
                  y >= cfg%ic_box_y0 .and. y <= cfg%ic_box_y1) then
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 1.0_dp
+             ! Branche par défaut si condition non satisfaite
              else
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 0.0_dp
              end if
 
           case (IC_VORTEX_SHEAR)
+             ! Affectation et calcul numérique
              dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
+             ! Évaluation de la condition logique
              if (dist < -eps) then
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 1.0_dp
+             ! Branche conditionnelle alternative
              else if (dist > eps) then
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 0.0_dp
+             ! Branche par défaut si condition non satisfaite
              else
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 0.5_dp - dist / (2.0_dp * eps) - (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
              end if
 
           case (IC_RAYLEIGH_TAYLOR)
+             ! Affectation et calcul numérique
              int_y = cfg%ic_center_y + cfg%ic_pert_amp * cos(2.0_dp * PI * cfg%ic_pert_k * x / mesh%lx)
+             ! Évaluation de la condition logique
              if (y >= int_y) then
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 1.0_dp ! Fluide lourd au-dessus
+             ! Branche par défaut si condition non satisfaite
              else
+                ! Transport / actualisation de la fraction volumique VOF
                 fields%C(i, j) = 0.0_dp ! Fluide léger en dessous
              end if
 
           case (IC_LAPLACIAN_TEST)
+             ! Transport / actualisation de la fraction volumique VOF
              fields%C(i, j) = 1.0_dp
 
           case default
+             ! Transport / actualisation de la fraction volumique VOF
              fields%C(i, j) = 1.0_dp
           end select
        end do
@@ -107,238 +159,387 @@ contains
 
     ! 3. Détection des obstacles solides pour la pénalisation de Brinkman
     fields%solid_mask = 0
+    ! Évaluation de la condition logique
     if (cfg%obs_enabled) then
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
        do j = 0, ny + 1
+          ! Affectation et calcul numérique
           y = y_center(mesh, j)
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
           do i = 0, nx + 1
+             ! Affectation et calcul numérique
              x = x_center(mesh, i)
              if (is_in_obstacle(x, y, cfg%obs_type, cfg%obs_x0, cfg%obs_y0, cfg%obs_x1, cfg%obs_y1, &
                                 cfg%obs_xc, cfg%obs_yc, cfg%obs_radius)) then
+                ! Affectation et calcul numérique
                 fields%solid_mask(i, j) = 1
              end if
           end do
        end do
     end if
 
+    ! Appel de sous-programme modulaire
     call exchange_halos_scalar(fields%C, mesh)
+    ! Appel de sous-programme modulaire
     call apply_vof_bc(fields, mesh, cfg)
+    ! Appel de sous-programme modulaire
     call update_physical_properties(fields, mesh, cfg)
+    ! Appel de sous-programme modulaire
     call compute_curvature_and_csf(fields, mesh, cfg)
   end subroutine set_initial_conditions
 
+  ! [Procédure/Module] subroutine update_physical_properties
   subroutine update_physical_properties(fields, mesh, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
     type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
     type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
     type(config_t), intent(in) :: cfg
 
+    ! Déclaration de variable locale / paramètre de calcul
     integer :: i, j, nx, ny
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: c, y, z, mu_val, m_sw, m_se, m_nw, m_ne
 
+    ! Affectation et calcul numérique
     nx = mesh%nx_local
+    ! Affectation et calcul numérique
     ny = mesh%ny_local
 
+    ! Évaluation de la condition logique
     if (.not. cfg%enable_two_phase) then
+       ! Calcul de la masse volumique locale ou interpolée aux faces
        fields%rho = cfg%rho1
+       ! Calcul de la masse volumique locale ou interpolée aux faces
        fields%rho_u = cfg%rho1
+       ! Calcul de la masse volumique locale ou interpolée aux faces
        fields%rho_v = cfg%rho1
+       ! Évaluation de la condition logique
        if (cfg%viscosity_model == VISC_EXPONENTIAL) then
+          ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
           do j = 0, ny + 1
+             ! Affectation et calcul numérique
              y = y_center(mesh, j)
+             ! Affectation et calcul numérique
              z = y - cfg%visc_e
+             ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
              mu_val = cfg%visc_mu0 * exp(cfg%visc_a * (z * z) / (cfg%visc_e * cfg%visc_e))
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
              fields%mu(:, j) = mu_val
           end do
+          ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
           do j = 0, ny + 1
+             ! Affectation et calcul numérique
              y = y_face(mesh, j)
+             ! Affectation et calcul numérique
              z = y - cfg%visc_e
+             ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
              mu_val = cfg%visc_mu0 * exp(cfg%visc_a * (z * z) / (cfg%visc_e * cfg%visc_e))
+             ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
              fields%mu_node(:, j) = mu_val
           end do
+       ! Branche par défaut si condition non satisfaite
        else
+          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
           fields%mu = cfg%mu1
+          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
           fields%mu_node = cfg%mu1
        end if
+       ! Retour à la procédure appelante
        return
     end if
 
     ! Coins de C
     fields%C(0, 0)       = fields%C(1, 1)
+    ! Transport / actualisation de la fraction volumique VOF
     fields%C(nx+1, 0)    = fields%C(nx, 1)
+    ! Transport / actualisation de la fraction volumique VOF
     fields%C(0, ny+1)    = fields%C(1, ny)
+    ! Transport / actualisation de la fraction volumique VOF
     fields%C(nx+1, ny+1) = fields%C(nx, ny)
 
     ! 1. Masse volumique arithmétique et viscosité au centre
     do j = 0, ny + 1
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 0, nx + 1
+          ! Affectation et calcul numérique
           c = max(0.0_dp, min(1.0_dp, fields%C(i, j)))
+          ! Calcul de la masse volumique locale ou interpolée aux faces
           fields%rho(i, j) = c * cfg%rho1 + (1.0_dp - c) * cfg%rho2
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
           fields%mu(i, j)  = c * cfg%mu1  + (1.0_dp - c) * cfg%mu2
        end do
     end do
 
+    ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
     fields%mu(0, 0)       = fields%mu(1, 1)
+    ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
     fields%mu(nx+1, 0)    = fields%mu(nx, 1)
+    ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
     fields%mu(0, ny+1)    = fields%mu(1, ny)
+    ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
     fields%mu(nx+1, ny+1) = fields%mu(nx, ny)
 
     ! 2. Masse volumique sur les faces u
     do j = 1, ny
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx + 1
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
           fields%rho_u(i, j) = 0.5_dp * (fields%rho(i - 1, j) + fields%rho(i, j))
        end do
     end do
 
     ! 3. Masse volumique sur les faces v
     do j = 1, ny + 1
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
           fields%rho_v(i, j) = 0.5_dp * (fields%rho(i, j - 1) + fields%rho(i, j))
        end do
     end do
 
     ! 4. Viscosité harmonique aux nœuds (coins de mailles)
     do j = 1, ny + 1
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx + 1
+          ! Affectation et calcul numérique
           m_sw = fields%mu(i-1, j-1)
+          ! Affectation et calcul numérique
           m_se = fields%mu(i, j-1)
+          ! Affectation et calcul numérique
           m_nw = fields%mu(i-1, j)
+          ! Affectation et calcul numérique
           m_ne = fields%mu(i, j)
+          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
           fields%mu_node(i, j) = 4.0_dp / (1.0_dp / m_sw + 1.0_dp / m_se + 1.0_dp / m_nw + 1.0_dp / m_ne)
        end do
     end do
   end subroutine update_physical_properties
 
+  ! [Procédure/Module] pure real
   pure real(dp) function superbee(r)
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp), intent(in) :: r
+    ! Affectation et calcul numérique
     superbee = max(0.0_dp, max(min(2.0_dp * r, 1.0_dp), min(r, 2.0_dp)))
   end function superbee
 
+  ! [Procédure/Module] subroutine compute_curvature_and_csf
   subroutine compute_curvature_and_csf(fields, mesh, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
     type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
     type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
     type(config_t), intent(in) :: cfg
 
+    ! Déclaration de variable locale / paramètre de calcul
     integer :: i, j, nx, ny
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: dx, dy, dc_dx, dc_dy, grad_mag, kap_avg, grad_c
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp), allocatable :: norm_x(:, :), norm_y(:, :)
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp), allocatable :: kappa(:, :)
 
+    ! Évaluation de la condition logique
     if (.not. cfg%enable_surface_tension .or. cfg%sigma <= 0.0_dp) then
+       ! Affectation et calcul numérique
        fields%fx_sigma = 0.0_dp
+       ! Affectation et calcul numérique
        fields%fy_sigma = 0.0_dp
+       ! Affectation et calcul numérique
        fields%curvature = 0.0_dp
+       ! Retour à la procédure appelante
        return
     end if
 
+    ! Affectation et calcul numérique
     nx = mesh%nx_local
+    ! Affectation et calcul numérique
     ny = mesh%ny_local
+    ! Calcul de la métrique spatiale élémentaire
     dx = mesh%dx
+    ! Calcul de la métrique spatiale élémentaire
     dy = mesh%dy
 
+    ! Allocation dynamique de tableau contigu en mémoire
     allocate(norm_x(0:nx+1, 0:ny+1), norm_y(0:nx+1, 0:ny+1))
+    ! Allocation dynamique de tableau contigu en mémoire
     allocate(kappa(0:nx+1, 0:ny+1))
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
     norm_x = 0.0_dp
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
     norm_y = 0.0_dp
+    ! Affectation et calcul numérique
     kappa = 0.0_dp
 
     ! 1. Gradient et normale unitaire aux centres
     do j = 1, ny
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
+          ! Calcul de la métrique spatiale élémentaire
           dc_dx = (fields%C(i+1, j) - fields%C(i-1, j)) / (2.0_dp * dx)
+          ! Calcul de la métrique spatiale élémentaire
           dc_dy = (fields%C(i, j+1) - fields%C(i, j-1)) / (2.0_dp * dy)
+          ! Affectation et calcul numérique
           grad_mag = sqrt(dc_dx * dc_dx + dc_dy * dc_dy)
+          ! Évaluation de la condition logique
           if (grad_mag > 1.0e-3_dp / dx) then
+             ! Évaluation de la norme du résidu ou de l'erreur numérique
              norm_x(i, j) = dc_dx / grad_mag
+             ! Évaluation de la norme du résidu ou de l'erreur numérique
              norm_y(i, j) = dc_dy / grad_mag
           end if
        end do
     end do
 
+    ! Appel de sous-programme modulaire
     call exchange_halos_scalar(norm_x, mesh)
+    ! Appel de sous-programme modulaire
     call exchange_halos_scalar(norm_y, mesh)
 
     ! 2. Courbure kappa = -div(n)
     do j = 1, ny
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
+          ! Évaluation de la condition logique
           if (norm_x(i, j) /= 0.0_dp .or. norm_y(i, j) /= 0.0_dp) then
+             ! Affectation et calcul numérique
              kappa(i, j) = - ((norm_x(i+1, j) - norm_x(i-1, j)) / (2.0_dp * dx) + &
                               (norm_y(i, j+1) - norm_y(i, j-1)) / (2.0_dp * dy))
           end if
        end do
     end do
 
+    ! Appel de sous-programme modulaire
     call exchange_halos_scalar(kappa, mesh)
+    ! Affectation et calcul numérique
     fields%curvature = kappa
 
     ! 3. Forces de tension superficielle CSF (Balanced-Force)
     do j = 1, ny
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx + 1
+          ! Affectation et calcul numérique
           kap_avg = 0.5_dp * (kappa(i-1, j) + kappa(i, j))
+          ! Affectation et calcul numérique
           grad_c  = (fields%C(i, j) - fields%C(i-1, j)) / dx
+          ! Affectation et calcul numérique
           fields%fx_sigma(i, j) = cfg%sigma * kap_avg * grad_c
        end do
     end do
 
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
     do j = 1, ny + 1
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
+          ! Affectation et calcul numérique
           kap_avg = 0.5_dp * (kappa(i, j-1) + kappa(i, j))
+          ! Affectation et calcul numérique
           grad_c  = (fields%C(i, j) - fields%C(i, j-1)) / dy
+          ! Affectation et calcul numérique
           fields%fy_sigma(i, j) = cfg%sigma * kap_avg * grad_c
        end do
     end do
 
+    ! Libération de la mémoire allouée
     deallocate(norm_x, norm_y, kappa)
   end subroutine compute_curvature_and_csf
 
+  ! [Procédure/Module] subroutine advect_vof
   subroutine advect_vof(fields, mesh, cfg, dt)
+    ! Déclaration de variable locale / paramètre de calcul
     type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
     type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
     type(config_t), intent(in) :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp), intent(in) :: dt
 
+    ! Déclaration de variable locale / paramètre de calcul
     integer :: i, j, nx, ny, i_up, i_down, j_up, j_down
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: dx, dy, u_face, v_face, c_l, c_r, c_b, c_t
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: dc_up, dc_loc, r, phi, fx_in, fx_out, fy_in, fy_out
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp), allocatable :: flux_x(:, :), flux_y(:, :), c_new(:, :)
 
+    ! Affectation et calcul numérique
     nx = mesh%nx_local
+    ! Affectation et calcul numérique
     ny = mesh%ny_local
+    ! Calcul de la métrique spatiale élémentaire
     dx = mesh%dx
+    ! Calcul de la métrique spatiale élémentaire
     dy = mesh%dy
 
+    ! Allocation dynamique de tableau contigu en mémoire
     allocate(flux_x(0:nx+1, 0:ny+1), flux_y(0:nx+1, 0:ny+1))
+    ! Allocation dynamique de tableau contigu en mémoire
     allocate(c_new(0:nx+1, 0:ny+1))
+    ! Affectation et calcul numérique
     flux_x = 0.0_dp
+    ! Affectation et calcul numérique
     flux_y = 0.0_dp
+    ! Affectation et calcul numérique
     c_new = fields%C
 
     ! Flux selon X avec limiteur Superbee
     do j = 1, ny
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx + 1
+          ! Affectation et calcul numérique
           u_face = fields%u(i, j)
+          ! Affectation et calcul numérique
           c_l = fields%C(i-1, j)
+          ! Affectation et calcul numérique
           c_r = fields%C(i, j)
 
+          ! Évaluation de la condition logique
           if (u_face >= 0.0_dp) then
+             ! Affectation et calcul numérique
              i_up = max(0, i - 2)
+             ! Affectation et calcul numérique
              dc_up = c_l - fields%C(i_up, j)
+             ! Affectation et calcul numérique
              dc_loc = c_r - c_l
+             ! Évaluation de la condition logique
              if (abs(dc_loc) > 1.0e-12_dp) then
+                ! Affectation et calcul numérique
                 r = dc_up / dc_loc
+             ! Branche par défaut si condition non satisfaite
              else
+                ! Affectation et calcul numérique
                 r = 0.0_dp
              end if
+             ! Affectation et calcul numérique
              phi = superbee(r)
+             ! Affectation et calcul numérique
              flux_x(i, j) = u_face * (c_l + 0.5_dp * phi * (1.0_dp - u_face * dt / dx) * dc_loc)
+          ! Branche par défaut si condition non satisfaite
           else
+             ! Affectation et calcul numérique
              i_down = min(nx + 1, i + 1)
+             ! Affectation et calcul numérique
              dc_up = fields%C(i_down, j) - c_r
+             ! Affectation et calcul numérique
              dc_loc = c_r - c_l
+             ! Évaluation de la condition logique
              if (abs(dc_loc) > 1.0e-12_dp) then
+                ! Affectation et calcul numérique
                 r = dc_up / dc_loc
+             ! Branche par défaut si condition non satisfaite
              else
+                ! Affectation et calcul numérique
                 r = 0.0_dp
              end if
+             ! Affectation et calcul numérique
              phi = superbee(r)
+             ! Affectation et calcul numérique
              flux_x(i, j) = u_face * (c_r - 0.5_dp * phi * (1.0_dp + u_face * dt / dx) * dc_loc)
           end if
        end do
@@ -346,32 +547,56 @@ contains
 
     ! Flux selon Y avec limiteur Superbee
     do j = 1, ny + 1
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
+          ! Affectation et calcul numérique
           v_face = fields%v(i, j)
+          ! Affectation et calcul numérique
           c_b = fields%C(i, j-1)
+          ! Affectation et calcul numérique
           c_t = fields%C(i, j)
 
+          ! Évaluation de la condition logique
           if (v_face >= 0.0_dp) then
+             ! Affectation et calcul numérique
              j_up = max(0, j - 2)
+             ! Affectation et calcul numérique
              dc_up = c_b - fields%C(i, j_up)
+             ! Affectation et calcul numérique
              dc_loc = c_t - c_b
+             ! Évaluation de la condition logique
              if (abs(dc_loc) > 1.0e-12_dp) then
+                ! Affectation et calcul numérique
                 r = dc_up / dc_loc
+             ! Branche par défaut si condition non satisfaite
              else
+                ! Affectation et calcul numérique
                 r = 0.0_dp
              end if
+             ! Affectation et calcul numérique
              phi = superbee(r)
+             ! Affectation et calcul numérique
              flux_y(i, j) = v_face * (c_b + 0.5_dp * phi * (1.0_dp - v_face * dt / dy) * dc_loc)
+          ! Branche par défaut si condition non satisfaite
           else
+             ! Affectation et calcul numérique
              j_down = min(ny + 1, j + 1)
+             ! Affectation et calcul numérique
              dc_up = fields%C(i, j_down) - c_t
+             ! Affectation et calcul numérique
              dc_loc = c_t - c_b
+             ! Évaluation de la condition logique
              if (abs(dc_loc) > 1.0e-12_dp) then
+                ! Affectation et calcul numérique
                 r = dc_up / dc_loc
+             ! Branche par défaut si condition non satisfaite
              else
+                ! Affectation et calcul numérique
                 r = 0.0_dp
              end if
+             ! Affectation et calcul numérique
              phi = superbee(r)
+             ! Affectation et calcul numérique
              flux_y(i, j) = v_face * (c_t - 0.5_dp * phi * (1.0_dp + v_face * dt / dy) * dc_loc)
           end if
        end do
@@ -379,49 +604,81 @@ contains
 
     ! Mise à jour conservative
     do j = 1, ny
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
+          ! Affectation et calcul numérique
           fx_in  = flux_x(i, j)
+          ! Affectation et calcul numérique
           fx_out = flux_x(i+1, j)
+          ! Affectation et calcul numérique
           fy_in  = flux_y(i, j)
+          ! Affectation et calcul numérique
           fy_out = flux_y(i, j+1)
 
+          ! Affectation et calcul numérique
           c_new(i, j) = fields%C(i, j) - (dt / dx) * (fx_out - fx_in) - (dt / dy) * (fy_out - fy_in)
+          ! Affectation et calcul numérique
           c_new(i, j) = max(0.0_dp, min(1.0_dp, c_new(i, j)))
        end do
     end do
 
+    ! Affectation et calcul numérique
     fields%C = c_new
+    ! Appel de sous-programme modulaire
     call exchange_halos_scalar(fields%C, mesh)
+    ! Appel de sous-programme modulaire
     call apply_vof_bc(fields, mesh, cfg)
 
+    ! Appel de sous-programme modulaire
     call update_physical_properties(fields, mesh, cfg)
+    ! Appel de sous-programme modulaire
     call compute_curvature_and_csf(fields, mesh, cfg)
 
+    ! Libération de la mémoire allouée
     deallocate(flux_x, flux_y, c_new)
   end subroutine advect_vof
 
+  ! [Procédure/Module] subroutine vof_init
   subroutine vof_init(this, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
     class(interface_vof_t), intent(inout) :: this
+    ! Déclaration de variable locale / paramètre de calcul
     type(config_t), intent(in) :: cfg
+    ! Affectation et calcul numérique
     this%cfg = cfg
   end subroutine vof_init
 
+  ! [Procédure/Module] subroutine vof_set_ic
   subroutine vof_set_ic(this, mesh, fields)
+    ! Déclaration de variable locale / paramètre de calcul
     class(interface_vof_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
     type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
     type(flow_fields_t), intent(inout) :: fields
+    ! Appel de sous-programme modulaire
     call set_initial_conditions(fields, mesh, this%cfg)
+    ! Appel de sous-programme modulaire
     call update_physical_properties(fields, mesh, this%cfg)
+    ! Appel de sous-programme modulaire
     call compute_curvature_and_csf(fields, mesh, this%cfg)
   end subroutine vof_set_ic
 
+  ! [Procédure/Module] subroutine vof_advect_step
   subroutine vof_advect_step(this, mesh, fields, dt)
+    ! Déclaration de variable locale / paramètre de calcul
     class(interface_vof_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
     type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
     type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
     real(dp), intent(in) :: dt
+    ! Appel de sous-programme modulaire
     call advect_vof(fields, mesh, this%cfg, dt)
+    ! Appel de sous-programme modulaire
     call update_physical_properties(fields, mesh, this%cfg)
+    ! Appel de sous-programme modulaire
     call compute_curvature_and_csf(fields, mesh, this%cfg)
   end subroutine vof_advect_step
 

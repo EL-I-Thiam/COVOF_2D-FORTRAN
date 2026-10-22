@@ -1,49 +1,48 @@
-# Manuel de Référence Développeur et Architecture Logicielle Fortran 2018 - Solveur FUGU 2D
-## Guide Complet de Conception Modulaire, d'Extension, de Parallélisme OpenMPI et d'Intégration Numérique
-### Version 2.1.0 — Conforme aux Standards de Développement Thétis (I2M / UMR CNRS 5295)
+# Manuel de Référence Développeur et Architecture Logicielle C++20 - Solveur COVOF 2D
+## Guide Complet de Conception, d'Extension, de Parallélisme et d'Intégration Numérique
+### Version 2.1.0 — Conforme aux Standards de Développement Référence Académique (I2M / UMR CNRS 5295)
 
 ---
 
 ## Sommaire Général
 
 1. [Principes de Conception et Architecture Logicielle](#1-principes-de-conception-et-architecture-logicielle)
-   - 1.1. Philosophie Fortran 2018 et Parallélisme OpenMPI
-   - 1.2. Cartographie des Responsabilités et Modules Fortran 2018
-   - 1.3. Cycle de Vie d'une Simulation FUGU 2D et Correspondance Fortran Thétis
+   - 1.1. Philosophie C++20 et Parallélisme Hybride
+   - 1.2. Cartographie des Responsabilités et Diagramme de Classes
+   - 1.3. Cycle de Vie d'une Simulation COVOF 2D et Correspondance Fortran Référence Académique
 2. [Structures de Données et Organisation Mémoire (Data-Oriented Design)](#2-structures-de-données-et-organisation-mémoire-data-oriented-design)
-   - 2.1. Maillage Décalé et Représentation Mémoire des Champs (`mesh_2d_t` et `flow_fields_t`)
+   - 2.1. Maillage Décalé et Représentation Mémoire des Champs (`Mesh2D` et `FlowFields`)
    - 2.2. Gestion des Cellules Fantômes (Ghost Cells / Halos) et Indexation Locale/Globale
-   - 2.3. Continuité Mémoire, Ordre Colonne Majeure et Vectorisation SIMD
-3. [Dictionnaire de Correspondance : Équations Théoriques vs Code Fortran](#3-dictionnaire-de-correspondance--équations-théoriques-vs-code-fortran)
+   - 2.3. Continuité Mémoire, Alignement de Cache et Vectorisation SIMD
+3. [Dictionnaire de Correspondance : Équations Théoriques vs Code C++](#3-dictionnaire-de-correspondance--équations-théoriques-vs-code-c)
 4. [Détail d'Implémentation des Modules Fondamentaux](#4-détail-dimplémentation-des-modules-fondamentaux)
-   - 4.1. Module de Communication et Parallélisme MPI (`module_mpi_comm.f90`)
-   - 4.2. Module d'Assemblage Navier-Stokes et Lagrangien Augmenté (`module_navier_stokes.f90`)
-   - 4.3. Module d'Énergie Thermique et Flottabilité Boussinesq (`solve_energy`)
-   - 4.4. Module de Suivi d'Interface VOF et Tension CSF (`module_interface_vof.f90`)
-   - 4.5. Module des Solveurs Linéaires et Préconditionneurs (`module_linear_solvers.f90`)
-   - 4.6. Module d'Écriture Graphique VTK Parallèle XML (`module_vtk_writer.f90`)
-5. [Guide Développeur : Étendre le Solveur FUGU 2D](#5-guide-développeur--étendre-le-solveur-fugu-2d)
-   - 5.1. Tutoriel 1 : Ajouter une Nouvelle Équation de Transport Scalaire
-   - 5.2. Tutoriel 2 : Implémenter un Nouveau Préconditionneur
+   - 4.1. Module de Communication et Parallélisme MPI (`MpiComm`)
+   - 4.2. Module d'Assemblage Navier-Stokes et Lagrangien Augmenté (`NavierStokesSolver`)
+   - 4.3. Module d'Énergie Thermique et Flottabilité (`solve_energy`)
+   - 4.4. Module de Suivi d'Interface et Tension de Surface (`InterfaceTracker`)
+   - 4.5. Module des Solveurs Linéaires et Préconditionneurs (`LinearSolver`)
+   - 4.6. Module d'Écriture Graphique VTK Parallèle (`VTKWriter`)
+5. [Guide Développeur : Étendre le Solveur COVOF 2D](#5-guide-développeur--étendre-le-solveur-fugu-2d)
+   - 5.1. Tutoriel 1 : Ajouter une Nouvelle Équation de Transport Scalaire (ex: Espèce Chimique)
+   - 5.2. Tutoriel 2 : Implémenter un Nouveau Préconditionneur (ex: Multigrille Géométrique)
    - 5.3. Tutoriel 3 : Implémenter un Nouveau Solveur Linéaire ou Brancher MUMPS / PETSc
    - 5.4. Tutoriel 4 : Définir une Nouvelle Condition aux Limites Dynamique ou une Loi de Paroi
    - 5.5. Tutoriel 5 : Ajouter une Nouvelle Géométrie d'Obstacle Immergé (Pénalisation Brinkman)
 6. [Normes de Développement, Assurance Qualité et Profilage](#6-normes-de-développement-assurance-qualité-et-profilage)
-   - 6.1. Conventions de Codage et Bonnes Pratiques Fortran 2018
-   - 6.2. Débogage sous OpenMPI avec GDB / LLDB et Valgrind
-   - 6.3. Profilage des Performances CPU et Analyse des Communications MPI
+   - 6.1. Conventions de Codage et Bonnes Pratiques C++20
+   - 6.2. Débogage sous MPI avec GDB / LLDB et Valgrind
+   - 6.3. Profilage des Performances CPU et Analyse des Bottlenecks de Communication
 
 ---
 
 ## 1. Principes de Conception et Architecture Logicielle
 
-### 1.1. Philosophie Fortran 2018 et Parallélisme OpenMPI
+### 1.1. Philosophie C++20 et Parallélisme Hybride
 
-Le code **FUGU 2D** a été intégralement développé selon le standard moderne **Fortran 2018**, alliant la pureté syntaxique scientifique, le découpage modulaire strict et les performances brutes du calcul haute performance (HPC) :
-- **Modules Autonomes et Types Dérivés Extensibles** : Chaque domaine fonctionnel est encapsulé dans son propre module (`module_mesh`, `module_fields`, `module_navier_stokes`, etc.) avec visibilité stricte (`private` par défaut, `public` explicite).
-- **Zéro Allocation Dynamique dans la Boucle Temporelle** : Toutes les mémoires de travail (champs MAC décalés, résidus de Krylov, vecteurs de travail BiCGSTAB2/GMRES, buffers de halo MPI) sont allouées une seule fois à l'initialisation dans `flow_fields_t`.
-- **Conception Matrix-Free et Opérateurs Stencil** : L'opérateur système $y = A \cdot x$ est évalué sans stocker la matrice globale géante, préservant la mémoire cache et maximisant la bande passante mémoire.
-- **Topologie Cartésienne Décentralisée** : Découpage 2D par `MPI_Cart_create` avec communications non-bloquantes (`MPI_Isend` / `MPI_Irecv`) et réductions globales.
+Le code **COVOF 2D** a été architecturé pour conjuguer la rigueur mathématique des méthodes de volumes finis historiques et les performances de pointe des architectures multinoyaux modernes :
+- **Zéro Allocation Dynamique dans la Boucle Temporelle** : Toutes les mémoires de travail (champs de vitesse, pression, température, vecteurs résidus Krylov, buffers MPI) sont préallouées lors de la phase d'initialisation. Aucun appel à `malloc`, `new` ou réallocation de `std::vector` n'intervient à chaque pas de temps, garantissant une absence totale de fragmentation mémoire et un débit d'exécution optimal.
+- **Conception Matrix-Free et Opérateurs Stencil** : L'application des opérateurs différentiels dans les méthodes de Krylov s'effectue directement par évaluation de stencils sur la grille cartésienne, minimisant les accès mémoire par rapport au stockage d'une matrice creuse au format CSR (Compressed Sparse Row).
+- **Parallélisme Hybride Décentralisé** : La synchronisation inter-cœurs repose sur une topologie cartésienne OpenMPI (`MPI_Cart_create`) avec communications non-bloquantes (`MPI_Isend` / `MPI_Irecv`) superposables au calcul des cellules internes.
 
 ### 1.2. Cartographie des Responsabilités et Diagramme de Classes
 
@@ -130,11 +129,11 @@ classDiagram
     LinearSolverBase --> PreconditionerBase
 ```
 
-### 1.3. Cycle de Vie d'une Simulation FUGU 2D et Correspondance Fortran Thétis
+### 1.3. Cycle de Vie d'une Simulation COVOF 2D et Correspondance Fortran Référence Académique
 
 À chaque pas de temps, la fonction maîtresse `Simulation::run()` exécute la séquence algorithmique suivante :
 
-| Étape Algorithmique FUGU 2D | Routine C++ FUGU | Équivalent Fortran 90 Thétis | Fonction Physique / Mathématique |
+| Étape Algorithmique COVOF 2D | Routine C++ FUGU | Équivalent Fortran 90 Référence Académique | Fonction Physique / Mathématique |
 |:---|:---|:---|:---|
 | **1. Calcul du Pas de Temps** | `compute_time_step()` | `CALDT` (`caldt.f90`) | Évalue la restriction CFL convective et capillaire |
 | **2. Transport d'Interface** | `InterfaceTracker::advect()` | `ADVECTS` (`advects.f90`) | Avance $C^{n+1}$ par VOF avec limiteur TVD Superbee |
@@ -193,7 +192,7 @@ for (int j = 1; j <= mesh.ny_local; ++j) {
 
 ## 3. Dictionnaire de Correspondance : Équations Théoriques vs Code C++
 
-| Grandeur Mathématique | Symbole Formel | Variable C++ dans FUGU 2D | Variable Fortran Thétis |
+| Grandeur Mathématique | Symbole Formel | Variable C++ dans COVOF 2D | Variable Fortran Référence Académique |
 |:---|:---:|:---|:---|
 | Champ de vitesse horizontale | $u(x, y)$ | `fields.u[idx]` | `U(I, J)` |
 | Champ de vitesse verticale | $v(x, y)$ | `fields.v[idx]` | `V(I, J)` |
@@ -268,7 +267,7 @@ void NavierStokesSolver::solve_energy(FlowFields& fields, double dt) {
 
 ---
 
-## 5. Guide Développeur : Étendre le Solveur FUGU 2D
+## 5. Guide Développeur : Étendre le Solveur COVOF 2D
 
 ### 5.1. Tutoriel 1 : Ajouter une Nouvelle Équation de Transport Scalaire (ex: Espèce Chimique)
 
@@ -339,10 +338,10 @@ Pour interfacer le solveur direct multifrontal parallèle **MUMPS** :
 Pour traquer une erreur de segmentation ou une corruption mémoire sur un calcul parallèle :
 ```bash
 # Lancement de GDB sur chaque rang MPI dans un terminal séparé (sous X11) :
-mpirun -np 2 xterm -e gdb --args bin/fugu2d cases/cavity_re1000.json
+mpirun -np 2 xterm -e gdb --args bin/covof2d cases/cavity_re1000.json
 
 # Vérification des fuites de mémoire avec Valgrind :
-mpirun -np 2 valgrind --leak-check=full --track-origins=yes bin/fugu2d cases/laplacian.json
+mpirun -np 2 valgrind --leak-check=full --track-origins=yes bin/covof2d cases/laplacian.json
 ```
 
 ### 6.3. Profilage des Performances CPU
@@ -354,10 +353,10 @@ cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
 make -j4
 
 # Enregistrement du profil matériel avec perf sous Linux :
-mpirun -np 2 perf record --call-graph dwarf bin/fugu2d cases/cavity_re1000.json
+mpirun -np 2 perf record --call-graph dwarf bin/covof2d cases/cavity_re1000.json
 perf report
 ```
-La répartition typique du temps de calcul dans une simulation FUGU 2D stabilisée est :
+La répartition typique du temps de calcul dans une simulation COVOF 2D stabilisée est :
 - Produit matrice-vecteur Krylov (`apply_A`) : **$65\,\% - 75\,\%$**
 - Préconditionnement Jacobi : **$10\,\% - 15\,\%$**
 - Échanges de halos MPI non-bloquants : **$5\,\% - 10\,\%$**
@@ -580,7 +579,7 @@ public:
 
 ## 9. Procédure de Contribution et Intégration Continue
 
-Pour proposer de nouveaux développements dans FUGU 2D :
+Pour proposer de nouveaux développements dans COVOF 2D :
 1. **Création d'une branche de travail** : `git checkout -b feature/mon_modele_physique`.
 2. **Implémentation et respect des règles C++20** (zéro allocation dynamique dans `run()`).
 3. **Validation obligatoire de non-régression** : L'exécution complète du script de benchmark doit produire **100% de PASS** :
@@ -589,3 +588,181 @@ Pour proposer de nouveaux développements dans FUGU 2D :
    python3 scripts/verify_cases.py
    ```
 4. **Documentation** : Mettre à jour `MATHEMATICAL_THEORY.md`, `USER_GUIDE.md` et `DEVELOPER_GUIDE.md` en conséquence.
+
+
+---
+
+## 10. Répertoire Exhaustif et Analyse Détaillée de Chaque Fichier Source
+
+Cette section dresse l'inventaire exhaustif et la spécification technique de chacun des fichiers sources et en-têtes constituant l'architecture logicielle de **COVOF 2D (C++17 et Fortran 2018)**.
+
+### 10.1. En-têtes et Modules C++17 (`COVOF_2D-C++/include/fugu/` et `src/`)
+
+#### 1. `include/fugu/Types.hpp`
+* **Rôle et Responsabilité** : Définition des structures de données scalaires et énumérations fortement typées (`enum class`) régissant les conditions aux limites, les types de solveurs et les obstacles immergés.
+* **Structures Clés** :
+  * `enum class BCType` : `DIRICHLET` (vitesse imposée), `NEUMANN` (sortie libre convective), `FREE_SLIP` (glissement parfait), `PERIODIC` (périodicité torique).
+  * `struct BoundaryCondition` : Définition des valeurs ($u, v, T$), profils d'entrée (`PARABOLIC`, `POISEUILLE_STEP`) et types thermiques associés.
+  * `struct Obstacle` : Définition géométrique d'obstacles solides immergés (`BOX`, `CYLINDER`), perméabilité de Darcy-Brinkman $K$.
+  * `struct FluidProperties` : Paramètres thermophysiques d'une phase ($ho, \mu, C_p, k,  eta$).
+  * `struct SolverOptions` : Paramétrage du Lagrangien augmenté ($r_{\text{al}}$, itérations d'Uzawa, tolérance de convergence $\epsilon$, type de préconditionneur).
+
+#### 2. `include/fugu/CSRMatrix.hpp` & `src/CSRMatrix.cpp`
+* **Rôle et Responsabilité** : Format de stockage creux Compressed Sparse Row (CSR) pour l'assemblage explicite de matrices locales creuses.
+* **Algorithmes & Structures** :
+  * Vecteurs `row_ptr` (taille $N+1$), `col_idx` (taille $NNZ$), `values` (taille $NNZ$), et `diag` (taille $N$).
+  * Méthode `set_from_triplets()` : Conversion en complexité $O(NNZ)$ avec somme cumulée pour la compression de lignes.
+  * Méthode `matvec()` : Produit matrice-vecteur creux optimisé pour le préchargement de cache L1/L2.
+  * Méthode `solve_jacobi()` : Relaxation itérative de Jacobi pour le préconditionnement local.
+
+#### 3. `include/fugu/Mesh.hpp` & `src/Mesh.cpp`
+* **Rôle et Responsabilité** : Topologie spatiale 2D, gestion du communicateur cartésien MPI, métrique géométrique et partitionnement de domaine.
+* **Algorithmes & Fonctions** :
+  * `init()` : Appel à `MPI_Dims_create` et `MPI_Cart_create` pour déterminer automatiquement la décomposition $(P_x, P_y)$ la plus carrée possible.
+  * Décalages de voisinage via `MPI_Cart_shift` pour identifier les 4 sous-domaines adjacents (`neighbor_west`, `neighbor_east`, `neighbor_south`, `neighbor_north`).
+  * Fonctions de coordonnées décalées : `x_face(i)` ($i-1/2$), `y_face(j)` ($j-1/2$), `x_center(i)` ($i$), `y_center(j)` ($j$).
+  * `is_in_obstacle()` : Test analytique d'inclusion géométrique pour la pénalisation de Brinkman.
+
+#### 4. `include/fugu/Field.hpp`
+* **Rôle et Responsabilité** : Conteneur des champs physiques discrétisés sur grille décalée MAC (Marker-And-Cell).
+* **Données Allouées** :
+  * Tableaux 2D continus indexés par $(i, j) \in [0, n_x+1] \times [0, n_y+1]$ (avec couche de cellules fantômes).
+  * Vitesse axiale $u(i-1/2, j)$, vitesse transversale $v(i, j-1/2)$, pression statique $p(i, j)$, divergence $\nabla \cdot \mathbf{u}(i, j)$.
+  * Fraction volumique VOF $C(i, j)$, température $T(i, j)$, masses volumiques $\rho, \rho_u, \rho_v$, viscosités dynamiques $\mu, \mu_{\text{node}}$.
+  * Forces capillaires $f_{x,\sigma}, f_{y,\sigma}$ et courbure d'interface $\kappa$.
+  * Masque solide `solid_mask` ($1$ pour solide, $0$ pour fluide).
+
+#### 5. `include/fugu/Config.hpp` & `src/Config.cpp`
+* **Rôle et Responsabilité** : Analyseur syntaxique JSON natif, validation des paramètres physiques et géométriques de la simulation.
+* **Fonctionnalités** :
+  * Extraction hiérarchique des sections `mesh`, `physics`, `time`, `boundary_conditions`, `solver`, `obstacle`, `output`.
+  * Remplissage automatique des valeurs par défaut pour les options omises.
+
+#### 6. `include/fugu/MpiComm.hpp` & `src/MpiComm.cpp`
+* **Rôle et Responsabilité** : Synchronisation distribuée des cellules fantômes (halos) par communications non-bloquantes OpenMPI.
+* **Algorithmes** :
+  * `exchange_halos_scalar()` : Échange des bords pour les champs centrés ($p, T, C, \rho, \mu$).
+  * `exchange_halos_u()` et `exchange_halos_v()` : Échange adapté à la grille décalée pour les composantes de vitesse sur faces.
+  * Utilisation systématique de paires `MPI_Isend` / `MPI_Irecv` associées à `MPI_Waitall` pour éviter tout interblocage (*deadlock*) et permettre le recouvrement calcul-communication.
+  * Application des conditions aux limites physiques (Dirichlet, Neumann, Free-Slip, Périodique) sur les frontières externes non partagées.
+
+#### 7. `include/fugu/Preconditioner.hpp` & `src/Preconditioner.cpp`
+* **Rôle et Responsabilité** : Interface abstraite et implémentation des préconditionneurs algébriques parallèles pour accélérer la convergence des méthodes de Krylov.
+* **Classes** :
+  * `IPreconditioner` : Interface de base avec méthode virtuelle pure `apply(r, z)`.
+  * `JacobiPreconditioner` : Préconditionneur diagonal par blocs $M = \text{diag}(A)$, complexité $O(1)$ sans échange réseau.
+  * `SSORPreconditioner` : Relaxation symétrique de Gauss-Seidel par étapes avant-arrière.
+
+#### 8. `include/fugu/LinearSolver.hpp` & `src/LinearSolver.cpp`
+* **Rôle et Responsabilité** : Implémentation des solveurs itératifs de sous-espace de Krylov Matrix-Free.
+* **Algorithmes Développés** :
+  * `BiCGSTAB2Solver` : Biconjugué Gradient Stabilisé d'ordre 2 (Sleijpen & van der Vorst 1993) avec minimisation polynomiale locale d'ordre 2 pour amortir les résonances asymétriques.
+  * `BiCGSTABSolver` : BiCGSTAB classique (van der Vorst 1992).
+  * `PCGSolver` : Gradient Conjugué Préconditionné pour opérateurs symétriques définis positifs.
+  * `GMRESSolver` : Résolution par orthogonalisation de modified Gram-Schmidt avec rotation de Givens.
+  * Réductions globales `MPI_Allreduce` pour le calcul distribué des produits scalaires $\langle u, v \rangle = \sum_i u_i v_i$.
+
+#### 9. `include/fugu/InterfaceTracker.hpp` & `src/InterfaceTracker.cpp`
+* **Rôle et Responsabilité** : Capture d'interface diphasique par la méthode Volume-Of-Fluid (VOF) et modélisation de la tension de surface CSF.
+* **Formulations Numériques** :
+  * Advection géométrique par limiteur de flux non-linéaire **TVD Superbee** garantissant la stricte conservation du volume et le maintien d'une épaisseur d'interface de 1 à 2 cellules.
+  * Calcul des normales unitaires $\mathbf{n} = \frac{\nabla C}{\|\nabla C\| + \epsilon}$ par différences finies centrées.
+  * Évaluation de la courbure locale $\kappa = -\nabla \cdot \mathbf{n}$.
+  * Calcul de la force volumique de Brackbill $\mathbf{f}_\sigma = \sigma \kappa \nabla C$ projetée sur les faces décalées $u$ et $v$.
+
+#### 10. `include/fugu/NavierStokesSolver.hpp` & `src/NavierStokesSolver.cpp`
+* **Rôle et Responsabilité** : Cœur hydrodynamique résolvant les équations de Navier-Stokes incompressibles couplées à l'énergie thermique.
+* **Schémas Discrets Spécifiés** :
+  * **Convection semi-implicite** : Termes advectifs $(\mathbf{u}\cdot\nabla)\mathbf{u}$ discrétisés par schéma centré d'ordre 2 ou décentré upwind.
+  * **Diffusion visqueuse à tenseur complet** : $\nabla \cdot (\mu (\nabla \mathbf{u} + \nabla^T \mathbf{u}))$ avec interpolation harmonique de la viscosité aux nœuds :
+    $$\mu_{i+1/2, j+1/2} = \frac{4}{\frac{1}{\mu_{i,j}} + \frac{1}{\mu_{i+1,j}} + \frac{1}{\mu_{i,j+1}} + \frac{1}{\mu_{i+1,j+1}}}$$
+  * **Lagrangien Augmenté & Uzawa** : Terme de pénalité de divergence $-r_{\text{al}} \nabla(\nabla \cdot \mathbf{u})$ et mise à jour de pression $p^{m+1} = p^m - r_{\text{al}} (\nabla \cdot \mathbf{u}^{m+1})$.
+  * **Thermique & Boussinesq** : Résolution de l'advection-diffusion de température et force de flottabilité $\mathbf{f}_b = -\rho \beta (T - T_0)\mathbf{g}$.
+  * **Pénalisation de Brinkman** : Terme de traînée volumique $\frac{\mu}{K} \mathbf{u}$ forçant $\mathbf{u} = \mathbf{0}$ à l'intérieur des obstacles rigides sans maillage non structuré.
+
+#### 11. `include/fugu/VTKWriter.hpp` & `src/VTKWriter.cpp`
+* **Rôle et Responsabilité** : Générateur de visualisations volumiques et surfaciques au standard XML VTK.
+* **Fichiers Produits** :
+  * Fichiers de sous-domaines partitionnés `.vtr` (*RectilinearGrid*) écrits par chaque processus MPI de façon indépendante et parallèle.
+  * Fichier maître coordinateur `.pvtr` (*ParallelRectilinearGrid*) référençant les sous-domaines locaux, directement lisible par ParaView.
+
+#### 12. `include/fugu/Simulation.hpp` & `src/Simulation.cpp`
+* **Rôle et Responsabilité** : Orchestration de la boucle temporelle, régulation adaptative du pas de temps sous contrainte CFL, gestion des sorties et modes de vérification.
+* **Fonctions Spécialisées** :
+  * Régulation adaptative $\Delta t = \min\left(\text{CFL} \frac{\Delta x}{\|\mathbf{u}\|_{\max}}, \frac{\rho \Delta x^2}{4\mu}\right)$.
+  * Mode analytique Laplacien (Cas 3.1) avec calcul des normes d\'erreur $L_1, L_2, L_\infty$.
+  * Mode advection vortex réversible (Cas 3.19) avec inversion du champ de vitesse à $t = T/2$ et mesure de la conservation géométrique.
+
+#### 13. `src/main.cpp`
+* **Rôle et Responsabilité** : Point d\'entrée en ligne de commande, gestion des signaux, instanciation et capture d\'erreurs.
+
+---
+
+### 10.2. Architecture Modulaire Fortran 2018 (`COVOF_2D-FORTRAN/src/`)
+
+L'implémentation Fortran 2018 reproduit rigoureusement l'intégralité des algorithmes ci-dessus à travers 12 modules autonomes exploitant les fonctionnalités modernes du langage (modules, types dérivés, stockage contigu en colonnes `column-major`, `iso_fortran_env`) :
+
+1. **`module_precision.f90`** : Typage standardisé `real(dp)` (`selected_real_kind(15, 307)`).
+2. **`module_constants.f90`** : Constantes mathématiques, codes de conditions limites et énumérations physiques.
+3. **`module_json.f90`** : Parseur JSON pur Fortran opérant sur des tampons de caractères continus.
+4. **`module_config.f90`** : Structure `config_t` et extraction des paramètres du calcul.
+5. **`module_mesh.f90`** : Topologie 2D MPI cartésienne, coordonnées métriques de faces et barycentres.
+6. **`module_fields.f90`** : Type `flow_fields_t` encapsulant l'ensemble des tableaux 2D alloués une unique fois.
+7. **`module_mpi_comm.f90`** : Communications asynchrones `MPI_Isend` / `MPI_Irecv` et synchronisation des bords.
+8. **`module_interface_vof.f90`** : Schéma VOF-TVD Superbee et modèle capillaire CSF.
+9. **`module_linear_solvers.f90`** : Algorithmes itératifs BiCGSTAB2, PCG et GMRES Matrix-Free.
+10. **`module_navier_stokes.f90`** : Discrétisation spatialisée des équations Navier-Stokes, Boussinesq et Brinkman.
+11. **`module_vtk_writer.f90`** : Génération des fichiers XML rectilinéaires `.pvtr` / `.vtr`.
+12. **`module_simulation.f90`** : Boucle temporelle, gestion du pas de temps adaptatif CFL et cas vérifications.
+13. **`fugu2d_main.f90`** : Programme principal exécutable.
+
+---
+
+## 11. Bibliographie Académique Complète et Répertoire des Fondations Théoriques
+
+Cette section rassemble les publications scientifiques de référence dont les modèles mathématiques et numériques sont directement implémentés dans **COVOF 2D** :
+
+1. **Harlow, F. H., & Welch, J. E. (1965)**. *Numerical Calculation of Time-Dependent Viscous Incompressible Flow of Fluid with Free Surface*. The Physics of Fluids, 8(12), 2182–2189. [DOI: 10.1063/1.1761178]  
+   *Contribution* : Introduction historique de la grille décalée MAC (Marker-And-Cell) éliminant les modes parasites en damier (*checkerboard modes*). Implémenté dans `Mesh`, `Field`, `module_mesh.f90` et `module_fields.f90`.
+
+2. **Fortin, M., & Glowinski, R. (1983)**. *Augmented Lagrangian Methods: Applications to the Numerical Solution of Boundary-Value Problems*. Studies in Mathematics and its Applications, Vol. 15, North-Holland, Amsterdam.  
+   *Contribution* : Formalisation mathématique de l'algorithme du Lagrangien Augmenté et actualisation de pression d'Uzawa pour forcer la contrainte d'incompressibilité sans matrice de projection découplée. Implémenté dans `NavierStokesSolver` et `module_navier_stokes.f90`.
+
+3. **Brackbill, J. U., Kothe, D. B., & Zemach, C. (1992)**. *A continuum method for modeling surface tension*. Journal of Computational Physics, 100(2), 335–354. [DOI: 10.1016/0021-9991(92)90240-Y]  
+   *Contribution* : Méthode Continuum Surface Force (CSF) convertissant la tension interfaciale en une force volumique équivalente proportionnelle à la courbure locale et au gradient de fraction volumique. Implémenté dans `InterfaceTracker` et `module_interface_vof.f90`.
+
+4. **Sleijpen, G. L., & van der Vorst, H. A. (1993)**. *BiCGSTAB(l) for linear equations involving unsymmetric matrices with complex spectrum*. Electronic Transactions on Numerical Analysis, 1, 11–32.  
+   *Contribution* : Algorithme BiCGSTAB($l$) d'ordre 2 réduisant drastiquement les oscillations et stagnations du BiCGSTAB standard sur les matrices asymétriques issues des opérateurs de convection-diffusion raides. Implémenté dans `LinearSolver` et `module_linear_solvers.f90`.
+
+5. **Roe, P. L. (1986)**. *Characteristic-Based Schemes for the Euler Equations*. Annual Review of Fluid Mechanics, 18(1), 337–365. [DOI: 10.1146/annurev.fl.18.010186.002005]  
+   *Contribution* : Théorie des limiteurs de flux TVD (Total Variation Diminishing) et formulation du limiteur haute résolution Superbee préservant la netteté des discontinuités d'interface. Implémenté dans `InterfaceTracker` et `module_interface_vof.f90`.
+
+6. **Angot, P., Bruneau, C. H., & Fabrie, P. (1999)**. *A penalization method to take into account obstacles in incompressible viscous flows*. Numerische Mathematik, 81(4), 497–520. [DOI: 10.1007/s002110050401]  
+   *Contribution* : Justification mathématique et analyse de convergence de la méthode de pénalisation volumique de Darcy-Brinkman pour la modélisation de corps solides sans remaillage non structuré. Implémenté dans `NavierStokesSolver` et `module_navier_stokes.f90`.
+
+7. **Saad, Y., & Schultz, M. H. (1986)**. *GMRES: A Generalized Minimal Residual Algorithm for Solving Nonsymmetric Linear Systems*. SIAM Journal on Scientific and Statistical Computing, 7(3), 856–869. [DOI: 10.1137/0907058]  
+   *Contribution* : Algorithme d'orthogonalisation de Krylov optimal pour la résolution des systèmes linéaires non symétriques. Implémenté dans `LinearSolver` et `module_linear_solvers.f90`.
+
+8. **Ghia, U., Ghia, K. N., & Shin, C. T. (1982)**. *High-Re solutions for incompressible flow using the Navier-Stokes equations and a multigrid method*. Journal of Computational Physics, 48(3), 387–411. [DOI: 10.1016/0021-9991(82)90058-4]  
+   *Contribution* : Solution numérique de référence et profils de vitesse axiaux et transversaux pour la cavité entraînée à $Re=100, 400, 1000$. Utilisé pour la validation du Cas 4.5.
+
+9. **Armaly, B. F., Durst, F., Pereira, J. C. F., & Schönung, B. (1983)**. *Experimental and theoretical investigation of backward-facing step flow*. Journal of Fluid Mechanics, 127, 473–496. [DOI: 10.1017/S0022112083002839]  
+   *Contribution* : Données expérimentales et numériques sur la longueur de recirculation et de recollement de couche limite en aval d'une marche descendante. Utilisé pour la validation du Cas 4.1.
+
+10. **de Vahl Davis, G. (1983)**. *Natural convection of air in a square cavity: A bench mark numerical solution*. International Journal for Numerical Methods in Fluids, 3(3), 249–264. [DOI: 10.1002/fld.1650030305]  
+    *Contribution* : Benchmark numérique de référence pour la convection naturelle sous approximation de Boussinesq dans une cavité carrée différentiellement chauffée ($Ra=10^4$). Utilisé pour la validation du Cas 6.1.
+
+11. **Martin, J. C., & Moyce, W. J. (1952)**. *An experimental study of the collapse of liquid columns on a rigid horizontal plane*. Philosophical Transactions of the Royal Society of London. Series A, 244(882), 312–324. [DOI: 10.1098/rsta.1952.0006]  
+    *Contribution* : Mesures expérimentales de la cinétique d'effondrement et de la vitesse du front d'onde pour une colonne d'eau sous gravité (rupture de barrage). Utilisé pour la validation du Cas 7.1.
+
+12. **Hysing, S., Turek, S., Kuzmin, D., Parolini, N., Burman, E., Ganesan, S., & Tobiska, L. (2009)**. *Quantitative benchmark computations of two-dimensional bubble dynamics*. International Journal for Numerical Methods in Fluids, 60(11), 1259–1288. [DOI: 10.1002/fld.1934]  
+    *Contribution* : Benchmark numérique rigoureux pour les écoulements diphasiques incompressibles à interface déformable (bulle ascendante dans un fluide visqueux). Utilisé pour la validation du Cas 7.5.
+
+13. **Szymanski, P. (1932)**. *Quelques solutions exactes des équations de l'hydrodynamique de fluide visqueux dans le cas d'un tube cylindrique*. Journal de Mathématiques Pures et Appliquées, 9e série, 11, 67–107.  
+    *Contribution* : Dérivation de la solution analytique instationnaire exacte par décomposition en série de Fourier pour l'établissement de l'écoulement de Poiseuille. Utilisé pour la vérification du Cas 3.8.
+
+14. **Caltagirone, J. P. (2007)**. *Mécanique des milieux continus et des fluides*. Éditions Lavoisier, Paris.  
+    *Contribution* : Formulations variationnelles, discrétisations conservatrices des équations de transport multiphasiques et couplages vitesse-pression par Lagrangien augmenté.
+
+15. **Patankar, S. V. (1980)**. *Numerical Heat Transfer and Fluid Flow*. Hemisphere Publishing Corporation, Taylor & Francis Group, New York.  
+    *Contribution* : Fondements de la discrétisation par volumes finis, traitement des conditions aux limites et concepts de discrétisation sur grille décalée.

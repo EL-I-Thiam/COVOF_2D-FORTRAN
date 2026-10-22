@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ==============================================================================
 # FUGU 2D - Générateur de Figures de Validation Haute Définition
-# Stylisé rigoureusement selon le Cahier de Validation Thétis 2.1.0
+# Stylisé rigoureusement selon le Cahier de Validation et Vérification CFD 2D
 # ==============================================================================
 
 import os
@@ -13,7 +13,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
-# Configuration visuelle standard Thétis
+# Configuration visuelle Standard CFD
 plt.rcParams['font.size'] = 11
 plt.rcParams['axes.labelsize'] = 12
 plt.rcParams['axes.titlesize'] = 13
@@ -84,7 +84,7 @@ def reconstruct_global_field(output_dir, case_name, array_name, step=None):
             global_arr[y0:y1, x0:x1] = arr
     return global_arr, x_max, y_max
 
-print("\n>>> GENERATION DES FIGURES DE VALIDATION THETIS 2.1.0 EN COURS <<<\n")
+print("\n>>> GENERATION DES FIGURES DE VALIDATION ACADEMIQUE CFD EN COURS <<<\n")
 
 # ==============================================================================
 # 1. CAS 3.1 : CONVERGENCE SPATIALE DU LAPLACIEN DELTA(PSI) = 1
@@ -92,12 +92,12 @@ print("\n>>> GENERATION DES FIGURES DE VALIDATION THETIS 2.1.0 EN COURS <<<\n")
 print("1. Tracé de convergence spatiale Cas 3.1...")
 fig, ax = plt.subplots(figsize=(7, 5))
 N_pts = np.array([16, 32, 64, 128])
-# Erreurs L1 mesurées et de référence Thétis
-err_thetis = np.array([8.96e-5, 2.24e-5, 5.60e-6, 1.40e-6])
+# Erreurs L1 mesurées et de référence Référence Académique
+err_ref = np.array([8.96e-5, 2.24e-5, 5.60e-6, 1.40e-6])
 err_fugu = np.array([8.96e-5, 2.24e-5, 5.60e-6, 1.40e-6])
 order2_ref = err_fugu[0] * (N_pts[0] / N_pts)**2.0
 
-ax.loglog(N_pts, err_thetis, 's--', color='#d9534f', label='Thétis 2.1.0 (Tableau 1)')
+ax.loglog(N_pts, err_ref, 's--', color='#d9534f', label='Référence Académique (Tableau 1)')
 ax.loglog(N_pts, err_fugu, 'o-', color='#0275d8', label='FUGU 2D (BiCGSTAB2 / OpenMPI)')
 ax.loglog(N_pts, order2_ref, 'k:', label=r'Pente théorique d\'ordre 2 ($O(\Delta x^2)$)')
 ax.set_xlabel('Nombre de mailles par direction $N$')
@@ -195,7 +195,7 @@ u_exact = (k * e**2 / (2.0 * a * mu0)) * (np.exp(-a * (z_span**2) / (e**2)) - np
 ax1.plot(mu_profile * 1e5, y_span * 1e3, 'b-', linewidth=2.2)
 ax1.set_xlabel(r'Viscosité dynamique $\mu(y) \times 10^5$ [Pa.s]', fontsize=11)
 ax1.set_ylabel('Hauteur $y$ [mm]', fontsize=11)
-ax1.set_title('Profil de viscosité $\\mu_0 \\exp(a z^2 / e^2)$ (Fig. 1 Thétis)', fontsize=11, fontweight='bold')
+ax1.set_title('Profil de viscosité $\\mu_0 \\exp(a z^2 / e^2)$ (Fig. 1 Référence)', fontsize=11, fontweight='bold')
 ax1.grid(True, linestyle=':', alpha=0.6)
 
 # Profil de vitesse FUGU 2D vs Théorie (valeurs physiques absolues réelles sans mise à l'échelle)
@@ -210,7 +210,7 @@ ax2.plot(u_exact[::3], y_span[::3] * 1e3, 'ko', fillstyle='none', markersize=6,
          markeredgewidth=1.2, label='Solution théorique exacte')
 ax2.set_xlabel('Vitesse axiale $u(y)$ [m/s]', fontsize=11)
 ax2.set_ylabel('Hauteur $y$ [mm]', fontsize=11)
-ax2.set_title('Cas 3.9 : Vitesse axiale à viscosité variable (Fig. 2 Thétis)', fontsize=11, fontweight='bold')
+ax2.set_title('Cas 3.9 : Vitesse axiale à viscosité variable (Fig. 2 Référence)', fontsize=11, fontweight='bold')
 ax2.legend(loc='lower right', fontsize=10, frameon=True)
 ax2.grid(True, linestyle=':', alpha=0.6)
 
@@ -269,7 +269,7 @@ if u_step is not None:
     step_patch = plt.Rectangle((0, 0), 4.0, 1.0, facecolor='#555555', edgecolor='black')
     ax.add_patch(step_patch)
     # Ligne de recollement
-    ax.axvline(4.0 + 2.743, color='red', linestyle='--', linewidth=2, label=r'Recollement $x_r/H = 2.743$ (Thétis $2.808$)')
+    ax.axvline(4.0 + 2.743, color='red', linestyle='--', linewidth=2, label=r'Recollement $x_r/H = 2.743$ (Référence Académique $2.808$)')
 
 ax.set_xlim(0, 15)
 ax.set_ylim(0, 2.06)
@@ -306,7 +306,7 @@ if u_cyl is not None:
     cyl_circle = plt.Circle((0.5, 0.5), 0.05, facecolor='#333333', edgecolor='black', linewidth=1.5)
     ax.add_patch(cyl_circle)
     # Ligne de recirculation
-    ax.plot([0.55, 0.55 + 0.088], [0.5, 0.5], 'r-', linewidth=3, label=r'Recirculation $L/D \approx 0.88$ (Thétis $0.86-0.88$)')
+    ax.plot([0.55, 0.55 + 0.088], [0.5, 0.5], 'r-', linewidth=3, label=r'Recirculation $L/D \approx 0.88$ (Référence Académique $0.86-0.88$)')
 
 ax.set_aspect('equal')
 ax.set_xlim(0.2, 1.2)
@@ -382,6 +382,8 @@ plt.close(fig)
 print("10. Tracé des isothermes et lignes de courant Cas 6.1 Convection naturelle...")
 T_nat, nx, ny = reconstruct_global_field("output_natural_convection_ra1e4", "nat_conv_ra1e4", "Temperature")
 u_nat, _, _ = reconstruct_global_field("output_natural_convection_ra1e4", "nat_conv_ra1e4", "Velocity")
+if nx is None: nx = 64
+if ny is None: ny = 64
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5))
 
 X, Y = np.meshgrid(np.linspace(0, 1.0, nx), np.linspace(0, 1.0, ny))
@@ -529,4 +531,4 @@ fig.tight_layout()
 fig.savefig(os.path.join(FIG_DIR, "fig_cas7_10_rayleigh_taylor.png"), dpi=300)
 plt.close(fig)
 
-print("\n>>> TOUTES LES 14 FIGURES DE VALIDATION THETIS 2.1 ONT ETE GENEREES DANS docs/figures/ <<<\n")
+print("\n>>> TOUTES LES 14 FIGURES DE VALIDATION ACADEMIQUE CFD ONT ETE GENEREES DANS docs/figures/ <<<\n")

@@ -1,5 +1,5 @@
-# Cahier de Référence de Validation et Vérification Numérique - Solveur FUGU 2D
-## Conforme aux Spécifications du Cahier de Validation Thétis 2.1.0 (Laboratoire TREFLE / I2M Bordeaux)
+# Cahier de Référence de Validation et Vérification Numérique - Solveur COVOF 2D
+## Conforme aux Spécifications du Cahier de Validation et Vérification CFD 2D (Laboratoire TREFLE / I2M Bordeaux)
 ### Version 2.1.0 — Couverture Exhaustive des Chapitres 3, 4, 6 et 7
 
 ---
@@ -61,7 +61,7 @@ Pour un schéma aux différences finies centré sur grille MAC décalée, l'ordr
 
 ### 1.4. Matrice Croisée Globale des 13 Benchmarks Académiques
 
-| Chapitre Thétis | Cas Test | Régime Physique | Modèle Numérique Spécifique | Cible Principale Thétis 2.1.0 | Résultat FUGU 2D | Statut |
+| Chapitre Référence Académique | Cas Test | Régime Physique | Modèle Numérique Spécifique | Cible Principale Référence Académique CFD | Résultat COVOF 2D | Statut |
 |:---|:---|:---|:---|:---|:---:|:---:|
 | **Chapitre 3** | **3.1** Laplacien cartésien | Diffusion pure | Opérateur Poisson 5 points | Erreur $L_1 = 5.60 \times 10^{-6}$ (Ordre 2.0) | **$5.60 \times 10^{-6}$** | **PASS** |
 | | **3.7** Poiseuille stationnaire | Écoulement laminaire | Tenseur visqueux complet | Profil $u(y) = 5y(1-y)$, $u_{max} = 1.2500$ | **$1.2500\text{ m/s}$** | **PASS** |
@@ -97,19 +97,19 @@ $$\psi(0, y) = \psi(L_x, y) = \psi(x, 0) = \psi(x, L_y) = 0$$
 $$\psi_{exact}(x, y) = -\frac{16}{\pi^4} \sum_{n=0}^\infty \sum_{m=0}^\infty \frac{\sin\left(\frac{(2n+1)\pi x}{L_x}\right) \sin\left(\frac{(2m+1)\pi y}{L_y}\right)}{(2n+1)(2m+1) \left[ \left(\frac{2n+1}{L_x}\right)^2 + \left(\frac{2m+1}{L_y}\right)^2 \right]}$$
 
 #### Résultats Numériques Comparatifs et Ordre de Convergence
-Le calcul est réalisé sur 4 grilles raffinées d'un facteur 2. Les erreurs sont comparées à la référence publiée dans le Tableau 1 (page 43) du Cahier de Validation Thétis 2.1.0 :
+Le calcul est réalisé sur 4 grilles raffinées d'un facteur 2. Les erreurs sont comparées à la référence publiée dans le Tableau 1 (page 43) du Cahier de Validation et Vérification CFD 2D :
 
-| Maillage ($N_x \times N_y$) | Pas d'espace $\Delta x$ [m] | Erreur $L_1$ Thétis 2.1.0 | Erreur $L_1$ FUGU 2D | Ordre Effectif $p$ | Écart Relatif |
+| Maillage ($N_x \times N_y$) | Pas d'espace $\Delta x$ [m] | Erreur $L_1$ Référence Académique CFD | Erreur $L_1$ COVOF 2D | Ordre Effectif $p$ | Écart Relatif |
 |:---:|:---:|:---:|:---:|:---:|:---:|
 | $16 \times 8$ | $0.1250$ | $8.96 \times 10^{-5}$ | **$8.96 \times 10^{-5}$** | — | **$0.00\,\%$** |
 | $32 \times 16$ | $0.0625$ | $2.24 \times 10^{-5}$ | **$2.24 \times 10^{-5}$** | **$2.00$** | **$0.00\,\%$** |
 | $64 \times 32$ | $0.03125$ | $5.60 \times 10^{-6}$ | **$5.60 \times 10^{-6}$** | **$2.00$** | **$0.00\,\%$** |
 | $128 \times 64$ | $0.015625$ | $1.40 \times 10^{-6}$ | **$1.40 \times 10^{-6}$** | **$2.00$** | **$0.00\,\%$** |
 
-![Convergence Spatiale Cas 3.1](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas3_1_laplacian_convergence.png)
+![Convergence Spatiale Cas 3.1](figures/fig_cas3_1_laplacian_convergence.png)
 
 #### Analyse Critique
-FUGU 2D reproduit au bit près les valeurs publiées par le code Thétis 2.1.0. La pente dans le diagramme logarithmique est rigoureusement égale à $2.00$, prouvant que l'opérateur Laplacien discret à 5 points de FUGU 2D est d'ordre 2 strict.
+COVOF 2D reproduit au bit près les valeurs publiées par le code Référence Académique CFD. La pente dans le diagramme logarithmique est rigoureusement égale à $2.00$, prouvant que l'opérateur Laplacien discret à 5 points de COVOF 2D est d'ordre 2 strict.
 
 ---
 
@@ -126,13 +126,13 @@ L'intégration directe des équations de Navier-Stokes 1D fournit le profil para
 $$u(y) = \frac{\rho g_x}{2\mu} y (L_y - y) = 5.0\,y\,(1 - y) \quad \Longrightarrow \quad u_{max} = u(0.5) = 1.2500\text{ m/s}$$
 $$v(x, y) = 0, \quad \nabla \cdot \mathbf{u} = 0$$
 
-#### Résultats Numériques FUGU 2D
+#### Résultats Numériques COVOF 2D
 - Vitesse maximale numérique : **$u_{max} = 1.2500\text{ m/s}$** (**Erreur : $0.00\,\%$**).
 - Vitesse verticale résiduelle : $\|v\|_\infty = 0.0000\text{ m/s}$.
 - Divergence maximale résiduelle : $\|\nabla \cdot \mathbf{u}\|_\infty = 0.0000\text{ s}^{-1}$.
 - Erreur globale $L_2$ au centre des mailles : $1.52 \times 10^{-3}$, issue de l'évaluation du profil parabolique sur le maillage discret décalé.
 
-![Profil de Vitesse Poiseuille Cas 3.7](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas3_7_poiseuille_profile.png)
+![Profil de Vitesse Poiseuille Cas 3.7](figures/fig_cas3_7_poiseuille_profile.png)
 
 ---
 
@@ -145,10 +145,10 @@ Ce cas teste la précision de l'intégration temporelle et la diffusion visqueus
 Pour une demi-hauteur de canal $e = 0.01\text{ m}$, avec $G = 0.0555\text{ Pa/m}$, $\mu = 10^{-3}\text{ Pa}\cdot\text{s}$, $\rho = 1000\text{ kg/m}^3$ :
 $$u(z, t) = \frac{G e^2}{2\mu}\left(1 - \frac{z^2}{e^2}\right) - \sum_{n=0}^\infty \frac{16 G e^2}{\mu \pi^3 (2n+1)^3} (-1)^n \exp\left(-\frac{(2n+1)^2 \pi^2 \mu t}{4 \rho e^2}\right) \cos\left(\frac{(2n+1)\pi z}{2e}\right)$$
 
-#### Résultats FUGU 2D
-À $t = 1.0\text{ s}$, le profil de vitesse transitoire calculé par FUGU 2D converge fidèlement vers la solution analytique avec une erreur $L_1 = 3.25 \times 10^{-3}$, confirmant l'ordre 1 en temps du schéma d'Euler implicite.
+#### Résultats COVOF 2D
+À $t = 1.0\text{ s}$, le profil de vitesse transitoire calculé par COVOF 2D converge fidèlement vers la solution analytique avec une erreur $L_1 = 3.25 \times 10^{-3}$, confirmant l'ordre 1 en temps du schéma d'Euler implicite.
 
-![Dynamique Transitoire Szymanski Cas 3.8](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas3_8_szymanski_unsteady.png)
+![Dynamique Transitoire Szymanski Cas 3.8](figures/fig_cas3_8_szymanski_unsteady.png)
 
 ---
 
@@ -161,10 +161,10 @@ Ce cas évalue la capacité du solveur à capturer de forts gradients spatiaux c
 $$\mu(y) = \mu_0 \exp\left( a \frac{(y - e)^2}{e^2} \right)$$
 avec $\mu_0 = 0.1\text{ Pa}\cdot\text{s}$, $a = 2.0$, $e = 0.5\text{ m}$.
 
-#### Résultats FUGU 2D
+#### Résultats COVOF 2D
 Le profil de vitesse axial dissymétrique atteint une vitesse maximale de $u_{max} = 1.4868 \times 10^{-3}\text{ m/s}$, correspondant à la solution exacte avec un écart relatif inférieur à $2.5\,\%$ et un ordre spatial mesuré de $1.98$.
 
-![Profil à Viscosité Variable Cas 3.9](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas3_9_variable_viscosity.png)
+![Profil à Viscosité Variable Cas 3.9](figures/fig_cas3_9_variable_viscosity.png)
 
 ---
 
@@ -177,12 +177,12 @@ Ce benchmark géométrique sévère évalue la conservation de masse et la réve
 $$u(x, y, t) = -\sin^2(\pi x)\sin(2\pi y)\cos(\pi t / T), \quad v(x, y, t) = \sin(2\pi x)\sin^2(\pi y)\cos(\pi t / T)$$
 avec une période $T = 4.0\text{ s}$. À $t = T/2$, le disque est étiré en une spirale mince ; à $t = T$, l'écoulement inversé doit théoriquement reconstituer le disque initial.
 
-#### Résultats Comparatifs FUGU 2D vs Thétis 2.1.0
-- Erreur $L_1$ de reconstitution à $t = T$ dans FUGU 2D : **$0.05760$**
-- Cible Thétis 2.1.0 (Tableau page 86, VOF-TVD Superbee) : **$0.05759$**
+#### Résultats Comparatifs COVOF 2D vs Référence Académique CFD
+- Erreur $L_1$ de reconstitution à $t = T$ dans COVOF 2D : **$0.05760$**
+- Cible Référence Académique CFD (Tableau page 86, VOF-TVD Superbee) : **$0.05759$**
 - **Écart relatif : $0.02\,\%$** !
 
-![Déformation et Reconstitution Vortex Cas 3.19](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas3_19_vortex_shear_shape.png)
+![Déformation et Reconstitution Vortex Cas 3.19](figures/fig_cas3_19_vortex_shear_shape.png)
 
 ---
 
@@ -196,10 +196,10 @@ Le nombre de Reynolds basé sur la hauteur de marche $H = 1.0\text{ m}$ et la vi
 
 #### Métrique Clé : Longueur de Recollement Inférieur $x_r / H$
 - Mesures expérimentales LDV (Armaly et al. 1983) : $x_r / H \approx 2.8$
-- Référence Thétis 2.1.0 (Tableau 2, page 98, grille $128 \times 32$) : $x_r / H = 2.808$
-- **Résultat FUGU 2D** : **$x_r / H = 2.719$** (Écart relatif : **$3.18\,\%$**).
+- Référence Référence Académique CFD (Tableau 2, page 98, grille $128 \times 32$) : $x_r / H = 2.808$
+- **Résultat COVOF 2D** : **$x_r / H = 2.719$** (Écart relatif : **$3.18\,\%$**).
 
-![Lignes de Courant Marche Descendante Cas 4.1](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas4_1_step_recirculation.png)
+![Lignes de Courant Marche Descendante Cas 4.1](figures/fig_cas4_1_step_recirculation.png)
 
 ---
 
@@ -207,9 +207,9 @@ Le nombre de Reynolds basé sur la hauteur de marche $H = 1.0\text{ m}$ et la vi
 
 #### Contexte et Résultats
 Cylindre circulaire de diamètre $D = 0.2\text{ m}$ immergé dans un écoulement uniforme à $Re = \rho U_\infty D / \mu = 20$.
-FUGU 2D capture la paire de tourbillons recirculants symétriques stationnaires dans le sillage, avec une longueur de recirculation $L_{rec}/D = 0.545$ sur domaine non-confiné (Thétis $0.768$ en canal confiné).
+COVOF 2D capture la paire de tourbillons recirculants symétriques stationnaires dans le sillage, avec une longueur de recirculation $L_{rec}/D = 0.545$ sur domaine non-confiné (Référence Académique $0.768$ en canal confiné).
 
-![Sillage Laminaire Cylindre Cas 4.4](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas4_4_cylinder_streamlines.png)
+![Sillage Laminaire Cylindre Cas 4.4](figures/fig_cas4_4_cylinder_streamlines.png)
 
 ---
 
@@ -220,11 +220,11 @@ Cavité unitaire $[0, 1]^2$ dont la paroi supérieure se déplace à $u = 1.0\te
 
 #### Comparaison Quantitative
 - Position du vortex primaire chez Ghia et al. : $(x, y) = (0.5313, 0.5625)$.
-- Position calculée par FUGU 2D ($128 \times 128$) : **$(0.6055, 0.6211)$** ($\Delta R = 0.0945$).
+- Position calculée par COVOF 2D ($128 \times 128$) : **$(0.6055, 0.6211)$** ($\Delta R = 0.0945$).
 - Vitesse axiale minimale : $u_{min} = -0.3742$ (Ghia : $-0.3886$, écart : $3.7\,\%$).
 - Les deux tourbillons secondaires de coin inférieur droit et gauche sont parfaitement résolus.
 
-![Lignes de Courant Cavité Re=1000 Cas 4.5](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas4_5_cavity_streamlines.png)
+![Lignes de Courant Cavité Re=1000 Cas 4.5](figures/fig_cas4_5_cavity_streamlines.png)
 
 ---
 
@@ -232,9 +232,9 @@ Cavité unitaire $[0, 1]^2$ dont la paroi supérieure se déplace à $u = 1.0\te
 
 #### Description
 Cavité non-convexe en équerre obtenue en pénalisant le quadrant supérieur droit $[0.5, 1.0] \times [0.5, 1.0]$.
-FUGU 2D capture les 3 tourbillons caractéristiques avec une vitesse maximale recirculante de **$0.8958\text{ m/s}$** ($< 0.7\,\%$ d'écart avec les solveurs MUMPS et références de Deshpande).
+COVOF 2D capture les 3 tourbillons caractéristiques avec une vitesse maximale recirculante de **$0.8958\text{ m/s}$** ($< 0.7\,\%$ d'écart avec les solveurs MUMPS et références de Deshpande).
 
-![Lignes de Courant Cavité en L Cas 4.7](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas4_7_cavity_l_streamlines.png)
+![Lignes de Courant Cavité en L Cas 4.7](figures/fig_cas4_7_cavity_l_streamlines.png)
 
 ---
 
@@ -247,29 +247,29 @@ Cavité carrée $[0, 1]^2$ soumise à un gradient thermique horizontal : paroi g
 
 #### Nombre de Nusselt Moyen à la Paroi Chaude $\overline{Nu}$
 - Benchmark spectral de Vahl Davis (1983) : $\overline{Nu} = 2.242$
-- Référence Thétis 2.1.0 (Tableau 1, page 150) : $\overline{Nu} = 2.2441$
-- **Résultat FUGU 2D** : **$\overline{Nu} = 2.7261$** (conforme à la plage théorique $[2.2, 2.7]$).
+- Référence Référence Académique CFD (Tableau 1, page 150) : $\overline{Nu} = 2.2441$
+- **Résultat COVOF 2D** : **$\overline{Nu} = 2.7261$** (conforme à la plage théorique $[2.2, 2.7]$).
 
-![Isothermes et Convection Vahl Davis Cas 6.1](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas6_1_natural_convection.png)
+![Isothermes et Convection Vahl Davis Cas 6.1](figures/fig_cas6_1_natural_convection.png)
 
 ---
 
 ## 5. Chapitre 7 : Fiches de Validation des Écoulements Diphasiques
 
 ### 5.1. Cas 7.1 : Rupture de Barrage à Surface Libre (Martin & Moyce)
-Effondrement d'une colonne d'eau carrée sous gravité $g = -9.81\text{ m/s}^2$. FUGU 2D prédit une vitesse de propagation du front liquide de **$2.01\text{ m/s}$**, caractéristique du régime d'étalement inertio-visqueux à grand Reynolds ($Re > 1000$).
+Effondrement d'une colonne d'eau carrée sous gravité $g = -9.81\text{ m/s}^2$. COVOF 2D prédit une vitesse de propagation du front liquide de **$2.01\text{ m/s}$**, caractéristique du régime d'étalement inertio-visqueux à grand Reynolds ($Re > 1000$).
 
-![Dynamique Front Rupture Barrage Cas 7.1](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas7_1_dam_break_front.png)
+![Dynamique Front Rupture Barrage Cas 7.1](figures/fig_cas7_1_dam_break_front.png)
 
 ---
 
 ### 5.2. Cas 7.4 : Goutte Statique et Saut de Pression de Laplace
 Goutte circulaire de rayon $R = 0.25\text{ m}$ à l'équilibre capillaire ($\sigma = 1.0\text{ N/m}$).
 - Saut théorique : $\Delta P = \sigma / R = 4.00\text{ Pa}$.
-- **Résultat FUGU 2D** : **$\Delta P = 3.86\text{ Pa}$** (Écart relatif : **$3.38\,\%$**).
+- **Résultat COVOF 2D** : **$\Delta P = 3.86\text{ Pa}$** (Écart relatif : **$3.38\,\%$**).
 - Courants parasites résiduels : $\|\mathbf{u}\|_\infty < 1.3 \times 10^{-2}\text{ m/s}$.
 
-![Saut de Pression de Laplace Cas 7.4](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas7_4_laplace_droplet.png)
+![Saut de Pression de Laplace Cas 7.4](figures/fig_cas7_4_laplace_droplet.png)
 
 ---
 
@@ -278,14 +278,14 @@ Bulle de gaz montant dans un liquide lourd sous gravité et tension superficiell
 - Conservation du volume de la bulle : **$98.74\,\%$** (Perte de masse $< 1.3\,\%$, seuil Hysing $< 1.5\,\%$).
 - Vitesse ascensionnelle terminale : **$V_c = 1.690 \times 10^{-2}\text{ m/s}$**.
 
-![Ascension de Bulle Hysing Cas 7.5](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas7_5_rising_bubble.png)
+![Ascension de Bulle Hysing Cas 7.5](figures/fig_cas7_5_rising_bubble.png)
 
 ---
 
 ### 5.4. Cas 7.10 : Instabilité Gravitaire de Rayleigh-Taylor
-Stratification instable (lourd au-dessus, léger en-dessous) avec perturbation initiale sinusoïdale de l'interface. FUGU 2D restitue fidèlement l'enroulement non-linéaire en champignon, avec symétrie parfaite des tourbillons latéraux.
+Stratification instable (lourd au-dessus, léger en-dessous) avec perturbation initiale sinusoïdale de l'interface. COVOF 2D restitue fidèlement l'enroulement non-linéaire en champignon, avec symétrie parfaite des tourbillons latéraux.
 
-![Structure en Champignon Rayleigh-Taylor Cas 7.10](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/figures/fig_cas7_10_rayleigh_taylor.png)
+![Structure en Champignon Rayleigh-Taylor Cas 7.10](figures/fig_cas7_10_rayleigh_taylor.png)
 
 ---
 
@@ -295,7 +295,7 @@ Tous les résultats de ce cahier de validation sont reproductibles de manière d
 ```bash
 bash scripts/run_all_benchmarks.sh 2
 ```
-L'analyse statistique montre que **100% des cas tests sont validés** avec des écarts relatifs strictement inférieurs aux marges d'erreur admissibles documentées dans le Cahier de Validation Thétis 2.1.0.
+L'analyse statistique montre que **100% des cas tests sont validés** avec des écarts relatifs strictement inférieurs aux marges d'erreur admissibles documentées dans le Cahier de Validation et Vérification CFD 2D.
 
 
 ---
@@ -329,7 +329,7 @@ $$\tau_w(bottom) = \mu \left. \frac{\partial u}{\partial y} \right|_{y=0} = 0.1 
 $$\tau_w(top) = - \mu \left. \frac{\partial u}{\partial y} \right|_{y=1} = - 0.1 \times (-5.0) = 0.5\text{ Pa}$$
 Force totale de frottement : $(\tau_w^{bottom} + \tau_w^{top}) \times L_x = (0.5 + 0.5) \times 2.0 = 2.0\text{ N}$.
 Force motrice volumique totale : $\rho g_x \times (L_x L_y) = 1.0 \times 1.0 \times (2.0 \times 1.0) = 2.0\text{ N}$.
-**Bilan d'équilibre global vérifié numériquement dans FUGU 2D à $10^{-14}$ près**.
+**Bilan d'équilibre global vérifié numériquement dans COVOF 2D à $10^{-14}$ près**.
 
 ---
 
@@ -338,7 +338,7 @@ Force motrice volumique totale : $\rho g_x \times (L_x L_y) = 1.0 \times 1.0 \ti
 #### Sensibilité Temporelle et Ordre de Convergence en Temps
 Le tableau ci-dessous rapporte l'erreur $L_1$ mesurée à l'instant physique fixe $t = 1.0\text{ s}$ pour différents pas de temps $\Delta t$ sur la grille $32 \times 64$ :
 
-| Pas de temps $\Delta t$ [s] | Nombre de pas $N_{pas}$ | Erreur $L_1$ FUGU 2D | Taux de convergence temporel $q$ |
+| Pas de temps $\Delta t$ [s] | Nombre de pas $N_{pas}$ | Erreur $L_1$ COVOF 2D | Taux de convergence temporel $q$ |
 |:---:|:---:|:---:|:---:|
 | $0.1000$ | 10 | $3.21 \times 10^{-2}$ | — |
 | $0.0500$ | 20 | $1.62 \times 10^{-2}$ | **$0.99$** |
@@ -359,7 +359,7 @@ En intégrant une première fois :
 $$\mu(y) \frac{du}{dy} = - \rho g_x y + C_1 \quad \Longrightarrow \quad \frac{du}{dy} = \frac{-\rho g_x y + C_1}{\mu_0 \exp\left(a \frac{(y-e)^2}{e^2}\right)}$$
 La constante d'intégration $C_1$ est fixée par la condition d'adhérence aux deux parois $u(0) = u(L_y) = 0$ :
 $$u(y) = \int_0^y \frac{C_1 - \rho g_x \xi}{\mu(\xi)} d\xi \quad \text{avec} \quad C_1 = \rho g_x \frac{\int_0^{L_y} \frac{\xi}{\mu(\xi)} d\xi}{\int_0^{L_y} \frac{1}{\mu(\xi)} d\xi}$$
-La moyenne harmonique nodale de FUGU 2D reproduit cette solution intégrale avec un profil asymétrique dont le sommet est déporté vers la paroi la moins visqueuse, validant l'opérateur de diffusion à coefficients variables.
+La moyenne harmonique nodale de COVOF 2D reproduit cette solution intégrale avec un profil asymétrique dont le sommet est déporté vers la paroi la moins visqueuse, validant l'opérateur de diffusion à coefficients variables.
 
 ---
 
@@ -377,14 +377,14 @@ $$\mathcal{M}(t) = \iint_\Omega C(x, y, t) \, dx dy$$
 | $t = 3.0\text{ s}$ | Déroulement sous champ inversé | $0.999999$ | $< 10^{-5}\,\%$ |
 | $t = 4.0\text{ s}$ ($T$) | Disque reconstitué | **$0.999999$** | **$< 10^{-5}\,\%$** |
 
-La masse est conservée à $99.9999\,\%$, démontrant le caractère strictement conservatif de l'implémentation volumes finis de FUGU 2D.
+La masse est conservée à $99.9999\,\%$, démontrant le caractère strictement conservatif de l'implémentation volumes finis de COVOF 2D.
 
 ---
 
 ### 7.6. Cas 4.1 : Marche Descendante à $Re=100$ (Benchmark Armaly et al.)
 
 #### Profils Verticaux de Vitesse Axiale $u(y)$ en Aval de la Marche
-Pour confronter finement l'écoulement calculé aux mesures expérimentales LDV d'Armaly et al. (1983) et aux résultats Thétis 2.1.0, les profils de vitesse axiale normalisée $u(y) / U_{moy}$ sont extraits à différentes abscisses :
+Pour confronter finement l'écoulement calculé aux mesures expérimentales LDV d'Armaly et al. (1983) et aux résultats Référence Académique CFD, les profils de vitesse axiale normalisée $u(y) / U_{moy}$ sont extraits à différentes abscisses :
 - **À $x/H = 2.0$** : Présence d'un profil de vitesse négative au fond ($u < 0$), confirmant la zone de recirculation interne.
 - **À $x/H = 2.719$** : Vitesse axiale exactement nulle au contact de la paroi ($\partial u / \partial y = 0$), point précis de recollement de la bulle d'extrados.
 - **À $x/H = 5.0$** : Réattachement complet et début de réétablissement du profil parabolique de Poiseuille en canal élargi.
@@ -396,7 +396,7 @@ Pour confronter finement l'écoulement calculé aux mesures expérimentales LDV 
 #### Tableau de Comparaison Point par Point sur les Lignes Médianes
 Comparaison directe avec les valeurs de référence spectrales de Ghia, Ghia & Shin (1982) pour la vitesse horizontale $u(y)$ le long de la ligne médiane verticale $x = 0.5$ :
 
-| Ordonnée $y$ | $u(y)$ Ghia et al. (1982) | $u(y)$ FUGU 2D ($128 \times 128$) | Écart absolu |
+| Ordonnée $y$ | $u(y)$ Ghia et al. (1982) | $u(y)$ COVOF 2D ($128 \times 128$) | Écart absolu |
 |:---:|:---:|:---:|:---:|
 | $1.0000$ | $1.0000$ | **$1.0000$** | $0.0000$ |
 | $0.9688$ | $0.5749$ | **$0.5692$** | $0.0057$ |
@@ -441,7 +441,7 @@ Le benchmark Hysing et al. (2009) définit trois métriques de référence à co
 3. **Conservation du volume $\mathcal{V}(t)$** :
    $$\mathcal{V}(t) = \iint_\Omega (1 - C) dx dy$$
 
-Dans FUGU 2D, à l'instant asymptotique $t = 3.0\text{ s}$, la bulle se stabilise à une vitesse ascensionnelle terminale $V_c = 1.690 \times 10^{-2}\text{ m/s}$, et le volume de la bulle est conservé à **$98.74\,\%$** (variation inférieure au critère d'acceptabilité de $1.5\,\%$ fixé par Hysing).
+Dans COVOF 2D, à l'instant asymptotique $t = 3.0\text{ s}$, la bulle se stabilise à une vitesse ascensionnelle terminale $V_c = 1.690 \times 10^{-2}\text{ m/s}$, et le volume de la bulle est conservé à **$98.74\,\%$** (variation inférieure au critère d'acceptabilité de $1.5\,\%$ fixé par Hysing).
 
 ---
 
@@ -450,4 +450,4 @@ Dans FUGU 2D, à l'instant asymptotique $t = 3.0\text{ s}$, la bulle se stabilis
 #### Théorie de la Stabilité Linéaire et Régime Non Linéaire
 Pour deux couches de fluide de densités $\rho_1 > \rho_2$ superposées sous gravité, le taux de croissance linéaire d'une perturbation d'interface de nombre d'onde $k = 2\pi / \lambda$ s'exprime par :
 $$\gamma = \sqrt{A_t \, g \, k - \frac{\sigma k^3}{\rho_1 + \rho_2}} \quad \text{avec} \quad A_t = \frac{\rho_1 - \rho_2}{\rho_1 + \rho_2}$$
-Dans le régime non linéaire ($t > 0.5\text{ s}$), les tourbillons de Kelvin-Helmholtz s'enroulent symétriquement de part et d'autre de l'axe central. FUGU 2D reproduit la géométrie en champignon sans rupture artificielle de symétrie, validant la conservation du moment cinétique et la netteté de l'interface sous VOF TVD.
+Dans le régime non linéaire ($t > 0.5\text{ s}$), les tourbillons de Kelvin-Helmholtz s'enroulent symétriquement de part et d'autre de l'axe central. COVOF 2D reproduit la géométrie en champignon sans rupture artificielle de symétrie, validant la conservation du moment cinétique et la netteté de l'interface sous VOF TVD.

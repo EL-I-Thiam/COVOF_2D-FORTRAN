@@ -1,17 +1,17 @@
-# Portail Général de la Documentation FUGU 2D (Fortran 2018)
+# Portail Général de la Documentation COVOF 2D (Fortran 2018)
 ## Système Complet de Documentation Technique, Théorique, Utilisateur et Développeur
-### Version 2.1.0 — Élaboré selon les Standards du Laboratoire TREFLE / I2M Bordeaux (Code Thétis)
+### Version 2.1.0 — Élaboré selon les Standards du Laboratoire TREFLE / I2M Bordeaux (code de référence)
 
 ---
 
 ## 1. Vue d'Ensemble de la Documentation
 
-Bienvenue sur le portail documentaire officiel du solveur de mécanique des fluides numérique **FUGU 2D** en **Fortran 2018 + OpenMPI**.
+Bienvenue sur le portail documentaire officiel du solveur de mécanique des fluides numérique **COVOF 2D** en **Fortran 2018 + OpenMPI**.
 Cette suite documentaire forme un ensemble de référence de plus de **45 pages équivalentes** couvrant l'intégralité des fondements théoriques, de l'architecture modulaire Fortran 2018, des guides d'utilisation pratique et des protocoles de validation académique :
 
 ```
                         ┌────────────────────────────────────────────────────────┐
-                        │             PORTAIL DOCUMENTAIRE FUGU 2D               │
+                        │             PORTAIL DOCUMENTAIRE COVOF 2D               │
                         │                  (docs/INDEX.md)                       │
                         └──────────────────────────┬─────────────────────────────┘
                                                    │
@@ -23,7 +23,7 @@ Cette suite documentaire forme un ensemble de référence de plus de **45 pages 
 │ THÉORIQUE       │      │ UTILISATEUR     │              │ DÉVELOPPEUR     │      │ VALIDATION      │
 │ (THEORY.md)     │      │ (USER_GUIDE.md) │              │ (DEV_GUIDE.md)  │      │ (VALIDATION.md) │
 └─────────────────┘      └─────────────────┘              └─────────────────┘      └─────────────────┘
- [Théorie & Maths]        [Guide Pratique]                [Architecture F2018]      [V&V Thétis 2.1]
+ [Théorie & Maths]        [Guide Pratique]                [Architecture F2018]      [V&V Référence Académique CFD]
  - Navier-Stokes AL       - Syntaxe JSON                  - Modules Fortran 2018   - 13 Benchmarks
  - Discrétisation MAC     - Exécution OpenMPI             - Échanges Halos MPI     - Solutions exactes
  - VOF-TVD Superbee       - Suivi temps réel              - Krylov & Préconds      - Tables d'erreurs
@@ -37,44 +37,44 @@ Cette suite documentaire forme un ensemble de référence de plus de **45 pages 
 Pour optimiser votre prise en main selon vos objectifs, trois parcours de lecture thématiques sont recommandés :
 
 ### 🚀 Parcours 1 : L'Utilisateur et l'Ingénieur CFD
-*Objectif : Installer FUGU 2D, configurer une simulation physique, la lancer sur station ou supercalculateur, et exploiter les résultats sous ParaView.*
-1. **[USER_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/USER_GUIDE.md)**
+*Objectif : Installer COVOF 2D, configurer une simulation physique, la lancer sur station ou supercalculateur, et exploiter les résultats sous ParaView.*
+1. **[USER_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/USER_GUIDE.md)**
    - Section 2 : Installation rapide et compilation CMake.
    - Section 3 : Dictionnaire complet des mots-clés du fichier de configuration JSON.
    - Section 4 : Tutoriels pas à pas (Cavité entraînée, Convection naturelle, Rupture de barrage).
    - Section 5 : Exécution parallèle avec OpenMPI et soumission de jobs SLURM.
    - Section 7 : Visualisation sous ParaView (lignes de courant, profils, isosurfaces).
-2. **[VALIDATION_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/VALIDATION_GUIDE.md)**
+2. **[VALIDATION_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/VALIDATION_GUIDE.md)**
    - Consultation des cas tests prêts à l'emploi similaires à votre application.
 
 ---
 
 ### 💻 Parcours 2 : Le Développeur et l'Architecte HPC
 *Objectif : Comprendre l'organisation du code source C++20, étendre les fonctionnalités, ajouter un solveur ou une équation de transport.*
-1. **[DEVELOPER_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/DEVELOPER_GUIDE.md)**
+1. **[DEVELOPER_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/DEVELOPER_GUIDE.md)**
    - Section 1 : Architecture logicielle, diagramme de classes et cycle de calcul.
    - Section 2 : Structures de données `FlowFields` et gestion des cellules fantômes (halos).
    - Section 4 : Analyse des modules fondamentaux (`MpiComm`, `NavierStokesSolver`, `LinearSolver`).
    - Section 5 : Tutoriels pas à pas pour étendre le solveur (nouvelle équation, solveur MUMPS, nouveau préconditionneur).
    - Section 6 : Bonnes pratiques C++20, débogage MPI (GDB/Valgrind) et profilage de performance.
-2. **[MATHEMATICAL_THEORY.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/MATHEMATICAL_THEORY.md)**
+2. **[MATHEMATICAL_THEORY.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/MATHEMATICAL_THEORY.md)**
    - Section 4 : Discrétisation spatiale sur grille décalée MAC et stencils discrets.
    - Section 7 : Algorithmes de Krylov BiCGSTAB(2), GMRES et Gradient Conjugué.
 
 ---
 
 ### 🔬 Parcours 3 : Le Chercheur et l'Enseignant-Chercheur
-*Objectif : Étudier la rigueur mathématique des modèles, la convergence spatio-temporelle et les benchmarks académiques confrontés au code Thétis 2.1.0.*
-1. **[MATHEMATICAL_THEORY.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/MATHEMATICAL_THEORY.md)**
+*Objectif : Étudier la rigueur mathématique des modèles, la convergence spatio-temporelle et les benchmarks académiques confrontés au code Référence Académique CFD.*
+1. **[MATHEMATICAL_THEORY.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/MATHEMATICAL_THEORY.md)**
    - Section 2 : Équations de Navier-Stokes à propriétés variables et modèle "One-Fluid".
    - Section 3 : Méthode du Lagrangien Augmenté, analyse spectrale et élimination du bloc zéro.
    - Section 6 : Modèle continu de tension de surface (CSF) de Brackbill et formulation Balanced-Force.
    - Section 8 : Restrictions de stabilité CFL convective, visqueuse et capillaire.
-2. **[VALIDATION_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/VALIDATION_GUIDE.md)**
+2. **[VALIDATION_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/VALIDATION_GUIDE.md)**
    - Section 1 : Cadre méthodologique de Vérification et Validation (ASME V&V 20).
    - Section 2 : Fiches des solutions exactes (Laplacien, Poiseuille stationnaire/instationnaire/variable, Vortex TVD).
    - Sections 3 à 5 : Fiches de validation physique (Marche Armaly, Cylindre, Cavité carrée et en L, Vahl Davis, Hysing, Rupture de barrage, Rayleigh-Taylor).
-   - Analyse comparative détaillée FUGU 2D vs Thétis 2.1.0 avec tableaux d'erreur $L_1, L_2, L_\infty$.
+   - Analyse comparative détaillée COVOF 2D vs Référence Académique CFD avec tableaux d'erreur $L_1, L_2, L_\infty$.
 
 ---
 
@@ -82,21 +82,21 @@ Pour optimiser votre prise en main selon vos objectifs, trois parcours de lectur
 
 | Document | Rôle Principal | Public Cible | Longueur & Richesse | Lien d'Accès Direct |
 |:---|:---|:---|:---:|:---|
-| **Notice Théorique** | Dérivations mathématiques, équations différentielles, schémas volumes finis | Chercheurs, Numériciens | ~520 lignes, 35+ équations | [`MATHEMATICAL_THEORY.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/MATHEMATICAL_THEORY.md) |
-| **Manuel Utilisateur** | Configuration JSON, exécution MPI/SLURM, diagnostics, ParaView | Utilisateurs, Ingénieurs | ~500 lignes, dictionnaires | [`USER_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/USER_GUIDE.md) |
-| **Manuel Développeur** | Architecture C++20, structures mémoire, halos MPI, guides d'extension | Développeurs C++, HPC | ~420 lignes, diagrammes UML | [`DEVELOPER_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/DEVELOPER_GUIDE.md) |
-| **Cahier de Validation** | 13 Fiches de V&V, tableaux d'erreurs, comparaison Thétis 2.1.0 | Auditeurs qualité, Chercheurs | ~450 lignes, tableaux $L_1/L_2$ | [`VALIDATION_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/fugu2d/docs/VALIDATION_GUIDE.md) |
-| **Rapport de Synthèse** | Rapport exécutif avec 14 figures haute définition intégrées | Décideurs, Ingénieurs | Artéfact interactif | [`fugu2d_validation_report.md`](file:///Users/elhadjiibrahimathiam/.gemini/antigravity/brain/d891e39d-85a0-4365-9d86-f527fe9e206c/fugu2d_validation_report.md) |
+| **Notice Théorique** | Dérivations mathématiques, équations différentielles, schémas volumes finis | Chercheurs, Numériciens | ~520 lignes, 35+ équations | [`MATHEMATICAL_THEORY.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/MATHEMATICAL_THEORY.md) |
+| **Manuel Utilisateur** | Configuration JSON, exécution MPI/SLURM, diagnostics, ParaView | Utilisateurs, Ingénieurs | ~500 lignes, dictionnaires | [`USER_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/USER_GUIDE.md) |
+| **Manuel Développeur** | Architecture C++20, structures mémoire, halos MPI, guides d'extension | Développeurs C++, HPC | ~420 lignes, diagrammes UML | [`DEVELOPER_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/DEVELOPER_GUIDE.md) |
+| **Cahier de Validation** | 13 Fiches de V&V, tableaux d'erreurs, comparaison Référence Académique CFD | Auditeurs qualité, Chercheurs | ~450 lignes, tableaux $L_1/L_2$ | [`VALIDATION_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/VALIDATION_GUIDE.md) |
+| **Rapport de Synthèse** | Rapport exécutif avec 14 figures haute définition intégrées | Décideurs, Ingénieurs | Artéfact interactif | [`covof2d_validation_report.md`](file:///Users/elhadjiibrahimathiam/.gemini/antigravity/brain/d891e39d-85a0-4365-9d86-f527fe9e206c/covof2d_validation_report.md) |
 
 ---
 
-## 4. Synthèse des Résultats de Validation Thétis 2.1.0
+## 4. Synthèse des Résultats de Validation Référence Académique CFD
 
 Le tableau ci-dessous résume le succès à **100%** de l'ensemble de la campagne de validation menée sur la suite des 13 cas tests :
 
 ```
 ===================================================================================================================
-     CHAPITRE             CAS TEST                   MÉTRIQUE CLÉ             CIBLE THÉTIS 2.1.0    FUGU 2D  STATUT
+     CHAPITRE             CAS TEST                   MÉTRIQUE CLÉ             CIBLE Référence Académique CFD    COVOF 2D  STATUT
 ===================================================================================================================
 Chap 3 (Exact)    3.1 Laplacien cartésien       Erreur L1 (Grille 64x32)     5.60e-06 (Ordre 2.0)  5.60e-06   PASS
 Chap 3 (Exact)    3.7 Poiseuille stationnaire   Vitesse max u_max [m/s]      1.2500 m/s (Exact)    1.2500     PASS
@@ -130,5 +130,5 @@ bash scripts/run_all_benchmarks.sh 2
 python3 scripts/verify_cases.py
 
 # Régénérer les 14 figures haute définition dans docs/figures/ :
-python3 scripts/generate_thetis_validation_figures.py
+python3 scripts/generate_validation_figures.py
 ```

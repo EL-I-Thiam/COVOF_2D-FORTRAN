@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(fugu2d_fortran LANGUAGES Fortran)
+project(COVOF_2D_FORTRAN LANGUAGES Fortran)
 
 set(CMAKE_Fortran_STANDARD 2018)
 set(CMAKE_Fortran_STANDARD_REQUIRED ON)
@@ -24,10 +24,18 @@ set(SOURCES
     src/fugu2d_main.f90
 )
 
-add_executable(fugu2d_fortran ${SOURCES})
+# Executable target: covof2d_fortran
+add_executable(covof2d_fortran ${SOURCES})
+target_link_libraries(covof2d_fortran PRIVATE MPI::MPI_Fortran)
 
-target_link_libraries(fugu2d_fortran PRIVATE MPI::MPI_Fortran)
-
-set_target_properties(fugu2d_fortran PROPERTIES
+set_target_properties(covof2d_fortran PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
+)
+
+# Create compatibility symlink for fugu2d_fortran
+add_custom_command(TARGET covof2d_fortran POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+        ${CMAKE_CURRENT_SOURCE_DIR}/bin/covof2d_fortran
+        ${CMAKE_CURRENT_SOURCE_DIR}/bin/fugu2d_fortran
+    COMMENT "Creating compatibility symlink bin/fugu2d_fortran -> bin/covof2d_fortran"
 )

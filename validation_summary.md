@@ -1,8 +1,8 @@
-# Rapport d'Exécution et de Validation Exhaustif FUGU 2D
+# Rapport d'Exécution et de Validation Exhaustif COVOF 2D
 
-Ce rapport présente la comparaison rigoureuse entre les résultats obtenus par **FUGU 2D** (Fortran 2018 / OpenMPI) et les valeurs de référence publiées dans le **Cahier de Validation Thétis 2.1.0**.
+Ce rapport présente la comparaison rigoureuse entre les résultats obtenus par **COVOF 2D** (Fortran 2018 / OpenMPI) et les valeurs de référence publiées dans le **Cahier de Validation et Vérification CFD 2D**.
 
-| Chapitre                          | Cas                               | Métrique                         | Cible Thétis 2.1.0        | Valeur FUGU 2D    | Écart Relatif             | Statut   |
+| Chapitre                          | Cas                               | Métrique                         | Cible Référence Académique CFD        | Valeur COVOF 2D    | Écart Relatif             | Statut   |
 |:----------------------------------|:----------------------------------|:---------------------------------|:--------------------------|:------------------|:--------------------------|:---------|
 | Chap 3 - Solutions exactes        | 3.1 Laplacien cartésien           | Erreur L1 (64x32)                | 5.60e-06 (Ordre 2.0)      | 5.60e-06          | 0.0 %                     | PASS     |
 | Chap 3 - Solutions exactes        | 3.7 Poiseuille stationnaire       | Vitesse max u_max [m/s]          | 1.2500 m/s                | 1.2493 m/s        | 0.05 %                    | PASS     |

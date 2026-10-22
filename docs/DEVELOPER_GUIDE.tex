@@ -1,0 +1,1648 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\documentclass[
+]{article}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\newenvironment{Shaded}{}{}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.49,0.56,0.16}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\BuiltInTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{#1}}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textit{#1}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.53,0.00,0.00}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.56,0.13,0.00}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.73,0.13,0.13}{\textit{#1}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.02,0.16,0.49}{#1}}
+\newcommand{\ImportTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{\textbf{#1}}}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.40,0.40,0.40}{#1}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.74,0.48,0.00}{#1}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.73,0.40,0.53}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.10,0.09,0.49}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\usepackage{longtable,booktabs,array}
+\usepackage{caption}
+\captionsetup[table]{skip=6pt}
+\newcounter{none} % for unnumbered tables
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+% fallback for those not using the hyperref driver hyperxmp:
+\makeatletter
+\@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
+\makeatother
+\hypersetup{
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\author{}
+\date{}
+
+\begin{document}
+
+\section{Manuel de Référence Développeur et Architecture Logicielle
+C++20 - Solveur COVOF
+2D}\label{manuel-de-ruxe9fuxe9rence-duxe9veloppeur-et-architecture-logicielle-c20---solveur-covof-2d}
+
+\subsection{Guide Complet de Conception, d'Extension, de Parallélisme et
+d'Intégration
+Numérique}\label{guide-complet-de-conception-dextension-de-paralluxe9lisme-et-dintuxe9gration-numuxe9rique}
+
+\subsubsection{Version 2.1.0 --- Conforme aux Standards de Développement
+Référence Académique (I2M / UMR CNRS
+5295)}\label{version-2.1.0-conforme-aux-standards-de-duxe9veloppement-ruxe9fuxe9rence-acaduxe9mique-i2m-umr-cnrs-5295}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{Sommaire Général}\label{sommaire-guxe9nuxe9ral}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \hyperref[1-principes-de-conception-et-architecture-logicielle]{Principes
+  de Conception et Architecture Logicielle}
+
+  \begin{itemize}
+  \tightlist
+  \item
+    1.1. Philosophie C++20 et Parallélisme Hybride
+  \item
+    1.2. Cartographie des Responsabilités et Diagramme de Classes
+  \item
+    1.3. Cycle de Vie d'une Simulation COVOF 2D et Correspondance
+    Fortran Référence Académique
+  \end{itemize}
+\item
+  \hyperref[2-structures-de-donnuxe9es-et-organisation-muxe9moire-data-oriented-design]{Structures
+  de Données et Organisation Mémoire (Data-Oriented Design)}
+
+  \begin{itemize}
+  \tightlist
+  \item
+    2.1. Maillage Décalé et Représentation Mémoire des Champs
+    (\texttt{Mesh2D} et \texttt{FlowFields})
+  \item
+    2.2. Gestion des Cellules Fantômes (Ghost Cells / Halos) et
+    Indexation Locale/Globale
+  \item
+    2.3. Continuité Mémoire, Alignement de Cache et Vectorisation SIMD
+  \end{itemize}
+\item
+  \hyperref[3-dictionnaire-de-correspondance--uxe9quations-thuxe9oriques-vs-code-c]{Dictionnaire
+  de Correspondance : Équations Théoriques vs Code C++}
+\item
+  \hyperref[4-duxe9tail-dimpluxe9mentation-des-modules-fondamentaux]{Détail
+  d'Implémentation des Modules Fondamentaux}
+
+  \begin{itemize}
+  \tightlist
+  \item
+    4.1. Module de Communication et Parallélisme MPI (\texttt{MpiComm})
+  \item
+    4.2. Module d'Assemblage Navier-Stokes et Lagrangien Augmenté
+    (\texttt{NavierStokesSolver})
+  \item
+    4.3. Module d'Énergie Thermique et Flottabilité
+    (\texttt{solve\_energy})
+  \item
+    4.4. Module de Suivi d'Interface et Tension de Surface
+    (\texttt{InterfaceTracker})
+  \item
+    4.5. Module des Solveurs Linéaires et Préconditionneurs
+    (\texttt{LinearSolver})
+  \item
+    4.6. Module d'Écriture Graphique VTK Parallèle (\texttt{VTKWriter})
+  \end{itemize}
+\item
+  \hyperref[5-guide-duxe9veloppeur--uxe9tendre-le-solveur-fugu-2d]{Guide
+  Développeur : Étendre le Solveur COVOF 2D}
+
+  \begin{itemize}
+  \tightlist
+  \item
+    5.1. Tutoriel 1 : Ajouter une Nouvelle Équation de Transport
+    Scalaire (ex: Espèce Chimique)
+  \item
+    5.2. Tutoriel 2 : Implémenter un Nouveau Préconditionneur (ex:
+    Multigrille Géométrique)
+  \item
+    5.3. Tutoriel 3 : Implémenter un Nouveau Solveur Linéaire ou
+    Brancher MUMPS / PETSc
+  \item
+    5.4. Tutoriel 4 : Définir une Nouvelle Condition aux Limites
+    Dynamique ou une Loi de Paroi
+  \item
+    5.5. Tutoriel 5 : Ajouter une Nouvelle Géométrie d'Obstacle Immergé
+    (Pénalisation Brinkman)
+  \end{itemize}
+\item
+  \hyperref[6-normes-de-duxe9veloppement-assurance-qualituxe9-et-profilage]{Normes
+  de Développement, Assurance Qualité et Profilage}
+
+  \begin{itemize}
+  \tightlist
+  \item
+    6.1. Conventions de Codage et Bonnes Pratiques C++20
+  \item
+    6.2. Débogage sous MPI avec GDB / LLDB et Valgrind
+  \item
+    6.3. Profilage des Performances CPU et Analyse des Bottlenecks de
+    Communication
+  \end{itemize}
+\end{enumerate}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{1. Principes de Conception et Architecture
+Logicielle}\label{principes-de-conception-et-architecture-logicielle}
+
+\subsubsection{1.1. Philosophie C++20 et Parallélisme
+Hybride}\label{philosophie-c20-et-paralluxe9lisme-hybride}
+
+Le code \textbf{COVOF 2D} a été architecturé pour conjuguer la rigueur
+mathématique des méthodes de volumes finis historiques et les
+performances de pointe des architectures multinoyaux modernes : -
+\textbf{Zéro Allocation Dynamique dans la Boucle Temporelle} : Toutes
+les mémoires de travail (champs de vitesse, pression, température,
+vecteurs résidus Krylov, buffers MPI) sont préallouées lors de la phase
+d'initialisation. Aucun appel à \texttt{malloc}, \texttt{new} ou
+réallocation de \texttt{std::vector} n'intervient à chaque pas de temps,
+garantissant une absence totale de fragmentation mémoire et un débit
+d'exécution optimal. - \textbf{Conception Matrix-Free et Opérateurs
+Stencil} : L'application des opérateurs différentiels dans les méthodes
+de Krylov s'effectue directement par évaluation de stencils sur la
+grille cartésienne, minimisant les accès mémoire par rapport au stockage
+d'une matrice creuse au format CSR (Compressed Sparse Row). -
+\textbf{Parallélisme Hybride Décentralisé} : La synchronisation
+inter-cœurs repose sur une topologie cartésienne OpenMPI
+(\texttt{MPI\_Cart\_create}) avec communications non-bloquantes
+(\texttt{MPI\_Isend} / \texttt{MPI\_Irecv}) superposables au calcul des
+cellules internes.
+
+\subsubsection{1.2. Cartographie des Responsabilités et Diagramme de
+Classes}\label{cartographie-des-responsabilituxe9s-et-diagramme-de-classes}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\KeywordTok{classDiagram}
+    \KeywordTok{class}\DataTypeTok{ Config \{}
+        \KeywordTok{+}\NormalTok{load\_from\_json(path)}
+        \KeywordTok{+}\NormalTok{MeshParams mesh}
+        \KeywordTok{+}\NormalTok{PhysicsParams physics}
+        \KeywordTok{+}\NormalTok{SolverParams solver}
+    \DataTypeTok{\}}
+
+    \KeywordTok{class}\DataTypeTok{ Mesh2D \{}
+        \KeywordTok{+}\NormalTok{int nx\_global, ny\_global}
+        \KeywordTok{+}\NormalTok{int nx\_local, ny\_local}
+        \KeywordTok{+}\NormalTok{double dx, dy}
+        \KeywordTok{+}\NormalTok{int rank, size}
+        \KeywordTok{+}\NormalTok{init\_mpi\_cartesian()}
+        \KeywordTok{+}\NormalTok{local\_to\_global\_coords()}
+    \DataTypeTok{\}}
+
+    \KeywordTok{class}\DataTypeTok{ FlowFields \{}
+        \KeywordTok{+}\NormalTok{vector}\FunctionTok{\textasciitilde{}}\NormalTok{double}\FunctionTok{\textasciitilde{}}\NormalTok{ u, v}
+        \KeywordTok{+}\NormalTok{vector}\FunctionTok{\textasciitilde{}}\NormalTok{double}\FunctionTok{\textasciitilde{}}\NormalTok{ p, div}
+        \KeywordTok{+}\NormalTok{vector}\FunctionTok{\textasciitilde{}}\NormalTok{double}\FunctionTok{\textasciitilde{}}\NormalTok{ C, T}
+        \KeywordTok{+}\NormalTok{vector}\FunctionTok{\textasciitilde{}}\NormalTok{double}\FunctionTok{\textasciitilde{}}\NormalTok{ rho, mu}
+        \KeywordTok{+}\NormalTok{vector}\FunctionTok{\textasciitilde{}}\NormalTok{double}\FunctionTok{\textasciitilde{}}\NormalTok{ mu\_node}
+        \KeywordTok{+}\NormalTok{vector}\FunctionTok{\textasciitilde{}}\NormalTok{double}\FunctionTok{\textasciitilde{}}\NormalTok{ fx\_sigma, fy\_sigma}
+        \KeywordTok{+}\NormalTok{allocate(mesh)}
+    \DataTypeTok{\}}
+
+    \KeywordTok{class}\DataTypeTok{ MpiComm \{}
+        \KeywordTok{+}\NormalTok{exchange\_halos\_scalar(phi)}
+        \KeywordTok{+}\NormalTok{exchange\_halos\_velocity(u, v)}
+        \KeywordTok{+}\NormalTok{apply\_boundary\_conditions()}
+        \KeywordTok{+}\NormalTok{apply\_thermal\_boundary\_conditions()}
+        \KeywordTok{+}\NormalTok{global\_max(val)}
+        \KeywordTok{+}\NormalTok{global\_sum(val)}
+    \DataTypeTok{\}}
+
+    \KeywordTok{class}\DataTypeTok{ LinearSolverBase \{}
+        \AttributeTok{\textless{}\textless{}abstract\textgreater{}\textgreater{}}
+        \KeywordTok{+}\NormalTok{solve(A, x, b, precond)}\KeywordTok{*}
+    \DataTypeTok{\}}
+
+    \KeywordTok{class}\DataTypeTok{ BiCGSTAB2Solver \{}
+        \KeywordTok{+}\NormalTok{solve(A, x, b, precond)}
+    \DataTypeTok{\}}
+
+    \KeywordTok{class}\DataTypeTok{ PreconditionerBase \{}
+        \AttributeTok{\textless{}\textless{}abstract\textgreater{}\textgreater{}}
+        \KeywordTok{+}\NormalTok{apply(r, z)}\KeywordTok{*}
+    \DataTypeTok{\}}
+
+    \KeywordTok{class}\DataTypeTok{ JacobiPreconditioner \{}
+        \KeywordTok{+}\NormalTok{apply(r, z)}
+    \DataTypeTok{\}}
+
+    \KeywordTok{class}\DataTypeTok{ InterfaceTracker \{}
+        \KeywordTok{+}\NormalTok{advect\_vof(C, u, v, dt)}
+        \KeywordTok{+}\NormalTok{compute\_csf\_surface\_tension()}
+        \KeywordTok{+}\NormalTok{update\_fluid\_properties()}
+    \DataTypeTok{\}}
+
+    \KeywordTok{class}\DataTypeTok{ NavierStokesSolver \{}
+        \KeywordTok{+}\NormalTok{assemble\_rhs()}
+        \KeywordTok{+}\NormalTok{solve\_velocity\_uzawa()}
+        \KeywordTok{+}\NormalTok{solve\_energy(fields, dt)}
+        \KeywordTok{+}\NormalTok{compute\_mean\_nusselt()}
+    \DataTypeTok{\}}
+
+    \KeywordTok{class}\DataTypeTok{ Simulation \{}
+        \KeywordTok{+}\NormalTok{run()}
+        \KeywordTok{+}\NormalTok{run\_vortex\_advection()}
+    \DataTypeTok{\}}
+
+    \DataTypeTok{Simulation} \PreprocessorTok{{-}{-}\textgreater{}} \DataTypeTok{Config}
+    \DataTypeTok{Simulation} \PreprocessorTok{{-}{-}\textgreater{}} \DataTypeTok{Mesh2D}
+    \DataTypeTok{Simulation} \PreprocessorTok{{-}{-}\textgreater{}} \DataTypeTok{FlowFields}
+    \DataTypeTok{Simulation} \PreprocessorTok{{-}{-}\textgreater{}} \DataTypeTok{MpiComm}
+    \DataTypeTok{Simulation} \PreprocessorTok{{-}{-}\textgreater{}} \DataTypeTok{NavierStokesSolver}
+    \DataTypeTok{Simulation} \PreprocessorTok{{-}{-}\textgreater{}} \DataTypeTok{InterfaceTracker}
+    \DataTypeTok{NavierStokesSolver} \PreprocessorTok{{-}{-}\textgreater{}} \DataTypeTok{LinearSolverBase}
+    \DataTypeTok{LinearSolverBase} \PreprocessorTok{{-}{-}\textgreater{}} \DataTypeTok{PreconditionerBase}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{1.3. Cycle de Vie d'une Simulation COVOF 2D et
+Correspondance Fortran Référence
+Académique}\label{cycle-de-vie-dune-simulation-covof-2d-et-correspondance-fortran-ruxe9fuxe9rence-acaduxe9mique}
+
+À chaque pas de temps, la fonction maîtresse \texttt{Simulation::run()}
+exécute la séquence algorithmique suivante :
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Étape Algorithmique COVOF 2D
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Routine C++ FUGU
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Équivalent Fortran 90 Référence Académique
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Fonction Physique / Mathématique
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{1. Calcul du Pas de Temps} & \texttt{compute\_time\_step()} &
+\texttt{CALDT} (\texttt{caldt.f90}) & Évalue la restriction CFL
+convective et capillaire \\
+\textbf{2. Transport d'Interface} & \texttt{InterfaceTracker::advect()}
+& \texttt{ADVECTS} (\texttt{advects.f90}) & Avance \(C^{n+1}\) par VOF
+avec limiteur TVD Superbee \\
+\textbf{3. Propriétés Physiques} & \texttt{update\_properties()} &
+\texttt{PROPHY} (\texttt{prophy.f90}) & Évalue \(\rho(C)\)
+(arithmétique) et \(\mu(C)\) (harmonique) \\
+\textbf{4. Force Capillaire CSF} & \texttt{compute\_csf()} &
+\texttt{TENSUR} (\texttt{tensur.f90}) & Évalue normale \(\mathbf{n}\),
+courbure \(\kappa\) et \(\mathbf{F}_\sigma\) balanced \\
+\textbf{5. Assemblage RHS \& Matrice} & \texttt{assemble\_rhs()} &
+\texttt{NAVIERS} (\texttt{naviers.f90}) & Convection, diffusion,
+gravité, gradient de pression \(p^n\) \\
+\textbf{6. Inversion Krylov Vitesse} &
+\texttt{linear\_solver-\textgreater{}solve()} & \texttt{MUMPS} /
+\texttt{BICGSTAB2} & Résout le système du Lagrangien Augmenté pour
+\(\mathbf{u}^{n+1}\) \\
+\textbf{7. Mise à Jour Uzawa Pression} & \texttt{update\_pressure()} &
+\texttt{UZAWA} (\texttt{uzawa.f90}) &
+\(p^{n+1} = p^n - r_{al} \nabla \cdot \mathbf{u}^{n+1}\) \\
+\textbf{8. Résolution Thermique} & \texttt{solve\_energy()} &
+\texttt{ENERGIE} (\texttt{energie.f90}) & Résout \(T^{n+1}\) par
+diffusion-convection implicite \\
+\textbf{9. Échanges de Halos MPI} & \texttt{MpiComm::exchange()} &
+\texttt{ECHANGE} (\texttt{echange.f90}) & Synchronisation des mailles
+fantômes inter-domaines \\
+\textbf{10. Diagnostics et VTK} & \texttt{VTKWriter::write\_step()} &
+\texttt{IMPRIM} (\texttt{imprim.f90}) & Écriture des partitions
+\texttt{.pvtr} / \texttt{.vtr} et calculs \(L_1, L_2\) \\
+\end{longtable}
+}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{2. Structures de Données et Organisation Mémoire
+(Data-Oriented
+Design)}\label{structures-de-donnuxe9es-et-organisation-muxe9moire-data-oriented-design}
+
+\subsubsection{2.1. Maillage Décalé et Représentation Mémoire des
+Champs}\label{maillage-duxe9caluxe9-et-repruxe9sentation-muxe9moire-des-champs}
+
+Dans la classe \texttt{FlowFields}, tous les champs physiques sont
+alloués sous forme de tableaux 1D contigus
+(\texttt{std::vector\textless{}double\textgreater{}}) selon une
+disposition linéaire en mémoire indexée en ligne majeure
+(\emph{row-major order}) :
+\[\text{Index}(i, j) = j \times N_{cols} + i\]
+
+Pour une cellule locale \((i, j)\) avec \(1 \le i \le N_x^{loc}\) et
+\(1 \le j \le N_y^{loc}\) : - Les cellules \(i=0\) et \(i=N_x^{loc}+1\)
+correspondent aux \textbf{halos Ouest et Est}. - Les cellules \(j=0\) et
+\(j=N_y^{loc}+1\) correspondent aux \textbf{halos Sud et Nord}.
+
+Le tableau ci-dessous détaille les dimensions et l'alignement des
+variables :
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2353}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2353}}
+  >{\centering\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2941}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2353}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Variable C++
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Type et Localisation MAC
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Taille du Vecteur Local
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Description Physique
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{u} & Face verticale \((i-1/2, j)\) &
+\((N_x^{loc}+2) \times (N_y^{loc}+2)\) & Vitesse horizontale axiale
+\([\text{m/s}]\) \\
+\texttt{v} & Face horizontale \((i, j-1/2)\) &
+\((N_x^{loc}+2) \times (N_y^{loc}+2)\) & Vitesse transversale verticale
+\([\text{m/s}]\) \\
+\texttt{p} & Centre de cellule \((i, j)\) &
+\((N_x^{loc}+2) \times (N_y^{loc}+2)\) & Pression hydrodynamique
+\([\text{Pa}]\) \\
+\texttt{C} & Centre de cellule \((i, j)\) &
+\((N_x^{loc}+2) \times (N_y^{loc}+2)\) & Fraction volumique de couleur
+\([0, 1]\) \\
+\texttt{T} & Centre de cellule \((i, j)\) &
+\((N_x^{loc}+2) \times (N_y^{loc}+2)\) & Température thermodynamique
+\([\text{K}]\) \\
+\texttt{rho} & Centre de cellule \((i, j)\) &
+\((N_x^{loc}+2) \times (N_y^{loc}+2)\) & Masse volumique équivalente
+\([\text{kg/m}^3]\) \\
+\texttt{mu} & Centre de cellule \((i, j)\) &
+\((N_x^{loc}+2) \times (N_y^{loc}+2)\) & Viscosité dynamique équivalente
+\([\text{Pa}\cdot\text{s}]\) \\
+\texttt{mu\_node} & Sommet de cellule \((i-1/2, j-1/2)\) &
+\((N_x^{loc}+2) \times (N_y^{loc}+2)\) & Viscosité nodale harmonique
+\([\text{Pa}\cdot\text{s}]\) \\
+\end{longtable}
+}
+
+\subsubsection{2.2. Gestion des Cellules Fantômes (Ghost Cells / Halos)
+et
+Indexation}\label{gestion-des-cellules-fantuxf4mes-ghost-cells-halos-et-indexation}
+
+Pour permettre la décomposition de domaine cartésienne sans altérer les
+stencils différentiels, chaque processus MPI alloue une couche de halos
+d'épaisseur 1 dans chaque direction. L'accès aux champs internes
+s'effectue via des boucles standardisées :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{// Parcours canonique des cellules fluides internes d\textquotesingle{}un sous{-}domaine}
+\ControlFlowTok{for} \OperatorTok{(}\DataTypeTok{int}\NormalTok{ j }\OperatorTok{=} \DecValTok{1}\OperatorTok{;}\NormalTok{ j }\OperatorTok{\textless{}=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{ny\_local}\OperatorTok{;} \OperatorTok{++}\NormalTok{j}\OperatorTok{)} \OperatorTok{\{}
+    \ControlFlowTok{for} \OperatorTok{(}\DataTypeTok{int}\NormalTok{ i }\OperatorTok{=} \DecValTok{1}\OperatorTok{;}\NormalTok{ i }\OperatorTok{\textless{}=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{nx\_local}\OperatorTok{;} \OperatorTok{++}\NormalTok{i}\OperatorTok{)} \OperatorTok{\{}
+        \DataTypeTok{int}\NormalTok{ idx }\OperatorTok{=}\NormalTok{ j }\OperatorTok{*}\NormalTok{ stride }\OperatorTok{+}\NormalTok{ i}\OperatorTok{;}
+        \CommentTok{// Accès direct sans saut de pointeur}
+\NormalTok{        p}\OperatorTok{[}\NormalTok{idx}\OperatorTok{]} \OperatorTok{=}\NormalTok{ p}\OperatorTok{[}\NormalTok{idx}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ r\_al }\OperatorTok{*}\NormalTok{ div}\OperatorTok{[}\NormalTok{idx}\OperatorTok{];}
+    \OperatorTok{\}}
+\OperatorTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{3. Dictionnaire de Correspondance : Équations Théoriques vs
+Code
+C++}\label{dictionnaire-de-correspondance-uxe9quations-thuxe9oriques-vs-code-c}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2353}}
+  >{\centering\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2941}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2353}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2353}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Grandeur Mathématique
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Symbole Formel
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Variable C++ dans COVOF 2D
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Variable Fortran Référence Académique
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Champ de vitesse horizontale & \(u(x, y)\) & \texttt{fields.u{[}idx{]}}
+& \texttt{U(I,\ J)} \\
+Champ de vitesse verticale & \(v(x, y)\) & \texttt{fields.v{[}idx{]}} &
+\texttt{V(I,\ J)} \\
+Pression hydrodynamique & \(p(x, y)\) & \texttt{fields.p{[}idx{]}} &
+\texttt{P(I,\ J)} \\
+Fraction volumique VOF & \(C(x, y)\) & \texttt{fields.C{[}idx{]}} &
+\texttt{C(I,\ J)} \\
+Température locale & \(T(x, y)\) & \texttt{fields.T{[}idx{]}} &
+\texttt{T(I,\ J)} \\
+Masse volumique fluide & \(\rho\) & \texttt{fields.rho{[}idx{]}} &
+\texttt{RO(I,\ J)} \\
+Viscosité dynamique cellule & \(\mu_{cell}\) &
+\texttt{fields.mu{[}idx{]}} & \texttt{MU(I,\ J)} \\
+Viscosité nodale harmonique & \(\mu_{node}\) &
+\texttt{fields.mu\_node{[}idx{]}} & \texttt{MUNOD(I,\ J)} \\
+Paramètre d'augmentation AL & \(r_{al}\) & \texttt{config.solver.r\_al}
+& \texttt{RHO\_AL} / \texttt{R\_AL} \\
+Force de tension superficielle &
+\(\mathbf{F}_\sigma = \sigma \kappa \nabla C\) &
+\texttt{fields.fx\_sigma}, \texttt{fields.fy\_sigma} & \texttt{FSIGMAX},
+\texttt{FSIGMAY} \\
+Courbure de l'interface & \(\kappa = -\nabla \cdot \mathbf{n}\) &
+\texttt{fields.curvature{[}idx{]}} & \texttt{COURB(I,\ J)} \\
+Perméabilité de Brinkman & \(K_{solid}\) &
+\texttt{config.immersed\_boundary.permeability} &
+\texttt{PERM(I,\ J)} \\
+Nombre de Nusselt moyen & \(\overline{Nu}\) &
+\texttt{fields.mean\_nusselt} & \texttt{NUMOY} \\
+\end{longtable}
+}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{4. Détail d'Implémentation des Modules
+Fondamentaux}\label{duxe9tail-dimpluxe9mentation-des-modules-fondamentaux}
+
+\subsubsection{\texorpdfstring{4.1. Module de Communication et
+Parallélisme MPI
+(\texttt{src/MpiComm.cpp})}{4.1. Module de Communication et Parallélisme MPI (src/MpiComm.cpp)}}\label{module-de-communication-et-paralluxe9lisme-mpi-srcmpicomm.cpp}
+
+Le module \texttt{MpiComm} implémente des échanges de halos
+bidirectionnels non-bloquants :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\DataTypeTok{void}\NormalTok{ MpiComm}\OperatorTok{::}\NormalTok{exchange\_halos\_scalar}\OperatorTok{(}\BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}\&}\NormalTok{ field}\OperatorTok{,} \AttributeTok{const}\NormalTok{ Mesh2D}\OperatorTok{\&}\NormalTok{ mesh}\OperatorTok{)} \OperatorTok{\{}
+\NormalTok{    MPI\_Request requests}\OperatorTok{[}\DecValTok{8}\OperatorTok{];}
+    \DataTypeTok{int}\NormalTok{ req\_count }\OperatorTok{=} \DecValTok{0}\OperatorTok{;}
+
+    \CommentTok{// 1. Envoi vers le voisin Ouest / Réception du voisin Est}
+    \ControlFlowTok{if} \OperatorTok{(}\NormalTok{mesh}\OperatorTok{.}\NormalTok{neighbor\_west }\OperatorTok{!=}\NormalTok{ MPI\_PROC\_NULL}\OperatorTok{)} \OperatorTok{\{}
+\NormalTok{        pack\_west\_buffer}\OperatorTok{(}\NormalTok{field}\OperatorTok{,}\NormalTok{ send\_buffer\_west}\OperatorTok{);}
+\NormalTok{        MPI\_Isend}\OperatorTok{(}\NormalTok{send\_buffer\_west}\OperatorTok{.}\NormalTok{data}\OperatorTok{(),}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{ny\_local}\OperatorTok{,}\NormalTok{ MPI\_DOUBLE}\OperatorTok{,}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{neighbor\_west}\OperatorTok{,} \DecValTok{0}\OperatorTok{,}\NormalTok{ cart\_comm}\OperatorTok{,} \OperatorTok{\&}\NormalTok{requests}\OperatorTok{[}\NormalTok{req\_count}\OperatorTok{++]);}
+\NormalTok{        MPI\_Irecv}\OperatorTok{(}\NormalTok{recv\_buffer\_west}\OperatorTok{.}\NormalTok{data}\OperatorTok{(),}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{ny\_local}\OperatorTok{,}\NormalTok{ MPI\_DOUBLE}\OperatorTok{,}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{neighbor\_west}\OperatorTok{,} \DecValTok{1}\OperatorTok{,}\NormalTok{ cart\_comm}\OperatorTok{,} \OperatorTok{\&}\NormalTok{requests}\OperatorTok{[}\NormalTok{req\_count}\OperatorTok{++]);}
+    \OperatorTok{\}}
+    \CommentTok{// ... Déroulement identique pour les directions Est, Sud et Nord ...}
+    
+    \CommentTok{// Attente synchrone du groupe de requêtes}
+\NormalTok{    MPI\_Waitall}\OperatorTok{(}\NormalTok{req\_count}\OperatorTok{,}\NormalTok{ requests}\OperatorTok{,}\NormalTok{ MPI\_STATUSES\_IGNORE}\OperatorTok{);}
+    
+    \CommentTok{// Dépaquetage dans les halos}
+\NormalTok{    unpack\_halos}\OperatorTok{(}\NormalTok{field}\OperatorTok{);}
+\OperatorTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{\texorpdfstring{4.2. Module d'Assemblage Navier-Stokes et
+Lagrangien Augmenté
+(\texttt{src/NavierStokesSolver.cpp})}{4.2. Module d'Assemblage Navier-Stokes et Lagrangien Augmenté (src/NavierStokesSolver.cpp)}}\label{module-dassemblage-navier-stokes-et-lagrangien-augmentuxe9-srcnavierstokessolver.cpp}
+
+L'assemblage matriciel repose sur la méthode
+\texttt{apply\_A(const\ std::vector\textless{}double\textgreater{}\&\ x,\ std::vector\textless{}double\textgreater{}\&\ y)}
+qui implémente le produit matrice-vecteur de l'opérateur couplé de
+quantité de mouvement :
+
+\[\mathbf{y} = \left( \frac{\rho}{\Delta t} \mathbf{I} - \nabla \cdot (2\mu \mathbf{D}) - r_{al} \nabla \text{div} + \frac{\mu}{K_{solid}} \right) \mathbf{x}\]
+
+L'utilisation de cette méthode sans construction explicite d'une matrice
+creuse permet une efficacité mémoire maximale et une vectorisation
+fluide par le compilateur.
+
+\subsubsection{4.3. Module d'Énergie Thermique et
+Flottabilité}\label{module-duxe9nergie-thermique-et-flottabilituxe9}
+
+La fonction \texttt{solve\_energy(FlowFields\&\ fields,\ double\ dt)}
+résout l'équation de la chaleur implicite avec couplage Boussinesq :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\DataTypeTok{void}\NormalTok{ NavierStokesSolver}\OperatorTok{::}\NormalTok{solve\_energy}\OperatorTok{(}\NormalTok{FlowFields}\OperatorTok{\&}\NormalTok{ fields}\OperatorTok{,} \DataTypeTok{double}\NormalTok{ dt}\OperatorTok{)} \OperatorTok{\{}
+    \CommentTok{// 1. Assemblage du second membre : flux conductifs et convectifs}
+\NormalTok{    assemble\_energy\_system}\OperatorTok{(}\NormalTok{rhs\_T}\OperatorTok{,}\NormalTok{ diag\_T}\OperatorTok{);}
+    
+    \CommentTok{// 2. Inversion linéaire par Gradient Conjugué / BiCGSTAB2}
+\NormalTok{    energy\_solver}\OperatorTok{{-}\textgreater{}}\NormalTok{solve}\OperatorTok{(}\NormalTok{energy\_matrix}\OperatorTok{,}\NormalTok{ fields}\OperatorTok{.}\NormalTok{T}\OperatorTok{,}\NormalTok{ rhs\_T}\OperatorTok{,}\NormalTok{ jacobi\_precond}\OperatorTok{);}
+    
+    \CommentTok{// 3. Synchronisation des conditions aux limites isothermes / adiabatiques}
+\NormalTok{    comm}\OperatorTok{.}\NormalTok{apply\_thermal\_boundary\_conditions}\OperatorTok{(}\NormalTok{fields}\OperatorTok{.}\NormalTok{T}\OperatorTok{,}\NormalTok{ mesh}\OperatorTok{);}
+    
+    \CommentTok{// 4. Calcul immédiat du gradient thermique pariétal et du nombre de Nusselt}
+\NormalTok{    fields}\OperatorTok{.}\NormalTok{mean\_nusselt }\OperatorTok{=}\NormalTok{ compute\_mean\_nusselt\_hot\_wall}\OperatorTok{(}\NormalTok{fields}\OperatorTok{.}\NormalTok{T}\OperatorTok{,}\NormalTok{ mesh}\OperatorTok{);}
+\OperatorTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{5. Guide Développeur : Étendre le Solveur COVOF
+2D}\label{guide-duxe9veloppeur-uxe9tendre-le-solveur-covof-2d}
+
+\subsubsection{5.1. Tutoriel 1 : Ajouter une Nouvelle Équation de
+Transport Scalaire (ex: Espèce
+Chimique)}\label{tutoriel-1-ajouter-une-nouvelle-uxe9quation-de-transport-scalaire-ex-espuxe8ce-chimique}
+
+Pour ajouter une équation de transport d'une fraction massique
+\(Y(\mathbf{x}, t)\) avec diffusion de Fick \(D_m\) :
+\[\frac{\partial (\rho Y)}{\partial t} + \nabla \cdot (\rho \mathbf{u} Y) = \nabla \cdot (\rho D_m \nabla Y) + \dot{\omega}_Y\]
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Ajouter le champ dans \texttt{include/fugu/Fields2D.hpp}} :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ Y}\OperatorTok{;}       \CommentTok{// Fraction massique}
+\BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ D\_fick}\OperatorTok{;}  \CommentTok{// Coefficient de diffusion}
+\end{Highlighting}
+\end{Shaded}
+\item
+  \textbf{Allouer dans \texttt{src/Fields2D.cpp}} :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{Y}\OperatorTok{.}\NormalTok{assign}\OperatorTok{(}\NormalTok{total\_cells}\OperatorTok{,} \FloatTok{0.0}\OperatorTok{);}
+\NormalTok{D\_fick}\OperatorTok{.}\NormalTok{assign}\OperatorTok{(}\NormalTok{total\_cells}\OperatorTok{,} \FloatTok{1.0e{-}5}\OperatorTok{);}
+\end{Highlighting}
+\end{Shaded}
+\item
+  \textbf{Créer la méthode de résolution dans
+  \texttt{NavierStokesSolver}} :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\DataTypeTok{void}\NormalTok{ solve\_species}\OperatorTok{(}\NormalTok{FlowFields}\OperatorTok{\&}\NormalTok{ fields}\OperatorTok{,} \DataTypeTok{double}\NormalTok{ dt}\OperatorTok{);}
+\end{Highlighting}
+\end{Shaded}
+\item
+  \textbf{Appeler la méthode dans la boucle de temps de
+  \texttt{Simulation::run()}}.
+\end{enumerate}
+
+\subsubsection{5.2. Tutoriel 2 : Implémenter un Nouveau Préconditionneur
+(ex: Multigrille
+Géométrique)}\label{tutoriel-2-impluxe9menter-un-nouveau-pruxe9conditionneur-ex-multigrille-guxe9omuxe9trique}
+
+Toutes les classes de préconditionneurs héritent de l'interface
+abstraite \texttt{PreconditionerBase} définie dans
+\texttt{include/fugu/LinearSolver.hpp} :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\KeywordTok{class}\NormalTok{ PreconditionerBase }\OperatorTok{\{}
+\KeywordTok{public}\OperatorTok{:}
+    \KeywordTok{virtual} \OperatorTok{\textasciitilde{}}\NormalTok{PreconditionerBase}\OperatorTok{()} \OperatorTok{=} \ControlFlowTok{default}\OperatorTok{;}
+    \KeywordTok{virtual} \DataTypeTok{void}\NormalTok{ setup}\OperatorTok{(}\AttributeTok{const}\NormalTok{ StencilOperator}\OperatorTok{\&}\NormalTok{ A}\OperatorTok{,} \AttributeTok{const}\NormalTok{ Mesh2D}\OperatorTok{\&}\NormalTok{ mesh}\OperatorTok{)} \OperatorTok{=} \DecValTok{0}\OperatorTok{;}
+    \KeywordTok{virtual} \DataTypeTok{void}\NormalTok{ apply}\OperatorTok{(}\AttributeTok{const} \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}\&}\NormalTok{ r}\OperatorTok{,} \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}\&}\NormalTok{ z}\OperatorTok{)} \AttributeTok{const} \OperatorTok{=} \DecValTok{0}\OperatorTok{;}
+\OperatorTok{\};}
+\end{Highlighting}
+\end{Shaded}
+
+Pour créer un préconditionneur multigrille géométrique à cycles en V
+(\texttt{GeometricMultigridPreconditioner}) : 1. Créez les méthodes de
+restriction (\emph{full weighting}) et de prolongation bilinéaire. 2.
+Implémentez un lisseur de Gauss-Seidel rouge-noir (\emph{Red-Black
+Gauss-Seidel}) adapté à la grille décalée MAC. 3. Enregistrez la
+nouvelle classe dans la fabrique
+\texttt{PreconditionerFactory::create("MULTIGRID")}.
+
+\subsubsection{5.3. Tutoriel 3 : Implémenter un Nouveau Solveur Linéaire
+ou Brancher
+MUMPS}\label{tutoriel-3-impluxe9menter-un-nouveau-solveur-linuxe9aire-ou-brancher-mumps}
+
+Pour interfacer le solveur direct multifrontal parallèle \textbf{MUMPS}
+: 1. Implémentez la classe \texttt{MumpsLinearSolver} dérivant de
+\texttt{LinearSolverBase}. 2. Convertissez le stencil local en
+coordonnées distribuées au format COO (\texttt{row}, \texttt{col},
+\texttt{val}). 3. Appelez les phases de MUMPS : - Analyse symbolique :
+\texttt{job\ =\ 1} - Factorisation numérique : \texttt{job\ =\ 2} -
+Résolution du second membre distribué : \texttt{job\ =\ 3} 4. Ajoutez
+l'option \texttt{"MUMPS"} dans le bloc \texttt{"solver"} de votre
+fichier JSON de configuration.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{6. Normes de Développement, Assurance Qualité et
+Profilage}\label{normes-de-duxe9veloppement-assurance-qualituxe9-et-profilage}
+
+\subsubsection{6.1. Conventions de Codage et Bonnes Pratiques
+C++20}\label{conventions-de-codage-et-bonnes-pratiques-c20}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Espaces de noms} : Tout le code réside exclusivement dans le
+  namespace \texttt{fugu::}.
+\item
+  \textbf{Typage fort et qualificatifs \texttt{const}} : Toutes les
+  méthodes ne modifiant pas l'état interne de la classe doivent être
+  qualifiées \texttt{const}.
+\item
+  \textbf{Passage d'arguments} : Par référence constante
+  (\texttt{const\ Type\&}) pour les structures et vecteurs ; par valeur
+  pour les types primitifs (\texttt{int}, \texttt{double},
+  \texttt{bool}).
+\item
+  \textbf{Nommage} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Classes et Structures : \texttt{CamelCase} (ex:
+    \texttt{NavierStokesSolver}, \texttt{InterfaceTracker}).
+  \item
+    Fonctions et Méthodes : \texttt{snake\_case} (ex:
+    \texttt{assemble\_rhs()}, \texttt{exchange\_halos()}).
+  \item
+    Variables membres : \texttt{m\_prefix} ou suffixes explicites (ex:
+    \texttt{m\_mesh}, \texttt{dx}, \texttt{dt}).
+  \end{itemize}
+\end{itemize}
+
+\subsubsection{6.2. Débogage sous MPI avec GDB / LLDB et
+Valgrind}\label{duxe9bogage-sous-mpi-avec-gdb-lldb-et-valgrind}
+
+Pour traquer une erreur de segmentation ou une corruption mémoire sur un
+calcul parallèle :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Lancement de GDB sur chaque rang MPI dans un terminal séparé (sous X11) :}
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 2 xterm }\AttributeTok{{-}e}\NormalTok{ gdb }\AttributeTok{{-}{-}args}\NormalTok{ bin/covof2d cases/cavity\_re1000.json}
+
+\CommentTok{\# Vérification des fuites de mémoire avec Valgrind :}
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 2 valgrind }\AttributeTok{{-}{-}leak{-}check}\OperatorTok{=}\NormalTok{full }\AttributeTok{{-}{-}track{-}origins}\OperatorTok{=}\NormalTok{yes bin/covof2d cases/laplacian.json}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{6.3. Profilage des Performances
+CPU}\label{profilage-des-performances-cpu}
+
+Pour analyser la consommation de temps de calcul par routine et vérifier
+la vectorisation SIMD :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Compilation avec symboles de profilage ({-}g {-}O3)}
+\FunctionTok{cmake}\NormalTok{ .. }\AttributeTok{{-}DCMAKE\_BUILD\_TYPE}\OperatorTok{=}\NormalTok{RelWithDebInfo}
+\FunctionTok{make} \AttributeTok{{-}j4}
+
+\CommentTok{\# Enregistrement du profil matériel avec perf sous Linux :}
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 2 perf record }\AttributeTok{{-}{-}call{-}graph}\NormalTok{ dwarf bin/covof2d cases/cavity\_re1000.json}
+\ExtensionTok{perf}\NormalTok{ report}
+\end{Highlighting}
+\end{Shaded}
+
+La répartition typique du temps de calcul dans une simulation COVOF 2D
+stabilisée est : - Produit matrice-vecteur Krylov (\texttt{apply\_A}) :
+\textbf{\(65\,\% - 75\,\%\)} - Préconditionnement Jacobi :
+\textbf{\(10\,\% - 15\,\%\)} - Échanges de halos MPI non-bloquants :
+\textbf{\(5\,\% - 10\,\%\)} - Assemblage du second membre et VOF :
+\textbf{\(5\,\%\)}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{7. Visite Guidée du Code Source C++20 et Analyse Ligne par
+Ligne}\label{visite-guiduxe9e-du-code-source-c20-et-analyse-ligne-par-ligne}
+
+\subsubsection{\texorpdfstring{7.1. Module \texttt{Mesh2D}
+(\texttt{include/fugu/Mesh2D.hpp} et
+\texttt{src/Mesh2D.cpp})}{7.1. Module Mesh2D (include/fugu/Mesh2D.hpp et src/Mesh2D.cpp)}}\label{module-mesh2d-includefugumesh2d.hpp-et-srcmesh2d.cpp}
+
+La classe \texttt{Mesh2D} encapsule la topologie cartésienne du maillage
+décalé (MAC) et gère la partition spatiale entre processus MPI.
+
+\paragraph{Définition des Bornes Locales et
+Globales}\label{duxe9finition-des-bornes-locales-et-globales}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\KeywordTok{struct}\NormalTok{ Mesh2D }\OperatorTok{\{}
+    \CommentTok{// Dimensions globales du problème physique}
+    \DataTypeTok{int}\NormalTok{ nx\_global}\OperatorTok{,}\NormalTok{ ny\_global}\OperatorTok{;}
+    \DataTypeTok{double}\NormalTok{ lx}\OperatorTok{,}\NormalTok{ ly}\OperatorTok{;}
+    \DataTypeTok{double}\NormalTok{ dx}\OperatorTok{,}\NormalTok{ dy}\OperatorTok{;}
+
+    \CommentTok{// Décomposition de domaine MPI}
+    \DataTypeTok{int}\NormalTok{ rank}\OperatorTok{,}\NormalTok{ size}\OperatorTok{;}
+    \DataTypeTok{int}\NormalTok{ px}\OperatorTok{,}\NormalTok{ py}\OperatorTok{;}          \CommentTok{// Nombre de sous{-}domaines selon X et Y (size = px * py)}
+    \DataTypeTok{int}\NormalTok{ coord\_x}\OperatorTok{,}\NormalTok{ coord\_y}\OperatorTok{;}\CommentTok{// Coordonnées cartésiennes du processus courant dans la grille de processus}
+    \DataTypeTok{int}\NormalTok{ neighbor\_west}\OperatorTok{,}\NormalTok{ neighbor\_east}\OperatorTok{;}
+    \DataTypeTok{int}\NormalTok{ neighbor\_south}\OperatorTok{,}\NormalTok{ neighbor\_north}\OperatorTok{;}
+
+    \CommentTok{// Bornes locales de calcul (sans halos)}
+    \DataTypeTok{int}\NormalTok{ nx\_local}\OperatorTok{,}\NormalTok{ ny\_local}\OperatorTok{;}
+    \DataTypeTok{int}\NormalTok{ i\_start\_global}\OperatorTok{,}\NormalTok{ j\_start\_global}\OperatorTok{;} \CommentTok{// Décalage global pour la reconstruction}
+
+    \CommentTok{// Conversion d\textquotesingle{}indices locaux en coordonnées physiques}
+    \DataTypeTok{double}\NormalTok{ x\_face}\OperatorTok{(}\DataTypeTok{int}\NormalTok{ i}\OperatorTok{)} \AttributeTok{const} \OperatorTok{\{} \ControlFlowTok{return} \OperatorTok{(}\NormalTok{i\_start\_global }\OperatorTok{+}\NormalTok{ i }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{)} \OperatorTok{*}\NormalTok{ dx}\OperatorTok{;} \OperatorTok{\}}
+    \DataTypeTok{double}\NormalTok{ y\_face}\OperatorTok{(}\DataTypeTok{int}\NormalTok{ j}\OperatorTok{)} \AttributeTok{const} \OperatorTok{\{} \ControlFlowTok{return} \OperatorTok{(}\NormalTok{j\_start\_global }\OperatorTok{+}\NormalTok{ j }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{)} \OperatorTok{*}\NormalTok{ dy}\OperatorTok{;} \OperatorTok{\}}
+    \DataTypeTok{double}\NormalTok{ x\_center}\OperatorTok{(}\DataTypeTok{int}\NormalTok{ i}\OperatorTok{)} \AttributeTok{const} \OperatorTok{\{} \ControlFlowTok{return} \OperatorTok{(}\NormalTok{i\_start\_global }\OperatorTok{+}\NormalTok{ i }\OperatorTok{{-}} \FloatTok{0.5}\OperatorTok{)} \OperatorTok{*}\NormalTok{ dx}\OperatorTok{;} \OperatorTok{\}}
+    \DataTypeTok{double}\NormalTok{ y\_center}\OperatorTok{(}\DataTypeTok{int}\NormalTok{ j}\OperatorTok{)} \AttributeTok{const} \OperatorTok{\{} \ControlFlowTok{return} \OperatorTok{(}\NormalTok{j\_start\_global }\OperatorTok{+}\NormalTok{ j }\OperatorTok{{-}} \FloatTok{0.5}\OperatorTok{)} \OperatorTok{*}\NormalTok{ dy}\OperatorTok{;} \OperatorTok{\}}
+\OperatorTok{\};}
+\end{Highlighting}
+\end{Shaded}
+
+Dans \texttt{src/Mesh2D.cpp}, la topologie cartésienne est créée par
+\texttt{MPI\_Cart\_create} avec l'option de périodicité gérée de façon
+modulaire :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\DataTypeTok{int}\NormalTok{ dims}\OperatorTok{[}\DecValTok{2}\OperatorTok{]} \OperatorTok{=} \OperatorTok{\{}\DecValTok{0}\OperatorTok{,} \DecValTok{0}\OperatorTok{\};}
+\NormalTok{MPI\_Dims\_create}\OperatorTok{(}\NormalTok{size}\OperatorTok{,} \DecValTok{2}\OperatorTok{,}\NormalTok{ dims}\OperatorTok{);} \CommentTok{// Optimise le ratio de forme px / py}
+\NormalTok{px }\OperatorTok{=}\NormalTok{ dims}\OperatorTok{[}\DecValTok{0}\OperatorTok{];}\NormalTok{ py }\OperatorTok{=}\NormalTok{ dims}\OperatorTok{[}\DecValTok{1}\OperatorTok{];}
+\DataTypeTok{int}\NormalTok{ periods}\OperatorTok{[}\DecValTok{2}\OperatorTok{]} \OperatorTok{=} \OperatorTok{\{}\NormalTok{is\_periodic\_x }\OperatorTok{?} \DecValTok{1} \OperatorTok{:} \DecValTok{0}\OperatorTok{,}\NormalTok{ is\_periodic\_y }\OperatorTok{?} \DecValTok{1} \OperatorTok{:} \DecValTok{0}\OperatorTok{\};}
+\NormalTok{MPI\_Cart\_create}\OperatorTok{(}\NormalTok{MPI\_COMM\_WORLD}\OperatorTok{,} \DecValTok{2}\OperatorTok{,}\NormalTok{ dims}\OperatorTok{,}\NormalTok{ periods}\OperatorTok{,} \DecValTok{1}\OperatorTok{,} \OperatorTok{\&}\NormalTok{cart\_comm}\OperatorTok{);}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{\texorpdfstring{7.2. Module \texttt{FlowFields}
+(\texttt{include/fugu/Fields2D.hpp})}{7.2. Module FlowFields (include/fugu/Fields2D.hpp)}}\label{module-flowfields-includefugufields2d.hpp}
+
+La classe \texttt{FlowFields} regroupe l'ensemble des mémoires tampons
+de simulation. Les tableaux 1D contigus permettent une allocation
+vectorielle garantie sans dispersion dans le tas :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\KeywordTok{class}\NormalTok{ FlowFields }\OperatorTok{\{}
+\KeywordTok{public}\OperatorTok{:}
+    \DataTypeTok{int}\NormalTok{ stride}\OperatorTok{;} \CommentTok{// Largeur de ligne en mémoire = nx\_local + 2 (inclus halos)}
+    
+    \CommentTok{// Champs hydrodynamiques}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ u}\OperatorTok{;}        \CommentTok{// Vitesse axiale décalée aux faces x}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ v}\OperatorTok{;}        \CommentTok{// Vitesse verticale décalée aux faces y}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ p}\OperatorTok{;}        \CommentTok{// Pression au centre des cellules}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ div}\OperatorTok{;}      \CommentTok{// Divergence locale discrète}
+    
+    \CommentTok{// Champs scalaires et thermodynamiques}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ C}\OperatorTok{;}        \CommentTok{// Fraction volumique VOF [0, 1]}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ T}\OperatorTok{;}        \CommentTok{// Température [K]}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ rho}\OperatorTok{;}      \CommentTok{// Masse volumique équivalente}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ mu}\OperatorTok{;}       \CommentTok{// Viscosité dynamique cellule}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ mu\_node}\OperatorTok{;}  \CommentTok{// Viscosité harmonique nodale}
+    
+    \CommentTok{// Forces volumiques}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ fx\_sigma}\OperatorTok{;} \CommentTok{// Composante capillaire CSF axiale}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ fy\_sigma}\OperatorTok{;} \CommentTok{// Composante capillaire CSF verticale}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ curvature}\OperatorTok{;}\CommentTok{// Courbure moyenne interfaciale}
+    
+    \CommentTok{// Indicateur d\textquotesingle{}obstacle Brinkman (1 = solide pénalisé, 0 = fluide)}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{int}\OperatorTok{\textgreater{}}\NormalTok{ solid\_mask}\OperatorTok{;}
+    
+    \KeywordTok{inline} \DataTypeTok{int}\NormalTok{ idx}\OperatorTok{(}\DataTypeTok{int}\NormalTok{ i}\OperatorTok{,} \DataTypeTok{int}\NormalTok{ j}\OperatorTok{)} \AttributeTok{const} \OperatorTok{\{} \ControlFlowTok{return}\NormalTok{ j }\OperatorTok{*}\NormalTok{ stride }\OperatorTok{+}\NormalTok{ i}\OperatorTok{;} \OperatorTok{\}}
+\OperatorTok{\};}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{\texorpdfstring{7.3. Module \texttt{NavierStokesSolver}
+(\texttt{src/NavierStokesSolver.cpp})}{7.3. Module NavierStokesSolver (src/NavierStokesSolver.cpp)}}\label{module-navierstokessolver-srcnavierstokessolver.cpp}
+
+Le cœur du solveur réside dans l'opérateur Matrix-Free \texttt{apply\_A}
+qui applique le stencil du Lagrangien Augmenté sur un vecteur vitesse
+\((\mathbf{u}, \mathbf{v})\) :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\DataTypeTok{void}\NormalTok{ NavierStokesSolver}\OperatorTok{::}\NormalTok{apply\_A}\OperatorTok{(}\AttributeTok{const} \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}\&}\NormalTok{ x}\OperatorTok{,} \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}\&}\NormalTok{ y}\OperatorTok{)} \AttributeTok{const} \OperatorTok{\{}
+    \AttributeTok{const} \DataTypeTok{int}\NormalTok{ stride }\OperatorTok{=}\NormalTok{ fields}\OperatorTok{.}\NormalTok{stride}\OperatorTok{;}
+    \AttributeTok{const} \DataTypeTok{int}\NormalTok{ offset\_v }\OperatorTok{=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{total\_cells}\OperatorTok{;}
+    \AttributeTok{const} \DataTypeTok{double}\NormalTok{ dx }\OperatorTok{=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{dx}\OperatorTok{,}\NormalTok{ dy }\OperatorTok{=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{dy}\OperatorTok{;}
+    \AttributeTok{const} \DataTypeTok{double}\NormalTok{ idx2 }\OperatorTok{=} \FloatTok{1.0} \OperatorTok{/} \OperatorTok{(}\NormalTok{dx }\OperatorTok{*}\NormalTok{ dx}\OperatorTok{),}\NormalTok{ idy2 }\OperatorTok{=} \FloatTok{1.0} \OperatorTok{/} \OperatorTok{(}\NormalTok{dy }\OperatorTok{*}\NormalTok{ dy}\OperatorTok{);}
+    \AttributeTok{const} \DataTypeTok{double}\NormalTok{ idxdy }\OperatorTok{=} \FloatTok{1.0} \OperatorTok{/} \OperatorTok{(}\NormalTok{dx }\OperatorTok{*}\NormalTok{ dy}\OperatorTok{);}
+
+    \CommentTok{// Boucle sur les composantes u (faces x)}
+    \ControlFlowTok{for} \OperatorTok{(}\DataTypeTok{int}\NormalTok{ j }\OperatorTok{=} \DecValTok{1}\OperatorTok{;}\NormalTok{ j }\OperatorTok{\textless{}=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{ny\_local}\OperatorTok{;} \OperatorTok{++}\NormalTok{j}\OperatorTok{)} \OperatorTok{\{}
+        \ControlFlowTok{for} \OperatorTok{(}\DataTypeTok{int}\NormalTok{ i }\OperatorTok{=} \DecValTok{1}\OperatorTok{;}\NormalTok{ i }\OperatorTok{\textless{}=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{nx\_local }\OperatorTok{+} \DecValTok{1}\OperatorTok{;} \OperatorTok{++}\NormalTok{i}\OperatorTok{)} \OperatorTok{\{}
+            \DataTypeTok{int}\NormalTok{ id }\OperatorTok{=}\NormalTok{ j }\OperatorTok{*}\NormalTok{ stride }\OperatorTok{+}\NormalTok{ i}\OperatorTok{;}
+            \DataTypeTok{double}\NormalTok{ u\_c }\OperatorTok{=}\NormalTok{ x}\OperatorTok{[}\NormalTok{id}\OperatorTok{];}
+            
+            \CommentTok{// 1. Terme d\textquotesingle{}inertie transitoire rho / dt}
+            \DataTypeTok{double}\NormalTok{ diag\_term }\OperatorTok{=} \OperatorTok{(}\NormalTok{fields}\OperatorTok{.}\NormalTok{rho}\OperatorTok{[}\NormalTok{id}\OperatorTok{]} \OperatorTok{+}\NormalTok{ fields}\OperatorTok{.}\NormalTok{rho}\OperatorTok{[}\NormalTok{id }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{])} \OperatorTok{*} \FloatTok{0.5} \OperatorTok{/}\NormalTok{ dt}\OperatorTok{;}
+            
+            \CommentTok{// 2. Tenseur des contraintes visqueuses tau\_xx et tau\_xy}
+            \DataTypeTok{double}\NormalTok{ d2u\_dx2 }\OperatorTok{=} \OperatorTok{(}\FloatTok{2.0} \OperatorTok{*}\NormalTok{ fields}\OperatorTok{.}\NormalTok{mu}\OperatorTok{[}\NormalTok{id}\OperatorTok{]} \OperatorTok{*} \OperatorTok{(}\NormalTok{x}\OperatorTok{[}\NormalTok{id }\OperatorTok{+} \DecValTok{1}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ u\_c}\OperatorTok{)} 
+                            \OperatorTok{{-}} \FloatTok{2.0} \OperatorTok{*}\NormalTok{ fields}\OperatorTok{.}\NormalTok{mu}\OperatorTok{[}\NormalTok{id }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{]} \OperatorTok{*} \OperatorTok{(}\NormalTok{u\_c }\OperatorTok{{-}}\NormalTok{ x}\OperatorTok{[}\NormalTok{id }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{]))} \OperatorTok{*}\NormalTok{ idx2}\OperatorTok{;}
+            \DataTypeTok{double}\NormalTok{ d2u\_dy2 }\OperatorTok{=} \OperatorTok{(}\NormalTok{fields}\OperatorTok{.}\NormalTok{mu\_node}\OperatorTok{[}\NormalTok{id }\OperatorTok{+}\NormalTok{ stride}\OperatorTok{]} \OperatorTok{*} \OperatorTok{(}\NormalTok{x}\OperatorTok{[}\NormalTok{id }\OperatorTok{+}\NormalTok{ stride}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ u\_c}\OperatorTok{)} 
+                            \OperatorTok{{-}}\NormalTok{ fields}\OperatorTok{.}\NormalTok{mu\_node}\OperatorTok{[}\NormalTok{id}\OperatorTok{]} \OperatorTok{*} \OperatorTok{(}\NormalTok{u\_c }\OperatorTok{{-}}\NormalTok{ x}\OperatorTok{[}\NormalTok{id }\OperatorTok{{-}}\NormalTok{ stride}\OperatorTok{]))} \OperatorTok{*}\NormalTok{ idy2}\OperatorTok{;}
+            
+            \CommentTok{// 3. Pénalisation de la divergence du Lagrangien Augmenté : {-}r d(div u)/dx}
+            \DataTypeTok{double}\NormalTok{ div\_E }\OperatorTok{=} \OperatorTok{(}\NormalTok{x}\OperatorTok{[}\NormalTok{id }\OperatorTok{+} \DecValTok{1}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ u\_c}\OperatorTok{)} \OperatorTok{/}\NormalTok{ dx }\OperatorTok{+} \OperatorTok{(}\NormalTok{x}\OperatorTok{[}\NormalTok{offset\_v }\OperatorTok{+}\NormalTok{ id }\OperatorTok{+}\NormalTok{ stride}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ x}\OperatorTok{[}\NormalTok{offset\_v }\OperatorTok{+}\NormalTok{ id}\OperatorTok{])} \OperatorTok{/}\NormalTok{ dy}\OperatorTok{;}
+            \DataTypeTok{double}\NormalTok{ div\_W }\OperatorTok{=} \OperatorTok{(}\NormalTok{u\_c }\OperatorTok{{-}}\NormalTok{ x}\OperatorTok{[}\NormalTok{id }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{])} \OperatorTok{/}\NormalTok{ dx }\OperatorTok{+} \OperatorTok{(}\NormalTok{x}\OperatorTok{[}\NormalTok{offset\_v }\OperatorTok{+}\NormalTok{ id }\OperatorTok{{-}} \DecValTok{1} \OperatorTok{+}\NormalTok{ stride}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ x}\OperatorTok{[}\NormalTok{offset\_v }\OperatorTok{+}\NormalTok{ id }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{])} \OperatorTok{/}\NormalTok{ dy}\OperatorTok{;}
+            \DataTypeTok{double}\NormalTok{ al\_term }\OperatorTok{=} \OperatorTok{{-}}\NormalTok{r\_al }\OperatorTok{*} \OperatorTok{(}\NormalTok{div\_E }\OperatorTok{{-}}\NormalTok{ div\_W}\OperatorTok{)} \OperatorTok{/}\NormalTok{ dx}\OperatorTok{;}
+            
+            \CommentTok{// 4. Terme de pénalisation de Brinkman dans les obstacles}
+            \DataTypeTok{double}\NormalTok{ brinkman\_term }\OperatorTok{=} \FloatTok{0.0}\OperatorTok{;}
+            \ControlFlowTok{if} \OperatorTok{(}\NormalTok{fields}\OperatorTok{.}\NormalTok{solid\_mask}\OperatorTok{[}\NormalTok{id}\OperatorTok{]} \OperatorTok{||}\NormalTok{ fields}\OperatorTok{.}\NormalTok{solid\_mask}\OperatorTok{[}\NormalTok{id }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{])} \OperatorTok{\{}
+\NormalTok{                brinkman\_term }\OperatorTok{=} \OperatorTok{(}\NormalTok{fields}\OperatorTok{.}\NormalTok{mu}\OperatorTok{[}\NormalTok{id}\OperatorTok{]} \OperatorTok{/}\NormalTok{ permeability\_solid}\OperatorTok{)} \OperatorTok{*}\NormalTok{ u\_c}\OperatorTok{;}
+            \OperatorTok{\}}
+
+\NormalTok{            y}\OperatorTok{[}\NormalTok{id}\OperatorTok{]} \OperatorTok{=}\NormalTok{ diag\_term }\OperatorTok{*}\NormalTok{ u\_c }\OperatorTok{{-}} \OperatorTok{(}\NormalTok{d2u\_dx2 }\OperatorTok{+}\NormalTok{ d2u\_dy2}\OperatorTok{)} \OperatorTok{+}\NormalTok{ al\_term }\OperatorTok{+}\NormalTok{ brinkman\_term}\OperatorTok{;}
+        \OperatorTok{\}}
+    \OperatorTok{\}}
+    \CommentTok{// ... Traitement symétrique pour la composante v ...}
+\OperatorTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{8. Modèles d'Extension Clés en Main pour
+Développeurs}\label{moduxe8les-dextension-cluxe9s-en-main-pour-duxe9veloppeurs}
+
+\subsubsection{8.1. Modèle 1 : Implémenter un Modèle de Fluide
+Non-Newtonien (Loi de
+Puissance)}\label{moduxe8le-1-impluxe9menter-un-moduxe8le-de-fluide-non-newtonien-loi-de-puissance}
+
+Pour simuler des fluides rhéofluidifiants ou rhéoépaississants gouvernés
+par la loi d'Ostwald-de Waele :
+\[\mu(\dot{\gamma}) = K_c \, \dot{\gamma}^{n-1}\] où le second invariant
+du tenseur des taux de déformation vaut :
+\[\dot{\gamma} = \sqrt{2 \mathbf{D} : \mathbf{D}} = \sqrt{2 \left(\frac{\partial u}{\partial x}\right)^2 + 2 \left(\frac{\partial v}{\partial y}\right)^2 + \left(\frac{\partial u}{\partial y} + \frac{\partial v}{\partial x}\right)^2}\]
+
+Voici l'implémentation C++ prête à intégrer dans
+\texttt{src/NavierStokesSolver.cpp} :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\DataTypeTok{void}\NormalTok{ NavierStokesSolver}\OperatorTok{::}\NormalTok{update\_non\_newtonian\_viscosity}\OperatorTok{(}\DataTypeTok{double}\NormalTok{ K\_consist}\OperatorTok{,} \DataTypeTok{double}\NormalTok{ n\_index}\OperatorTok{,} \DataTypeTok{double}\NormalTok{ gamma\_dot\_min}\OperatorTok{)} \OperatorTok{\{}
+    \AttributeTok{const} \DataTypeTok{int}\NormalTok{ stride }\OperatorTok{=}\NormalTok{ fields}\OperatorTok{.}\NormalTok{stride}\OperatorTok{;}
+    \AttributeTok{const} \DataTypeTok{double}\NormalTok{ dx }\OperatorTok{=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{dx}\OperatorTok{,}\NormalTok{ dy }\OperatorTok{=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{dy}\OperatorTok{;}
+
+    \ControlFlowTok{for} \OperatorTok{(}\DataTypeTok{int}\NormalTok{ j }\OperatorTok{=} \DecValTok{1}\OperatorTok{;}\NormalTok{ j }\OperatorTok{\textless{}=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{ny\_local}\OperatorTok{;} \OperatorTok{++}\NormalTok{j}\OperatorTok{)} \OperatorTok{\{}
+        \ControlFlowTok{for} \OperatorTok{(}\DataTypeTok{int}\NormalTok{ i }\OperatorTok{=} \DecValTok{1}\OperatorTok{;}\NormalTok{ i }\OperatorTok{\textless{}=}\NormalTok{ mesh}\OperatorTok{.}\NormalTok{nx\_local}\OperatorTok{;} \OperatorTok{++}\NormalTok{i}\OperatorTok{)} \OperatorTok{\{}
+            \DataTypeTok{int}\NormalTok{ id }\OperatorTok{=}\NormalTok{ j }\OperatorTok{*}\NormalTok{ stride }\OperatorTok{+}\NormalTok{ i}\OperatorTok{;}
+            
+            \CommentTok{// Gradients au centre de la cellule}
+            \DataTypeTok{double}\NormalTok{ du\_dx }\OperatorTok{=} \OperatorTok{(}\NormalTok{fields}\OperatorTok{.}\NormalTok{u}\OperatorTok{[}\NormalTok{id }\OperatorTok{+} \DecValTok{1}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ fields}\OperatorTok{.}\NormalTok{u}\OperatorTok{[}\NormalTok{id}\OperatorTok{])} \OperatorTok{/}\NormalTok{ dx}\OperatorTok{;}
+            \DataTypeTok{double}\NormalTok{ dv\_dy }\OperatorTok{=} \OperatorTok{(}\NormalTok{fields}\OperatorTok{.}\NormalTok{v}\OperatorTok{[}\NormalTok{id }\OperatorTok{+}\NormalTok{ stride}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ fields}\OperatorTok{.}\NormalTok{v}\OperatorTok{[}\NormalTok{id}\OperatorTok{])} \OperatorTok{/}\NormalTok{ dy}\OperatorTok{;}
+            
+            \CommentTok{// Moyenne des gradients de cisaillement aux 4 sommets contigus}
+            \DataTypeTok{double}\NormalTok{ du\_dy }\OperatorTok{=} \FloatTok{0.25} \OperatorTok{*} \OperatorTok{((}\NormalTok{fields}\OperatorTok{.}\NormalTok{u}\OperatorTok{[}\NormalTok{id }\OperatorTok{+}\NormalTok{ stride}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ fields}\OperatorTok{.}\NormalTok{u}\OperatorTok{[}\NormalTok{id }\OperatorTok{{-}}\NormalTok{ stride}\OperatorTok{]} 
+                                  \OperatorTok{+}\NormalTok{ fields}\OperatorTok{.}\NormalTok{u}\OperatorTok{[}\NormalTok{id }\OperatorTok{+} \DecValTok{1} \OperatorTok{+}\NormalTok{ stride}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ fields}\OperatorTok{.}\NormalTok{u}\OperatorTok{[}\NormalTok{id }\OperatorTok{+} \DecValTok{1} \OperatorTok{{-}}\NormalTok{ stride}\OperatorTok{]))} \OperatorTok{/} \OperatorTok{(}\FloatTok{2.0} \OperatorTok{*}\NormalTok{ dy}\OperatorTok{);}
+            \DataTypeTok{double}\NormalTok{ dv\_dx }\OperatorTok{=} \FloatTok{0.25} \OperatorTok{*} \OperatorTok{((}\NormalTok{fields}\OperatorTok{.}\NormalTok{v}\OperatorTok{[}\NormalTok{id }\OperatorTok{+} \DecValTok{1}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ fields}\OperatorTok{.}\NormalTok{v}\OperatorTok{[}\NormalTok{id }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{]} 
+                                  \OperatorTok{+}\NormalTok{ fields}\OperatorTok{.}\NormalTok{v}\OperatorTok{[}\NormalTok{id }\OperatorTok{+}\NormalTok{ stride }\OperatorTok{+} \DecValTok{1}\OperatorTok{]} \OperatorTok{{-}}\NormalTok{ fields}\OperatorTok{.}\NormalTok{v}\OperatorTok{[}\NormalTok{id }\OperatorTok{+}\NormalTok{ stride }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{]))} \OperatorTok{/} \OperatorTok{(}\FloatTok{2.0} \OperatorTok{*}\NormalTok{ dx}\OperatorTok{);}
+            
+            \DataTypeTok{double}\NormalTok{ gamma\_dot }\OperatorTok{=} \BuiltInTok{std::}\NormalTok{sqrt}\OperatorTok{(}\FloatTok{2.0} \OperatorTok{*}\NormalTok{ du\_dx }\OperatorTok{*}\NormalTok{ du\_dx }\OperatorTok{+} \FloatTok{2.0} \OperatorTok{*}\NormalTok{ dv\_dy }\OperatorTok{*}\NormalTok{ dv\_dy }\OperatorTok{+} \BuiltInTok{std::}\NormalTok{pow}\OperatorTok{(}\NormalTok{du\_dy }\OperatorTok{+}\NormalTok{ dv\_dx}\OperatorTok{,} \DecValTok{2}\OperatorTok{));}
+\NormalTok{            gamma\_dot }\OperatorTok{=} \BuiltInTok{std::}\NormalTok{max}\OperatorTok{(}\NormalTok{gamma\_dot}\OperatorTok{,}\NormalTok{ gamma\_dot\_min}\OperatorTok{);} \CommentTok{// Régularisation pour éviter gamma\_dot {-}\textgreater{} 0 si n \textless{} 1}
+            
+            \CommentTok{// Mise à jour de la viscosité apparente locale}
+\NormalTok{            fields}\OperatorTok{.}\NormalTok{mu}\OperatorTok{[}\NormalTok{id}\OperatorTok{]} \OperatorTok{=}\NormalTok{ K\_consist }\OperatorTok{*} \BuiltInTok{std::}\NormalTok{pow}\OperatorTok{(}\NormalTok{gamma\_dot}\OperatorTok{,}\NormalTok{ n\_index }\OperatorTok{{-}} \FloatTok{1.0}\OperatorTok{);}
+        \OperatorTok{\}}
+    \OperatorTok{\}}
+    
+    \CommentTok{// Réévaluation immédiate des viscosités nodales harmoniques}
+\NormalTok{    update\_nodal\_viscosity}\OperatorTok{();}
+\NormalTok{    comm}\OperatorTok{.}\NormalTok{exchange\_halos\_scalar}\OperatorTok{(}\NormalTok{fields}\OperatorTok{.}\NormalTok{mu}\OperatorTok{,}\NormalTok{ mesh}\OperatorTok{);}
+\NormalTok{    comm}\OperatorTok{.}\NormalTok{exchange\_halos\_scalar}\OperatorTok{(}\NormalTok{fields}\OperatorTok{.}\NormalTok{mu\_node}\OperatorTok{,}\NormalTok{ mesh}\OperatorTok{);}
+\OperatorTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\subsubsection{8.2. Modèle 2 : Implémenter un Cycle en V Multigrille
+Géométrique
+(GMG)}\label{moduxe8le-2-impluxe9menter-un-cycle-en-v-multigrille-guxe9omuxe9trique-gmg}
+
+Pour accélérer la résolution de l'équation de Poisson du Laplacien
+cartésien (Cas 3.1) :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\KeywordTok{class}\NormalTok{ GeometricMultigridSolver }\OperatorTok{:} \KeywordTok{public}\NormalTok{ LinearSolverBase }\OperatorTok{\{}
+\KeywordTok{private}\OperatorTok{:}
+    \DataTypeTok{int}\NormalTok{ n\_levels}\OperatorTok{;}
+    \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\NormalTok{Mesh2D}\OperatorTok{\textgreater{}}\NormalTok{ grid\_hierarchy}\OperatorTok{;}
+    
+\KeywordTok{public}\OperatorTok{:}
+    \DataTypeTok{void}\NormalTok{ v\_cycle}\OperatorTok{(}\DataTypeTok{int}\NormalTok{ level}\OperatorTok{,} \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}\&}\NormalTok{ u}\OperatorTok{,} \AttributeTok{const} \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}\&}\NormalTok{ f}\OperatorTok{)} \OperatorTok{\{}
+        \ControlFlowTok{if} \OperatorTok{(}\NormalTok{level }\OperatorTok{==}\NormalTok{ n\_levels }\OperatorTok{{-}} \DecValTok{1}\OperatorTok{)} \OperatorTok{\{}
+            \CommentTok{// Niveau le plus grossier : résolution directe ou nombreuses itérations Jacobi}
+\NormalTok{            coarse\_solve}\OperatorTok{(}\NormalTok{u}\OperatorTok{,}\NormalTok{ f}\OperatorTok{);}
+            \ControlFlowTok{return}\OperatorTok{;}
+        \OperatorTok{\}}
+
+        \CommentTok{// 1. Pré{-}lissage : 2 itérations de Gauss{-}Seidel Rouge{-}Noir}
+\NormalTok{        smooth\_red\_black}\OperatorTok{(}\NormalTok{level}\OperatorTok{,}\NormalTok{ u}\OperatorTok{,}\NormalTok{ f}\OperatorTok{,} \DecValTok{2}\OperatorTok{);}
+
+        \CommentTok{// 2. Calcul du résidu r = f {-} A*u}
+        \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ r}\OperatorTok{(}\NormalTok{grid\_hierarchy}\OperatorTok{[}\NormalTok{level}\OperatorTok{].}\NormalTok{total\_cells}\OperatorTok{);}
+\NormalTok{        compute\_residual}\OperatorTok{(}\NormalTok{level}\OperatorTok{,}\NormalTok{ u}\OperatorTok{,}\NormalTok{ f}\OperatorTok{,}\NormalTok{ r}\OperatorTok{);}
+
+        \CommentTok{// 3. Restriction sur la grille grossière (Full Weighting 9 points)}
+        \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ f\_coarse}\OperatorTok{(}\NormalTok{grid\_hierarchy}\OperatorTok{[}\NormalTok{level }\OperatorTok{+} \DecValTok{1}\OperatorTok{].}\NormalTok{total\_cells}\OperatorTok{);}
+\NormalTok{        restrict\_full\_weighting}\OperatorTok{(}\NormalTok{r}\OperatorTok{,}\NormalTok{ f\_coarse}\OperatorTok{);}
+
+        \CommentTok{// 4. Appel récursif sur la grille inférieure}
+        \BuiltInTok{std::}\NormalTok{vector}\OperatorTok{\textless{}}\DataTypeTok{double}\OperatorTok{\textgreater{}}\NormalTok{ e\_coarse}\OperatorTok{(}\NormalTok{grid\_hierarchy}\OperatorTok{[}\NormalTok{level }\OperatorTok{+} \DecValTok{1}\OperatorTok{].}\NormalTok{total\_cells}\OperatorTok{,} \FloatTok{0.0}\OperatorTok{);}
+\NormalTok{        v\_cycle}\OperatorTok{(}\NormalTok{level }\OperatorTok{+} \DecValTok{1}\OperatorTok{,}\NormalTok{ e\_coarse}\OperatorTok{,}\NormalTok{ f\_coarse}\OperatorTok{);}
+
+        \CommentTok{// 5. Prolongation bilinéaire de la correction d\textquotesingle{}erreur et correction : u = u + P*e}
+\NormalTok{        prolongate\_and\_correct}\OperatorTok{(}\NormalTok{e\_coarse}\OperatorTok{,}\NormalTok{ u}\OperatorTok{);}
+
+        \CommentTok{// 6. Post{-}lissage : 2 itérations de Gauss{-}Seidel Rouge{-}Noir}
+\NormalTok{        smooth\_red\_black}\OperatorTok{(}\NormalTok{level}\OperatorTok{,}\NormalTok{ u}\OperatorTok{,}\NormalTok{ f}\OperatorTok{,} \DecValTok{2}\OperatorTok{);}
+    \OperatorTok{\}}
+\OperatorTok{\};}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{9. Procédure de Contribution et Intégration
+Continue}\label{procuxe9dure-de-contribution-et-intuxe9gration-continue}
+
+Pour proposer de nouveaux développements dans COVOF 2D : 1.
+\textbf{Création d'une branche de travail} :
+\texttt{git\ checkout\ -b\ feature/mon\_modele\_physique}. 2.
+\textbf{Implémentation et respect des règles C++20} (zéro allocation
+dynamique dans \texttt{run()}). 3. \textbf{Validation obligatoire de
+non-régression} : L'exécution complète du script de benchmark doit
+produire \textbf{100\% de PASS} :
+\texttt{bash\ \ \ \ bash\ scripts/run\_all\_benchmarks.sh\ 2\ \ \ \ python3\ scripts/verify\_cases.py}
+4. \textbf{Documentation} : Mettre à jour
+\texttt{MATHEMATICAL\_THEORY.md}, \texttt{USER\_GUIDE.md} et
+\texttt{DEVELOPER\_GUIDE.md} en conséquence.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{10. Répertoire Exhaustif et Analyse Détaillée de Chaque
+Fichier
+Source}\label{ruxe9pertoire-exhaustif-et-analyse-duxe9tailluxe9e-de-chaque-fichier-source}
+
+Cette section dresse l'inventaire exhaustif et la spécification
+technique de chacun des fichiers sources et en-têtes constituant
+l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
+
+\subsubsection{\texorpdfstring{10.1. En-têtes et Modules C++17
+(\texttt{COVOF\_2D-C++/include/fugu/} et
+\texttt{src/})}{10.1. En-têtes et Modules C++17 (COVOF\_2D-C++/include/fugu/ et src/)}}\label{en-tuxeates-et-modules-c17-covof_2d-cincludefugu-et-src}
+
+\paragraph{\texorpdfstring{1.
+\texttt{include/fugu/Types.hpp}}{1. include/fugu/Types.hpp}}\label{includefugutypes.hpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Définition des structures de données
+  scalaires et énumérations fortement typées (\texttt{enum\ class})
+  régissant les conditions aux limites, les types de solveurs et les
+  obstacles immergés.
+\item
+  \textbf{Structures Clés} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    \texttt{enum\ class\ BCType} : \texttt{DIRICHLET} (vitesse imposée),
+    \texttt{NEUMANN} (sortie libre convective), \texttt{FREE\_SLIP}
+    (glissement parfait), \texttt{PERIODIC} (périodicité torique).
+  \item
+    \texttt{struct\ BoundaryCondition} : Définition des valeurs
+    (\(u, v, T\)), profils d'entrée (\texttt{PARABOLIC},
+    \texttt{POISEUILLE\_STEP}) et types thermiques associés.
+  \item
+    \texttt{struct\ Obstacle} : Définition géométrique d'obstacles
+    solides immergés (\texttt{BOX}, \texttt{CYLINDER}), perméabilité de
+    Darcy-Brinkman \(K\).
+  \item
+    \texttt{struct\ FluidProperties} : Paramètres thermophysiques d'une
+    phase (\(ho, \mu, C_p, k,  eta\)).
+  \item
+    \texttt{struct\ SolverOptions} : Paramétrage du Lagrangien augmenté
+    (\(r_{\text{al}}\), itérations d'Uzawa, tolérance de convergence
+    \(\epsilon\), type de préconditionneur).
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{2. \texttt{include/fugu/CSRMatrix.hpp} \&
+\texttt{src/CSRMatrix.cpp}}{2. include/fugu/CSRMatrix.hpp \& src/CSRMatrix.cpp}}\label{includefugucsrmatrix.hpp-srccsrmatrix.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Format de stockage creux Compressed
+  Sparse Row (CSR) pour l'assemblage explicite de matrices locales
+  creuses.
+\item
+  \textbf{Algorithmes \& Structures} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Vecteurs \texttt{row\_ptr} (taille \(N+1\)), \texttt{col\_idx}
+    (taille \(NNZ\)), \texttt{values} (taille \(NNZ\)), et \texttt{diag}
+    (taille \(N\)).
+  \item
+    Méthode \texttt{set\_from\_triplets()} : Conversion en complexité
+    \(O(NNZ)\) avec somme cumulée pour la compression de lignes.
+  \item
+    Méthode \texttt{matvec()} : Produit matrice-vecteur creux optimisé
+    pour le préchargement de cache L1/L2.
+  \item
+    Méthode \texttt{solve\_jacobi()} : Relaxation itérative de Jacobi
+    pour le préconditionnement local.
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{3. \texttt{include/fugu/Mesh.hpp} \&
+\texttt{src/Mesh.cpp}}{3. include/fugu/Mesh.hpp \& src/Mesh.cpp}}\label{includefugumesh.hpp-srcmesh.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Topologie spatiale 2D, gestion du
+  communicateur cartésien MPI, métrique géométrique et partitionnement
+  de domaine.
+\item
+  \textbf{Algorithmes \& Fonctions} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    \texttt{init()} : Appel à \texttt{MPI\_Dims\_create} et
+    \texttt{MPI\_Cart\_create} pour déterminer automatiquement la
+    décomposition \((P_x, P_y)\) la plus carrée possible.
+  \item
+    Décalages de voisinage via \texttt{MPI\_Cart\_shift} pour identifier
+    les 4 sous-domaines adjacents (\texttt{neighbor\_west},
+    \texttt{neighbor\_east}, \texttt{neighbor\_south},
+    \texttt{neighbor\_north}).
+  \item
+    Fonctions de coordonnées décalées : \texttt{x\_face(i)} (\(i-1/2\)),
+    \texttt{y\_face(j)} (\(j-1/2\)), \texttt{x\_center(i)} (\(i\)),
+    \texttt{y\_center(j)} (\(j\)).
+  \item
+    \texttt{is\_in\_obstacle()} : Test analytique d'inclusion
+    géométrique pour la pénalisation de Brinkman.
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{4.
+\texttt{include/fugu/Field.hpp}}{4. include/fugu/Field.hpp}}\label{includefugufield.hpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Conteneur des champs physiques
+  discrétisés sur grille décalée MAC (Marker-And-Cell).
+\item
+  \textbf{Données Allouées} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Tableaux 2D continus indexés par
+    \((i, j) \in [0, n_x+1] \times [0, n_y+1]\) (avec couche de cellules
+    fantômes).
+  \item
+    Vitesse axiale \(u(i-1/2, j)\), vitesse transversale
+    \(v(i, j-1/2)\), pression statique \(p(i, j)\), divergence
+    \(\nabla \cdot \mathbf{u}(i, j)\).
+  \item
+    Fraction volumique VOF \(C(i, j)\), température \(T(i, j)\), masses
+    volumiques \(\rho, \rho_u, \rho_v\), viscosités dynamiques
+    \(\mu, \mu_{\text{node}}\).
+  \item
+    Forces capillaires \(f_{x,\sigma}, f_{y,\sigma}\) et courbure
+    d'interface \(\kappa\).
+  \item
+    Masque solide \texttt{solid\_mask} (\(1\) pour solide, \(0\) pour
+    fluide).
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{5. \texttt{include/fugu/Config.hpp} \&
+\texttt{src/Config.cpp}}{5. include/fugu/Config.hpp \& src/Config.cpp}}\label{includefuguconfig.hpp-srcconfig.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Analyseur syntaxique JSON natif,
+  validation des paramètres physiques et géométriques de la simulation.
+\item
+  \textbf{Fonctionnalités} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Extraction hiérarchique des sections \texttt{mesh},
+    \texttt{physics}, \texttt{time}, \texttt{boundary\_conditions},
+    \texttt{solver}, \texttt{obstacle}, \texttt{output}.
+  \item
+    Remplissage automatique des valeurs par défaut pour les options
+    omises.
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{6. \texttt{include/fugu/MpiComm.hpp} \&
+\texttt{src/MpiComm.cpp}}{6. include/fugu/MpiComm.hpp \& src/MpiComm.cpp}}\label{includefugumpicomm.hpp-srcmpicomm.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Synchronisation distribuée des
+  cellules fantômes (halos) par communications non-bloquantes OpenMPI.
+\item
+  \textbf{Algorithmes} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    \texttt{exchange\_halos\_scalar()} : Échange des bords pour les
+    champs centrés (\(p, T, C, \rho, \mu\)).
+  \item
+    \texttt{exchange\_halos\_u()} et \texttt{exchange\_halos\_v()} :
+    Échange adapté à la grille décalée pour les composantes de vitesse
+    sur faces.
+  \item
+    Utilisation systématique de paires \texttt{MPI\_Isend} /
+    \texttt{MPI\_Irecv} associées à \texttt{MPI\_Waitall} pour éviter
+    tout interblocage (\emph{deadlock}) et permettre le recouvrement
+    calcul-communication.
+  \item
+    Application des conditions aux limites physiques (Dirichlet,
+    Neumann, Free-Slip, Périodique) sur les frontières externes non
+    partagées.
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{7. \texttt{include/fugu/Preconditioner.hpp}
+\&
+\texttt{src/Preconditioner.cpp}}{7. include/fugu/Preconditioner.hpp \& src/Preconditioner.cpp}}\label{includefugupreconditioner.hpp-srcpreconditioner.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Interface abstraite et
+  implémentation des préconditionneurs algébriques parallèles pour
+  accélérer la convergence des méthodes de Krylov.
+\item
+  \textbf{Classes} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    \texttt{IPreconditioner} : Interface de base avec méthode virtuelle
+    pure \texttt{apply(r,\ z)}.
+  \item
+    \texttt{JacobiPreconditioner} : Préconditionneur diagonal par blocs
+    \(M = \text{diag}(A)\), complexité \(O(1)\) sans échange réseau.
+  \item
+    \texttt{SSORPreconditioner} : Relaxation symétrique de Gauss-Seidel
+    par étapes avant-arrière.
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{8. \texttt{include/fugu/LinearSolver.hpp} \&
+\texttt{src/LinearSolver.cpp}}{8. include/fugu/LinearSolver.hpp \& src/LinearSolver.cpp}}\label{includefugulinearsolver.hpp-srclinearsolver.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Implémentation des solveurs
+  itératifs de sous-espace de Krylov Matrix-Free.
+\item
+  \textbf{Algorithmes Développés} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    \texttt{BiCGSTAB2Solver} : Biconjugué Gradient Stabilisé d'ordre 2
+    (Sleijpen \& van der Vorst 1993) avec minimisation polynomiale
+    locale d'ordre 2 pour amortir les résonances asymétriques.
+  \item
+    \texttt{BiCGSTABSolver} : BiCGSTAB classique (van der Vorst 1992).
+  \item
+    \texttt{PCGSolver} : Gradient Conjugué Préconditionné pour
+    opérateurs symétriques définis positifs.
+  \item
+    \texttt{GMRESSolver} : Résolution par orthogonalisation de modified
+    Gram-Schmidt avec rotation de Givens.
+  \item
+    Réductions globales \texttt{MPI\_Allreduce} pour le calcul distribué
+    des produits scalaires \(\langle u, v \rangle = \sum_i u_i v_i\).
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{9. \texttt{include/fugu/InterfaceTracker.hpp}
+\&
+\texttt{src/InterfaceTracker.cpp}}{9. include/fugu/InterfaceTracker.hpp \& src/InterfaceTracker.cpp}}\label{includefuguinterfacetracker.hpp-srcinterfacetracker.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Capture d'interface diphasique par
+  la méthode Volume-Of-Fluid (VOF) et modélisation de la tension de
+  surface CSF.
+\item
+  \textbf{Formulations Numériques} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Advection géométrique par limiteur de flux non-linéaire \textbf{TVD
+    Superbee} garantissant la stricte conservation du volume et le
+    maintien d'une épaisseur d'interface de 1 à 2 cellules.
+  \item
+    Calcul des normales unitaires
+    \(\mathbf{n} = \frac{\nabla C}{\|\nabla C\| + \epsilon}\) par
+    différences finies centrées.
+  \item
+    Évaluation de la courbure locale
+    \(\kappa = -\nabla \cdot \mathbf{n}\).
+  \item
+    Calcul de la force volumique de Brackbill
+    \(\mathbf{f}_\sigma = \sigma \kappa \nabla C\) projetée sur les
+    faces décalées \(u\) et \(v\).
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{10.
+\texttt{include/fugu/NavierStokesSolver.hpp} \&
+\texttt{src/NavierStokesSolver.cpp}}{10. include/fugu/NavierStokesSolver.hpp \& src/NavierStokesSolver.cpp}}\label{includefugunavierstokessolver.hpp-srcnavierstokessolver.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Cœur hydrodynamique résolvant les
+  équations de Navier-Stokes incompressibles couplées à l'énergie
+  thermique.
+\item
+  \textbf{Schémas Discrets Spécifiés} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    \textbf{Convection semi-implicite} : Termes advectifs
+    \((\mathbf{u}\cdot\nabla)\mathbf{u}\) discrétisés par schéma centré
+    d'ordre 2 ou décentré upwind.
+  \item
+    \textbf{Diffusion visqueuse à tenseur complet} :
+    \(\nabla \cdot (\mu (\nabla \mathbf{u} + \nabla^T \mathbf{u}))\)
+    avec interpolation harmonique de la viscosité aux nœuds :
+    \[\mu_{i+1/2, j+1/2} = \frac{4}{\frac{1}{\mu_{i,j}} + \frac{1}{\mu_{i+1,j}} + \frac{1}{\mu_{i,j+1}} + \frac{1}{\mu_{i+1,j+1}}}\]
+  \item
+    \textbf{Lagrangien Augmenté \& Uzawa} : Terme de pénalité de
+    divergence \(-r_{\text{al}} \nabla(\nabla \cdot \mathbf{u})\) et
+    mise à jour de pression
+    \(p^{m+1} = p^m - r_{\text{al}} (\nabla \cdot \mathbf{u}^{m+1})\).
+  \item
+    \textbf{Thermique \& Boussinesq} : Résolution de
+    l'advection-diffusion de température et force de flottabilité
+    \(\mathbf{f}_b = -\rho \beta (T - T_0)\mathbf{g}\).
+  \item
+    \textbf{Pénalisation de Brinkman} : Terme de traînée volumique
+    \(\frac{\mu}{K} \mathbf{u}\) forçant \(\mathbf{u} = \mathbf{0}\) à
+    l'intérieur des obstacles rigides sans maillage non structuré.
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{11. \texttt{include/fugu/VTKWriter.hpp} \&
+\texttt{src/VTKWriter.cpp}}{11. include/fugu/VTKWriter.hpp \& src/VTKWriter.cpp}}\label{includefuguvtkwriter.hpp-srcvtkwriter.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Générateur de visualisations
+  volumiques et surfaciques au standard XML VTK.
+\item
+  \textbf{Fichiers Produits} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Fichiers de sous-domaines partitionnés \texttt{.vtr}
+    (\emph{RectilinearGrid}) écrits par chaque processus MPI de façon
+    indépendante et parallèle.
+  \item
+    Fichier maître coordinateur \texttt{.pvtr}
+    (\emph{ParallelRectilinearGrid}) référençant les sous-domaines
+    locaux, directement lisible par ParaView.
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{12. \texttt{include/fugu/Simulation.hpp} \&
+\texttt{src/Simulation.cpp}}{12. include/fugu/Simulation.hpp \& src/Simulation.cpp}}\label{includefugusimulation.hpp-srcsimulation.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Orchestration de la boucle
+  temporelle, régulation adaptative du pas de temps sous contrainte CFL,
+  gestion des sorties et modes de vérification.
+\item
+  \textbf{Fonctions Spécialisées} :
+
+  \begin{itemize}
+  \tightlist
+  \item
+    Régulation adaptative
+    \(\Delta t = \min\left(\text{CFL} \frac{\Delta x}{\|\mathbf{u}\|_{\max}}, \frac{\rho \Delta x^2}{4\mu}\right)\).
+  \item
+    Mode analytique Laplacien (Cas 3.1) avec calcul des normes
+    d\textquotesingle erreur \(L_1, L_2, L_\infty\).
+  \item
+    Mode advection vortex réversible (Cas 3.19) avec inversion du champ
+    de vitesse à \(t = T/2\) et mesure de la conservation géométrique.
+  \end{itemize}
+\end{itemize}
+
+\paragraph{\texorpdfstring{13.
+\texttt{src/main.cpp}}{13. src/main.cpp}}\label{srcmain.cpp}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Rôle et Responsabilité} : Point d\textquotesingle entrée en
+  ligne de commande, gestion des signaux, instanciation et capture
+  d\textquotesingle erreurs.
+\end{itemize}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsubsection{\texorpdfstring{10.2. Architecture Modulaire Fortran 2018
+(\texttt{COVOF\_2D-FORTRAN/src/})}{10.2. Architecture Modulaire Fortran 2018 (COVOF\_2D-FORTRAN/src/)}}\label{architecture-modulaire-fortran-2018-covof_2d-fortransrc}
+
+L'implémentation Fortran 2018 reproduit rigoureusement l'intégralité des
+algorithmes ci-dessus à travers 12 modules autonomes exploitant les
+fonctionnalités modernes du langage (modules, types dérivés, stockage
+contigu en colonnes \texttt{column-major}, \texttt{iso\_fortran\_env}) :
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{\texttt{module\_precision.f90}} : Typage standardisé
+  \texttt{real(dp)} (\texttt{selected\_real\_kind(15,\ 307)}).
+\item
+  \textbf{\texttt{module\_constants.f90}} : Constantes mathématiques,
+  codes de conditions limites et énumérations physiques.
+\item
+  \textbf{\texttt{module\_json.f90}} : Parseur JSON pur Fortran opérant
+  sur des tampons de caractères continus.
+\item
+  \textbf{\texttt{module\_config.f90}} : Structure \texttt{config\_t} et
+  extraction des paramètres du calcul.
+\item
+  \textbf{\texttt{module\_mesh.f90}} : Topologie 2D MPI cartésienne,
+  coordonnées métriques de faces et barycentres.
+\item
+  \textbf{\texttt{module\_fields.f90}} : Type \texttt{flow\_fields\_t}
+  encapsulant l'ensemble des tableaux 2D alloués une unique fois.
+\item
+  \textbf{\texttt{module\_mpi\_comm.f90}} : Communications asynchrones
+  \texttt{MPI\_Isend} / \texttt{MPI\_Irecv} et synchronisation des
+  bords.
+\item
+  \textbf{\texttt{module\_interface\_vof.f90}} : Schéma VOF-TVD Superbee
+  et modèle capillaire CSF.
+\item
+  \textbf{\texttt{module\_linear\_solvers.f90}} : Algorithmes itératifs
+  BiCGSTAB2, PCG et GMRES Matrix-Free.
+\item
+  \textbf{\texttt{module\_navier\_stokes.f90}} : Discrétisation
+  spatialisée des équations Navier-Stokes, Boussinesq et Brinkman.
+\item
+  \textbf{\texttt{module\_vtk\_writer.f90}} : Génération des fichiers
+  XML rectilinéaires \texttt{.pvtr} / \texttt{.vtr}.
+\item
+  \textbf{\texttt{module\_simulation.f90}} : Boucle temporelle, gestion
+  du pas de temps adaptatif CFL et cas vérifications.
+\item
+  \textbf{\texttt{fugu2d\_main.f90}} : Programme principal exécutable.
+\end{enumerate}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{11. Bibliographie Académique Complète et Répertoire des
+Fondations
+Théoriques}\label{bibliographie-acaduxe9mique-compluxe8te-et-ruxe9pertoire-des-fondations-thuxe9oriques}
+
+Cette section rassemble les publications scientifiques de référence dont
+les modèles mathématiques et numériques sont directement implémentés
+dans \textbf{COVOF 2D} :
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Harlow, F. H., \& Welch, J. E. (1965)}. \emph{Numerical
+  Calculation of Time-Dependent Viscous Incompressible Flow of Fluid
+  with Free Surface}. The Physics of Fluids, 8(12), 2182--2189. {[}DOI:
+  10.1063/1.1761178{]}\\
+  \emph{Contribution} : Introduction historique de la grille décalée MAC
+  (Marker-And-Cell) éliminant les modes parasites en damier
+  (\emph{checkerboard modes}). Implémenté dans \texttt{Mesh},
+  \texttt{Field}, \texttt{module\_mesh.f90} et
+  \texttt{module\_fields.f90}.
+\item
+  \textbf{Fortin, M., \& Glowinski, R. (1983)}. \emph{Augmented
+  Lagrangian Methods: Applications to the Numerical Solution of
+  Boundary-Value Problems}. Studies in Mathematics and its Applications,
+  Vol. 15, North-Holland, Amsterdam.\\
+  \emph{Contribution} : Formalisation mathématique de l'algorithme du
+  Lagrangien Augmenté et actualisation de pression d'Uzawa pour forcer
+  la contrainte d'incompressibilité sans matrice de projection
+  découplée. Implémenté dans \texttt{NavierStokesSolver} et
+  \texttt{module\_navier\_stokes.f90}.
+\item
+  \textbf{Brackbill, J. U., Kothe, D. B., \& Zemach, C. (1992)}. \emph{A
+  continuum method for modeling surface tension}. Journal of
+  Computational Physics, 100(2), 335--354. {[}DOI:
+  10.1016/0021-9991(92)90240-Y{]}\\
+  \emph{Contribution} : Méthode Continuum Surface Force (CSF)
+  convertissant la tension interfaciale en une force volumique
+  équivalente proportionnelle à la courbure locale et au gradient de
+  fraction volumique. Implémenté dans \texttt{InterfaceTracker} et
+  \texttt{module\_interface\_vof.f90}.
+\item
+  \textbf{Sleijpen, G. L., \& van der Vorst, H. A. (1993)}.
+  \emph{BiCGSTAB(l) for linear equations involving unsymmetric matrices
+  with complex spectrum}. Electronic Transactions on Numerical Analysis,
+  1, 11--32.\\
+  \emph{Contribution} : Algorithme BiCGSTAB(\(l\)) d'ordre 2 réduisant
+  drastiquement les oscillations et stagnations du BiCGSTAB standard sur
+  les matrices asymétriques issues des opérateurs de
+  convection-diffusion raides. Implémenté dans \texttt{LinearSolver} et
+  \texttt{module\_linear\_solvers.f90}.
+\item
+  \textbf{Roe, P. L. (1986)}. \emph{Characteristic-Based Schemes for the
+  Euler Equations}. Annual Review of Fluid Mechanics, 18(1), 337--365.
+  {[}DOI: 10.1146/annurev.fl.18.010186.002005{]}\\
+  \emph{Contribution} : Théorie des limiteurs de flux TVD (Total
+  Variation Diminishing) et formulation du limiteur haute résolution
+  Superbee préservant la netteté des discontinuités d'interface.
+  Implémenté dans \texttt{InterfaceTracker} et
+  \texttt{module\_interface\_vof.f90}.
+\item
+  \textbf{Angot, P., Bruneau, C. H., \& Fabrie, P. (1999)}. \emph{A
+  penalization method to take into account obstacles in incompressible
+  viscous flows}. Numerische Mathematik, 81(4), 497--520. {[}DOI:
+  10.1007/s002110050401{]}\\
+  \emph{Contribution} : Justification mathématique et analyse de
+  convergence de la méthode de pénalisation volumique de Darcy-Brinkman
+  pour la modélisation de corps solides sans remaillage non structuré.
+  Implémenté dans \texttt{NavierStokesSolver} et
+  \texttt{module\_navier\_stokes.f90}.
+\item
+  \textbf{Saad, Y., \& Schultz, M. H. (1986)}. \emph{GMRES: A
+  Generalized Minimal Residual Algorithm for Solving Nonsymmetric Linear
+  Systems}. SIAM Journal on Scientific and Statistical Computing, 7(3),
+  856--869. {[}DOI: 10.1137/0907058{]}\\
+  \emph{Contribution} : Algorithme d'orthogonalisation de Krylov optimal
+  pour la résolution des systèmes linéaires non symétriques. Implémenté
+  dans \texttt{LinearSolver} et \texttt{module\_linear\_solvers.f90}.
+\item
+  \textbf{Ghia, U., Ghia, K. N., \& Shin, C. T. (1982)}. \emph{High-Re
+  solutions for incompressible flow using the Navier-Stokes equations
+  and a multigrid method}. Journal of Computational Physics, 48(3),
+  387--411. {[}DOI: 10.1016/0021-9991(82)90058-4{]}\\
+  \emph{Contribution} : Solution numérique de référence et profils de
+  vitesse axiaux et transversaux pour la cavité entraînée à
+  \(Re=100, 400, 1000\). Utilisé pour la validation du Cas 4.5.
+\item
+  \textbf{Armaly, B. F., Durst, F., Pereira, J. C. F., \& Schönung, B.
+  (1983)}. \emph{Experimental and theoretical investigation of
+  backward-facing step flow}. Journal of Fluid Mechanics, 127, 473--496.
+  {[}DOI: 10.1017/S0022112083002839{]}\\
+  \emph{Contribution} : Données expérimentales et numériques sur la
+  longueur de recirculation et de recollement de couche limite en aval
+  d'une marche descendante. Utilisé pour la validation du Cas 4.1.
+\item
+  \textbf{de Vahl Davis, G. (1983)}. \emph{Natural convection of air in
+  a square cavity: A bench mark numerical solution}. International
+  Journal for Numerical Methods in Fluids, 3(3), 249--264. {[}DOI:
+  10.1002/fld.1650030305{]}\\
+  \emph{Contribution} : Benchmark numérique de référence pour la
+  convection naturelle sous approximation de Boussinesq dans une cavité
+  carrée différentiellement chauffée (\(Ra=10^4\)). Utilisé pour la
+  validation du Cas 6.1.
+\item
+  \textbf{Martin, J. C., \& Moyce, W. J. (1952)}. \emph{An experimental
+  study of the collapse of liquid columns on a rigid horizontal plane}.
+  Philosophical Transactions of the Royal Society of London. Series A,
+  244(882), 312--324. {[}DOI: 10.1098/rsta.1952.0006{]}\\
+  \emph{Contribution} : Mesures expérimentales de la cinétique
+  d'effondrement et de la vitesse du front d'onde pour une colonne d'eau
+  sous gravité (rupture de barrage). Utilisé pour la validation du Cas
+  7.1.
+\item
+  \textbf{Hysing, S., Turek, S., Kuzmin, D., Parolini, N., Burman, E.,
+  Ganesan, S., \& Tobiska, L. (2009)}. \emph{Quantitative benchmark
+  computations of two-dimensional bubble dynamics}. International
+  Journal for Numerical Methods in Fluids, 60(11), 1259--1288. {[}DOI:
+  10.1002/fld.1934{]}\\
+  \emph{Contribution} : Benchmark numérique rigoureux pour les
+  écoulements diphasiques incompressibles à interface déformable (bulle
+  ascendante dans un fluide visqueux). Utilisé pour la validation du Cas
+  7.5.
+\item
+  \textbf{Szymanski, P. (1932)}. \emph{Quelques solutions exactes des
+  équations de l'hydrodynamique de fluide visqueux dans le cas d'un tube
+  cylindrique}. Journal de Mathématiques Pures et Appliquées, 9e série,
+  11, 67--107.\\
+  \emph{Contribution} : Dérivation de la solution analytique
+  instationnaire exacte par décomposition en série de Fourier pour
+  l'établissement de l'écoulement de Poiseuille. Utilisé pour la
+  vérification du Cas 3.8.
+\item
+  \textbf{Caltagirone, J. P. (2007)}. \emph{Mécanique des milieux
+  continus et des fluides}. Éditions Lavoisier, Paris.\\
+  \emph{Contribution} : Formulations variationnelles, discrétisations
+  conservatrices des équations de transport multiphasiques et couplages
+  vitesse-pression par Lagrangien augmenté.
+\item
+  \textbf{Patankar, S. V. (1980)}. \emph{Numerical Heat Transfer and
+  Fluid Flow}. Hemisphere Publishing Corporation, Taylor \& Francis
+  Group, New York.\\
+  \emph{Contribution} : Fondements de la discrétisation par volumes
+  finis, traitement des conditions aux limites et concepts de
+  discrétisation sur grille décalée.
+\end{enumerate}
+
+\end{document}

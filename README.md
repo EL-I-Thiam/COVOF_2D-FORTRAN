@@ -1,11 +1,11 @@
-# FUGU 2D (Fortran 2018) — Solveur CFD Parallèle Navier-Stokes Incompressible (OpenMPI)
+# COVOF 2D (Fortran 2018) — Solveur CFD Parallèle Navier-Stokes Incompressible (OpenMPI)
 
 [![Standard Fortran 2018](https://img.shields.io/badge/Fortran-2018-7b4f73.svg)](https://en.wikipedia.org/wiki/Fortran)
 [![OpenMPI](https://img.shields.io/badge/MPI-OpenMPI%204%2B-green.svg)](https://www.open-mpi.org/)
-[![Validation Thétis 2.1.0](https://img.shields.io/badge/Validation%20Th%C3%A9tis%202.1.0-13%2F13%20PASS-brightgreen.svg)](docs/VALIDATION_GUIDE.md)
+[![Validation Référence Académique CFD](https://img.shields.io/badge/Validation%20Th%C3%A9tis%202.1.0-13%2F13%20PASS-brightgreen.svg)](docs/VALIDATION_GUIDE.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**FUGU 2D (Fortran 2018)** est l'implémentation native haute performance en **Modern Fortran 2018 modulaire** du solveur de mécanique des fluides numérique bidimensionnel FUGU 2D, parallélisé par décomposition de domaine et passage de messages **OpenMPI**. Conçu pour reproduire avec une fidélité mathématique absolue les écoulements de référence de l'Institut de Mécanique et d'Ingénierie de Bordeaux (I2M / Laboratoire TREFLE) et du **Cahier de Validation Thétis 2.1.0**, le code résout les écoulements monophasiques isothermes laminaires, convectifs thermiques (approximation de Boussinesq) et diphasiques à surface libre (Volume-Of-Fluid - VOF).
+**COVOF 2D (Fortran 2018)** est l'implémentation native haute performance en **Modern Fortran 2018 modulaire** du solveur de mécanique des fluides numérique bidimensionnel COVOF 2D, parallélisé par décomposition de domaine et passage de messages **OpenMPI**. Conçu pour reproduire avec une fidélité mathématique absolue les écoulements de référence de l'Institut de Mécanique et d'Ingénierie de Bordeaux (I2M / Laboratoire TREFLE) et du **Cahier de Validation et Vérification CFD 2D**, le code résout les écoulements monophasiques isothermes laminaires, convectifs thermiques (approximation de Boussinesq) et diphasiques à surface libre (Volume-Of-Fluid - VOF).
 
 Le solveur exploite la puissance du calcul matriciel natif et du stockage contigu en colonnes (*column-major*) de Fortran avec une **politique stricte Zero-Allocation dans la boucle temporelle**, garantissant une vectorisation SIMD maximale, une localité de cache optimale, et une scalabilité parallèle parfaite sur grappes de calcul intensif.
 
@@ -15,7 +15,7 @@ Le solveur exploite la puissance du calcul matriciel natif et du stockage contig
 
 1. [Fonctionnalités Physiques et Numériques](#-fonctionnalités-physiques-et-numériques)
 2. [Architecture Modulaire Fortran 2018](#-architecture-modulaire-fortran-2018)
-3. [Synthèse des Validations Thétis 2.1.0 (13/13 PASS)](#-synthèse-des-validations-thétis-210-1313-pass)
+3. [Synthèse des Validations Référence Académique CFD (13/13 PASS)](#-synthèse-des-validations-Référence Académique-210-1313-pass)
 4. [Galerie des Résultats de Validation](#-galerie-des-résultats-de-validation)
 5. [Prérequis et Dépendances](#-prérequis-et-dépendances)
 6. [Compilation et Installation Rapide](#-compilation-et-installation-rapide)
@@ -50,7 +50,7 @@ Le solveur exploite la puissance du calcul matriciel natif et du stockage contig
   * Les scalaires ($p$, $T$, $C$) sont positionnés au barycentre des cellules $(i, j)$.
   * Annulation mathématique rigoureuse des modes en damier (*checkerboard modes*).
 * **Tenseur des Contraintes Visqueuses Complet** :
-  * Discrétisation conservative conforme à Caltagirone et al. (Annexe A Thétis) supportant les gradients spatiaux de viscosité $\nabla \cdot (\mu (\nabla \mathbf{u} + \nabla^T \mathbf{u}))$.
+  * Discrétisation conservative conforme à Caltagirone et al. (Annexe A Référence Académique) supportant les gradients spatiaux de viscosité $\nabla \cdot (\mu (\nabla \mathbf{u} + \nabla^T \mathbf{u}))$.
 * **Intégration Temporelle** :
   * Schémas d'Euler implicite (ordre 1) et Crank-Nicolson (ordre 2).
   * Régulation adaptative du pas de temps sous contrainte de stabilité CFL advective et visqueuse :
@@ -108,11 +108,11 @@ Le code tire parti des fonctionnalités avancées de **Fortran 2018** (modules, 
 
 ---
 
-## 📊 Synthèse des Validations Thétis 2.1.0 (13/13 PASS)
+## 📊 Synthèse des Validations Référence Académique CFD (13/13 PASS)
 
 Toutes les simulations de validation sont strictement exécutées en parallèle avec OpenMPI et vérifiées par la suite automatisée [`scripts/verify_cases.py`](scripts/verify_cases.py) :
 
-| Chapitre Thétis | Cas Test | Configuration Physique & Maillage | Métrique Analysée | Cible de Référence Thétis 2.1.0 | Résultat Numérique FUGU 2D | Écart / Erreur | Statut |
+| Chapitre Référence Académique | Cas Test | Configuration Physique & Maillage | Métrique Analysée | Cible de Référence Référence Académique CFD | Résultat Numérique COVOF 2D | Écart / Erreur | Statut |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
 | **Chap 3 - Exact** | **Cas 3.1** | Laplacien cartésien $\Delta \Psi = 1$ ($64 \times 32$) | Erreur $L_1$ analytique | $5.60 \times 10^{-6}$ (Ordre 2.0) | $5.60 \times 10^{-6}$ | **0.00 %** | **PASS** |
 | **Chap 3 - Exact** | **Cas 3.7** | Poiseuille plan stationnaire ($Re=100$, $16 \times 64$) | Vitesse maximale axiale | $1.2500\text{ m/s}$ | $1.2493\text{ m/s}$ | **0.05 %** | **PASS** |
@@ -132,7 +132,7 @@ Toutes les simulations de validation sont strictement exécutées en parallèle 
 
 ## 🖼 Galerie des Résultats de Validation
 
-Les visualisations comparatives suivantes sont générées par le script [`scripts/generate_thetis_validation_figures.py`](scripts/generate_thetis_validation_figures.py) :
+Les visualisations comparatives suivantes sont générées par le script [`scripts/generate_validation_figures.py`](scripts/generate_validation_figures.py) :
 
 | Cas 3.8 : Szymanski Instationnaire (Fourier) | Cas 3.9 : Poiseuille à Viscosité Variable |
 | :---: | :---: |
@@ -178,15 +178,15 @@ Les visualisations comparatives suivantes sont générées par le script [`scrip
 ### Option A : Via CMake (Recommandé)
 ```bash
 # 1. Cloner le dépôt
-git clone https://github.com/EL-I-Thiam/fugu2d_fortran.git
-cd fugu2d_fortran
+git clone https://github.com/EL-I-Thiam/covof2d_fortran.git
+cd covof2d_fortran
 
 # 2. Configurer et compiler
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j4
 
 # 3. Vérifier le binaire produit
-ls -lh bin/fugu2d_fortran
+ls -lh bin/covof2d_fortran
 ```
 
 ### Option B : Compilation Directe Standalone
@@ -205,8 +205,8 @@ mpifort -O3 -march=native \
   src/module_linear_solvers.f90 \
   src/module_vtk_writer.f90 \
   src/module_simulation.f90 \
-  src/fugu2d_main.f90 \
-  -o bin/fugu2d_fortran
+  src/covof2d_main.f90 \
+  -o bin/covof2d_fortran
 ```
 
 ---
@@ -217,13 +217,13 @@ mpifort -O3 -march=native \
 Pour exécuter un cas test avec $N$ processus MPI :
 ```bash
 # Cavité entraînée Re=1000 sur 4 processus
-mpirun -np 4 bin/fugu2d_fortran cases/cavity_re1000.json
+mpirun -np 4 bin/covof2d_fortran cases/cavity_re1000.json
 
 # Écoulement autour d'un cylindre Re=20 sur 2 processus
-mpirun -np 2 bin/fugu2d_fortran cases/obstacle_cylinder_re20.json
+mpirun -np 2 bin/covof2d_fortran cases/obstacle_cylinder_re20.json
 
 # Rupture de barrage VOF sur 4 processus
-mpirun -np 4 bin/fugu2d_fortran cases/dam_break.json
+mpirun -np 4 bin/covof2d_fortran cases/dam_break.json
 ```
 
 ### 2. Exécuter l'ensemble de la suite de validation (13 cas)
@@ -238,7 +238,7 @@ Le script automatisé [`scripts/run_all_benchmarks.sh`](scripts/run_all_benchmar
 python3 scripts/verify_cases.py
 
 # Génération des 14 figures comparatives haute définition
-python3 scripts/generate_thetis_validation_figures.py
+python3 scripts/generate_validation_figures.py
 ```
 
 ---
@@ -246,12 +246,12 @@ python3 scripts/generate_thetis_validation_figures.py
 ## 📁 Structure du Dépôt
 
 ```
-fugu2d_fortran/
+covof2d_fortran/
 ├── CMakeLists.txt                # Configuration CMake Fortran 2018 / MPI
-├── TUTORIAL.md                   # Tutoriel pas à pas complet pour FUGU 2D Fortran
-├── validation_summary.csv        # Résultats tabulés des 13 benchmarks Thétis
+├── TUTORIAL.md                   # Tutoriel pas à pas complet pour COVOF 2D Fortran
+├── validation_summary.csv        # Résultats tabulés des 13 benchmarks Référence Académique
 ├── validation_summary.md         # Synthèse Markdown des métriques CFD
-├── bin/                          # Exécutable binaire fugu2d_fortran
+├── bin/                          # Exécutable binaire covof2d_fortran
 ├── src/                          # 12 modules Fortran 2018 et programme principal
 │   ├── module_precision.f90      # Précision double standardisée (dp = real64)
 │   ├── module_constants.f90      # Constantes physiques et numériques fondamentales
@@ -265,7 +265,7 @@ fugu2d_fortran/
 │   ├── module_linear_solvers.f90 # Solveurs BiCGSTAB2, PCG, GMRES Matrix-Free
 │   ├── module_vtk_writer.f90     # Exporteur rectilinéaire multi-blocs .pvtr/.vtr
 │   ├── module_simulation.f90     # Boucle temporelle et orchestration
-│   └── fugu2d_main.f90           # Programme principal CLI
+│   └── covof2d_main.f90           # Programme principal CLI
 ├── cases/                        # 18 cas tests paramétrés au format JSON
 │   ├── poiseuille.json           # Cas 3.7 : Poiseuille plan stationnaire
 │   ├── poiseuille_unsteady.json  # Cas 3.8 : Poiseuille transitoire de Szymanski
@@ -284,12 +284,12 @@ fugu2d_fortran/
 │   ├── USER_GUIDE.md             # Manuel de référence utilisateur
 │   ├── DEVELOPER_GUIDE.md        # Guide d'architecture et extension pour développeurs
 │   ├── MATHEMATICAL_THEORY.md    # Dérivations théoriques et discrétisations
-│   ├── VALIDATION_GUIDE.md       # Cahier de vérification conforme Thétis 2.1.0
+│   ├── VALIDATION_GUIDE.md       # Cahier de vérification conforme Référence Académique CFD
 │   └── figures/                  # 14 figures de validation haute définition (PNG)
 └── scripts/                      # Scripts d'automatisation
     ├── run_all_benchmarks.sh     # Script bash de lancement de tous les calculs
     ├── verify_cases.py           # Analyse de convergence et validation automatique
-    └── generate_thetis_validation_figures.py # Générateur de graphiques comparatifs
+    └── generate_validation_figures.py # Générateur de graphiques comparatifs
 ```
 
 ---
@@ -300,12 +300,12 @@ fugu2d_fortran/
 * [**Manuel Utilisateur (`docs/USER_GUIDE.md`)**](docs/USER_GUIDE.md) : référence complète des options de configuration JSON, pilotage du pas de temps et conditions aux limites.
 * [**Guide Développeur (`docs/DEVELOPER_GUIDE.md`)**](docs/DEVELOPER_GUIDE.md) : guide d'architecture modulaire Fortran 2018, conventions de codage, ajout d'un nouveau solveur ou préconditionneur.
 * [**Documentation Théorique (`docs/MATHEMATICAL_THEORY.md`)**](docs/MATHEMATICAL_THEORY.md) : équations de Navier-Stokes, tenseur des contraintes visqueuses complet, Lagrangien Augmenté, VOF-Superbee et CSF.
-* [**Cahier de Validation (`docs/VALIDATION_GUIDE.md`)**](docs/VALIDATION_GUIDE.md) : fiches de validation détaillées pour les 13 benchmarks du Cahier Thétis 2.1.0.
+* [**Cahier de Validation (`docs/VALIDATION_GUIDE.md`)**](docs/VALIDATION_GUIDE.md) : fiches de validation détaillées pour les 13 benchmarks du Cahier de Validation de Référence CFD.
 
 ---
 
 ## 👥 Auteurs et Licence
 
 * **Auteur & Développeur** : Elhadji Ibrahima Thiam
-* **Laboratoire d'Inspiration** : I2M / Laboratoire TREFLE (Bordeaux) — Projet Thétis
+* **Laboratoire d'Inspiration** : I2M / Laboratoire TREFLE (Bordeaux) — Projet Référence Académique
 * **Licence** : Ce projet est distribué sous licence open-source MIT.

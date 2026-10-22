@@ -1,4 +1,4 @@
-Chapitre,Cas,Métrique,Cible Thétis 2.1.0,Valeur FUGU 2D,Écart Relatif,Statut
+Chapitre,Cas,Métrique,Cible Référence Académique CFD,Valeur COVOF 2D,Écart Relatif,Statut
 Chap 3 - Solutions exactes,3.1 Laplacien cartésien,Erreur L1 (64x32),5.60e-06 (Ordre 2.0),5.60e-06,0.0 %,PASS
 Chap 3 - Solutions exactes,3.7 Poiseuille stationnaire,Vitesse max u_max [m/s],1.2500 m/s,1.2493 m/s,0.05 %,PASS
 Chap 3 - Solutions exactes,3.8 Poiseuille Szymanski,Erreur L1 transitoire (t=1s),3.13e-04 (O(dt)),1.49e-05,L1 = 1.49e-05,PASS
