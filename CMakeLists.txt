@@ -29,5 +29,5 @@ add_executable(fugu2d_fortran ${SOURCES})
 target_link_libraries(fugu2d_fortran PRIVATE MPI::MPI_Fortran)
 
 set_target_properties(fugu2d_fortran PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
 )
