@@ -604,7 +604,8 @@ Cette section dresse l'inventaire exhaustif et la spécification technique de ch
   * `enum class BCType` : `DIRICHLET` (vitesse imposée), `NEUMANN` (sortie libre convective), `FREE_SLIP` (glissement parfait), `PERIODIC` (périodicité torique).
   * `struct BoundaryCondition` : Définition des valeurs ($u, v, T$), profils d'entrée (`PARABOLIC`, `POISEUILLE_STEP`) et types thermiques associés.
   * `struct Obstacle` : Définition géométrique d'obstacles solides immergés (`BOX`, `CYLINDER`), perméabilité de Darcy-Brinkman $K$.
-  * `struct FluidProperties` : Paramètres thermophysiques d'une phase ($ho, \mu, C_p, k,  eta$).
+  * `struct FluidProperties` : Paramètres thermophysiques d'une phase ($
+ho, \mu, C_p, k,  eta$).
   * `struct SolverOptions` : Paramétrage du Lagrangien augmenté ($r_{\text{al}}$, itérations d'Uzawa, tolérance de convergence $\epsilon$, type de préconditionneur).
 
 #### 2. `include/fugu/CSRMatrix.hpp` & `src/CSRMatrix.cpp`
@@ -714,7 +715,7 @@ L'implémentation Fortran 2018 reproduit rigoureusement l'intégralité des algo
 10. **`module_navier_stokes.f90`** : Discrétisation spatialisée des équations Navier-Stokes, Boussinesq et Brinkman.
 11. **`module_vtk_writer.f90`** : Génération des fichiers XML rectilinéaires `.pvtr` / `.vtr`.
 12. **`module_simulation.f90`** : Boucle temporelle, gestion du pas de temps adaptatif CFL et cas vérifications.
-13. **`fugu2d_main.f90`** : Programme principal exécutable.
+13. **`covof2d_main.f90`** : Programme principal exécutable.
 
 ---
 

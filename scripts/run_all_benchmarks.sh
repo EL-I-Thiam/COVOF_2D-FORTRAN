@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# FUGU 2D (Fortran 2018 + OpenMPI) - Lancement de la Suite Complète de Validation
+# COVOF 2D (Fortran 2018 + OpenMPI) - Lancement de la Suite Complète de Validation
 # Couvre TOUS les cas des Chapitres 3, 4, 6 et 7 du Cahier de Validation et Vérification CFD 2D
 # ==============================================================================
 
@@ -11,15 +11,15 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${ROOT_DIR}"
 
-EXEC="${ROOT_DIR}/bin/fugu2d_fortran"
+EXEC="${ROOT_DIR}/bin/covof2d_fortran"
 if [ ! -f "${EXEC}" ]; then
-    echo "Compilation de FUGU 2D Fortran 2018..."
+    echo "Compilation de COVOF 2D Fortran 2018..."
     mkdir -p bin
     mpifort -O3 src/module_precision.f90 src/module_constants.f90 src/module_json.f90 \
             src/module_config.f90 src/module_mesh.f90 src/module_fields.f90 \
             src/module_mpi_comm.f90 src/module_interface_vof.f90 \
             src/module_navier_stokes.f90 src/module_linear_solvers.f90 \
-            src/module_vtk_writer.f90 src/module_simulation.f90 src/fugu2d_main.f90 \
+            src/module_vtk_writer.f90 src/module_simulation.f90 src/covof2d_main.f90 \
             -o "${EXEC}"
 fi
 
@@ -29,7 +29,7 @@ if [ -n "$1" ]; then
 fi
 
 echo "================================================================================"
-echo "          LANCEMENT DE LA SUITE DE BENCHMARKS FUGU 2D FORTRAN 2018              "
+echo "          LANCEMENT DE LA SUITE DE BENCHMARKS COVOF 2D FORTRAN 2018              "
 echo "          Processus MPI : ${NP}                                                 "
 echo "================================================================================"
 

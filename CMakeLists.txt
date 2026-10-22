@@ -21,7 +21,7 @@ set(SOURCES
     src/module_linear_solvers.f90
     src/module_vtk_writer.f90
     src/module_simulation.f90
-    src/fugu2d_main.f90
+    src/covof2d_main.f90
 )
 
 # Executable target: covof2d_fortran

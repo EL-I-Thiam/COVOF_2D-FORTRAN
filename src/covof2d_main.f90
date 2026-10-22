@@ -1,6 +1,6 @@
 !===============================================================================
 ! Projet        : COVOF 2D (Convection & Volume-Of-Fluid 2D CFD Solver)
-! Fichier       : fugu2d_main.f90 (Point d'entrée principal Fortran 2018 / MPI)
+! Fichier       : covof2d_main.f90 (Point d'entrée principal Fortran 2018 / MPI)
 ! Description   : Programme principal pilotant l'initialisation de l'environnement
 !                 OpenMPI, le traitement des arguments CLI, la lecture du cas
 !                 JSON, l'orchestration du calcul Navier-Stokes / VOF / Énergie,
@@ -8,7 +8,7 @@
 ! Auteur        : Elhadji Ibrahima Thiam
 ! Standard      : Fortran 2018 / MPI-3
 !===============================================================================
-program fugu2d_main
+program covof2d_main
   ! Importation du module orchestrateur de la simulation CFD
   use module_simulation, only: simulation_t
   ! Typage explicite obligatoire pour toutes les variables locales
@@ -102,4 +102,4 @@ program fugu2d_main
   ! 5. Libération des ressources MPI et terminaison normale
   call MPI_Finalize(ierr)
 
-end program fugu2d_main
+end program covof2d_main

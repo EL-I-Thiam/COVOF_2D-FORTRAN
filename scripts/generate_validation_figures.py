@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ==============================================================================
-# FUGU 2D - Générateur de Figures de Validation Haute Définition
+# COVOF 2D - Générateur de Figures de Validation Haute Définition
 # Stylisé rigoureusement selon le Cahier de Validation et Vérification CFD 2D
 # ==============================================================================
 
@@ -94,11 +94,11 @@ fig, ax = plt.subplots(figsize=(7, 5))
 N_pts = np.array([16, 32, 64, 128])
 # Erreurs L1 mesurées et de référence Référence Académique
 err_ref = np.array([8.96e-5, 2.24e-5, 5.60e-6, 1.40e-6])
-err_fugu = np.array([8.96e-5, 2.24e-5, 5.60e-6, 1.40e-6])
-order2_ref = err_fugu[0] * (N_pts[0] / N_pts)**2.0
+err_covof = np.array([8.96e-5, 2.24e-5, 5.60e-6, 1.40e-6])
+order2_ref = err_covof[0] * (N_pts[0] / N_pts)**2.0
 
 ax.loglog(N_pts, err_ref, 's--', color='#d9534f', label='Référence Académique (Tableau 1)')
-ax.loglog(N_pts, err_fugu, 'o-', color='#0275d8', label='FUGU 2D (BiCGSTAB2 / OpenMPI)')
+ax.loglog(N_pts, err_covof, 'o-', color='#0275d8', label='COVOF 2D (BiCGSTAB2 / OpenMPI)')
 ax.loglog(N_pts, order2_ref, 'k:', label=r'Pente théorique d\'ordre 2 ($O(\Delta x^2)$)')
 ax.set_xlabel('Nombre de mailles par direction $N$')
 ax.set_ylabel('Erreur globale en norme $L_1$')
@@ -120,7 +120,7 @@ if u_poiseuille is not None:
     ys = np.linspace(0.5 / ny, 1.0 - 0.5 / ny, ny)
     u_num = u_mat[:, nx // 2]
     u_ex = 5.0 * ys * (1.0 - ys)
-    ax.plot(u_num, ys, 'r-', label='FUGU 2D ($64\\times 32$)')
+    ax.plot(u_num, ys, 'r-', label='COVOF 2D ($64\\times 32$)')
     ax.plot(u_ex[::2], ys[::2], 'ko', fillstyle='none', markersize=6, label='Solution exacte $5y(1-y)$')
 else:
     ys = np.linspace(0, 1, 50)
@@ -166,7 +166,7 @@ for idx, t in enumerate(times):
         u_mat = u_inst[:, :, 0] if u_inst.ndim == 3 else u_inst[:, 0::3]
         ys = (np.arange(ny) + 0.5) * (ly / ny)
         ax.plot(u_mat[:, nx // 2], ys, color=colors[idx], linestyle='-', marker='o',
-                markersize=3.5, markevery=4, label=f'FUGU 2D $t = {t}$ s')
+                markersize=3.5, markevery=4, label=f'COVOF 2D $t = {t}$ s')
 
 ax.set_xlabel('Vitesse axiale $u(y, t)$ [m/s]', fontsize=11)
 ax.set_ylabel('Position transversale $y$ [m]', fontsize=11)
@@ -198,13 +198,13 @@ ax1.set_ylabel('Hauteur $y$ [mm]', fontsize=11)
 ax1.set_title('Profil de viscosité $\\mu_0 \\exp(a z^2 / e^2)$ (Fig. 1 Référence)', fontsize=11, fontweight='bold')
 ax1.grid(True, linestyle=':', alpha=0.6)
 
-# Profil de vitesse FUGU 2D vs Théorie (valeurs physiques absolues réelles sans mise à l'échelle)
+# Profil de vitesse COVOF 2D vs Théorie (valeurs physiques absolues réelles sans mise à l'échelle)
 u_varmu, nx, ny = reconstruct_global_field("output_poiseuille_variable_viscosity", "poiseuille_var_mu", "Velocity")
 if u_varmu is not None:
     u_mat = u_varmu[:, :, 0] if u_varmu.ndim == 3 else u_varmu[:, 0::3]
     ys_num = (np.arange(ny) + 0.5) * (2.0 * e / ny)
     u_num = u_mat[:, nx // 2]
-    ax2.plot(u_num, ys_num * 1e3, 'r-', linewidth=2.2, label='FUGU 2D (Calculé)')
+    ax2.plot(u_num, ys_num * 1e3, 'r-', linewidth=2.2, label='COVOF 2D (Calculé)')
 
 ax2.plot(u_exact[::3], y_span[::3] * 1e3, 'ko', fillstyle='none', markersize=6,
          markeredgewidth=1.2, label='Solution théorique exacte')
@@ -335,7 +335,7 @@ if u_cav is not None:
     ax.streamplot(X[0, :], Y[:, 0], u_mat, v_mat, color='white', density=1.4, linewidth=0.7)
     # Marqueur vortex
     ax.plot(0.5313, 0.5625, 'r*', markersize=12, label='Centre Ghia et al. (0.5313, 0.5625)')
-    ax.plot(0.6055, 0.6211, 'yo', markersize=8, label='Centre FUGU 2D (0.6055, 0.6211)')
+    ax.plot(0.6055, 0.6211, 'yo', markersize=8, label='Centre COVOF 2D (0.6055, 0.6211)')
 
 ax.set_aspect('equal')
 ax.set_xlim(0, 1)
@@ -468,7 +468,7 @@ if p_drop is not None:
     bin_centers = 0.5 * (r_bins[:-1] + r_bins[1:])
     p_profile = [np.mean(p_flat[(dist >= r_bins[i]) & (dist < r_bins[i+1])]) for i in range(len(bin_centers))]
     
-    ax2.plot(bin_centers, p_profile, 'r-', linewidth=2.2, label='FUGU 2D')
+    ax2.plot(bin_centers, p_profile, 'r-', linewidth=2.2, label='COVOF 2D')
     ax2.axvline(0.25, color='gray', linestyle=':', label='Rayon goutte $R = 0.25$ m')
     ax2.axhline(4.0, color='blue', linestyle='--', label=r'Théorique $\Delta P = \sigma / R = 4.0$ Pa')
     ax2.set_xlabel('Rayon radial $r$ [m]')

@@ -1,7 +1,7 @@
 !===============================================================================
 ! Module: module_navier_stokes
 ! Description: Solveur Navier-Stokes 2D incompressible diphasique et thermique
-!              selon l'architecture Fortran 2018 de FUGU 2D.
+!              selon l'architecture Fortran 2018 de COVOF 2D.
 !              - Discrétisation spatiale MAC décalée (Harlow & Welch 1965)
 !              - Couplage Vitesse-Pression par Lagrangien Augmenté (Fortin & Glowinski)
 !              - Algorithme d'Uzawa pour la pression

@@ -1092,7 +1092,7 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
     Darcy-Brinkman \(K\).
   \item
     \texttt{struct\ FluidProperties} : Paramètres thermophysiques d'une
-    phase (\(ho, \mu, C_p, k,  eta\)).
+    phase (\$ ho, \mu, C\_p, k, eta\$).
   \item
     \texttt{struct\ SolverOptions} : Paramétrage du Lagrangien augmenté
     (\(r_{\text{al}}\), itérations d'Uzawa, tolérance de convergence
@@ -1495,7 +1495,7 @@ contigu en colonnes \texttt{column-major}, \texttt{iso\_fortran\_env}) :
   \textbf{\texttt{module\_simulation.f90}} : Boucle temporelle, gestion
   du pas de temps adaptatif CFL et cas vérifications.
 \item
-  \textbf{\texttt{fugu2d\_main.f90}} : Programme principal exécutable.
+  \textbf{\texttt{covof2d\_main.f90}} : Programme principal exécutable.
 \end{enumerate}
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}

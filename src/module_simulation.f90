@@ -1,6 +1,6 @@
 !===============================================================================
 ! Module: module_simulation
-! Description: Moteur principal de simulation FUGU 2D en Fortran 2018 :
+! Description: Moteur principal de simulation COVOF 2D en Fortran 2018 :
 !              - Gestion du cycle de vie du calcul (init, run, finalize)
 !              - Pas de temps adaptatif CFL + onde capillaire
 !              - Boucle temporelle avec couplage Lagrangien Augmenté / Uzawa
@@ -285,7 +285,7 @@ contains
     ! Évaluation de la condition logique
     if (this%mesh%rank == 0) then
        write(*, '(A)') ""
-       write(*, '(A)') ">>> DEMARRAGE DU CALCUL FUGU 2D FORTRAN 2018 PARALLELE <<<"
+       write(*, '(A)') ">>> DEMARRAGE DU CALCUL COVOF 2D FORTRAN 2018 PARALLELE <<<"
        write(*, '(A8,A14,A12,A14,A16,A16,A14)') &
          "Pas", "Temps [s]", "dt [s]", "Iter Krylov", "Vitesse Max", "Div Max", "Nu Moyen"
        write(*, '(A)') repeat("-", 94)
@@ -454,7 +454,7 @@ contains
     if (this%mesh%rank == 0) then
        write(*, '(A)') repeat("-", 94)
        ! Affectation et calcul numérique
-       write(*, '(A,F10.4,A)') ">>> SIMULATION FUGU 2D TERMINEE AVEC SUCCES A t = ", t, " s <<<"
+       write(*, '(A,F10.4,A)') ">>> SIMULATION COVOF 2D TERMINEE AVEC SUCCES A t = ", t, " s <<<"
        write(*, '(A,A)') "Fichiers de visualisation VTK et CSV disponibles dans : ", trim(this%config%output_dir)
     end if
 
@@ -652,7 +652,7 @@ contains
 
     ! Évaluation de la condition logique
     if (this%mesh%rank == 0) then
-       write(*, '(A)') ">>> RESULTAT RESOLUTION LAPLACIEN FUGU 2D <<<"
+       write(*, '(A)') ">>> RESULTAT RESOLUTION LAPLACIEN COVOF 2D <<<"
        write(*, '(A,I0)')       "  Iterations : ", iters
        write(*, '(A,ES14.6)')  "  Erreur L1   : ", err_l1
        write(*, '(A,ES14.6)')  "  Erreur L2   : ", err_l2
@@ -832,7 +832,7 @@ contains
     ! Évaluation de la condition logique
     if (this%mesh%rank == 0) then
        write(*, '(A)') ""
-       write(*, '(A)') ">>> RESULTAT DU CAS 3.19 : ADVECTION VORTEX FUGU 2D <<<"
+       write(*, '(A)') ">>> RESULTAT DU CAS 3.19 : ADVECTION VORTEX COVOF 2D <<<"
        write(*, '(A,I0,A,I0)') "  Maillage : ", nx, " x ", ny
        write(*, '(A,ES14.6)')  "  Erreur L1 : ", err_l1
        ! Affectation et calcul numérique

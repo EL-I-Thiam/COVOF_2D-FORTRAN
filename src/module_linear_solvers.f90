@@ -1,6 +1,6 @@
 !===============================================================================
 ! Module: module_linear_solvers
-! Description: Solveurs de Krylov parallèles pour FUGU 2D en Fortran 2018 :
+! Description: Solveurs de Krylov parallèles pour COVOF 2D en Fortran 2018 :
 !              - BiCGSTAB(2) (Sleijpen & van der Vorst 1993)
 !              - BiCGSTAB standard (van der Vorst 1992)
 !              - Conjugate Gradient (PCG - Hestenes & Stiefel 1952)

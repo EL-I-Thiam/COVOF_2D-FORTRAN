@@ -23,7 +23,7 @@ module module_config
 
   type :: config_t
      ! Déclaration de variable locale / paramètre de calcul
-     character(len=64) :: case_name = "fugu2d_case"
+     character(len=64) :: case_name = "covof2d_case"
      ! Déclaration de variable locale / paramètre de calcul
      character(len=32) :: mode = "NAVIER_STOKES"
 

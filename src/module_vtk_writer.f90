@@ -1,7 +1,7 @@
 !===============================================================================
 ! Module: module_vtk_writer
 ! Description: Exportateur de maillage rectiligne XML VTK parallèle (.pvtr / .vtr)
-!              et enregistreur de séries temporelles CSV pour FUGU 2D.
+!              et enregistreur de séries temporelles CSV pour COVOF 2D.
 !              - Écriture locale non-bloquante du fichier .vtr sur chaque processus
 !              - Assemblage du fichier maître .pvtr sur le rang racine
 !              - Diagnostics diphasiques : position du centre de masse, vitesse
@@ -22,7 +22,7 @@ module module_vtk_writer
      ! Déclaration de variable locale / paramètre de calcul
      character(len=256) :: output_dir = "output"
      ! Déclaration de variable locale / paramètre de calcul
-     character(len=128) :: case_name  = "fugu2d_case"
+     character(len=128) :: case_name  = "covof2d_case"
      ! Déclaration de variable locale / paramètre de calcul
      integer            :: csv_unit   = 0
      ! Déclaration de variable locale / paramètre de calcul
