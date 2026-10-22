@@ -2,8 +2,10 @@
 \PassOptionsToPackage{unicode}{hyperref}
 \PassOptionsToPackage{hyphens}{url}
 \documentclass[
+  french,
 ]{article}
 \usepackage{xcolor}
+\usepackage[margin=2cm]{geometry}
 \usepackage{amsmath,amssymb}
 \setcounter{secnumdepth}{-\maxdimen} % remove section numbering
 \usepackage{iftex}
@@ -100,6 +102,14 @@
 \def\fps@figure{htbp}
 \makeatother
 \usepackage{svg}
+\ifLuaTeX
+\usepackage[bidi=basic,shorthands=off]{babel}
+\else
+\usepackage[bidi=default,shorthands=off]{babel}
+\fi
+\ifLuaTeX
+  \usepackage{selnolig} % disable illegal ligatures
+\fi
 \setlength{\emergencystretch}{3em} % prevent overfull lines
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
@@ -111,6 +121,7 @@
 \@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
 \makeatother
 \hypersetup{
+  pdflang={fr},
   hidelinks,
   pdfcreator={LaTeX via pandoc}}
 
@@ -632,8 +643,8 @@ Rapide}\label{compilation-et-installation-rapide}
 \begin{Shaded}
 \begin{Highlighting}[]
 \CommentTok{\# 1. Cloner le dépôt}
-\FunctionTok{git}\NormalTok{ clone https://github.com/EL{-}I{-}Thiam/covof2d\_fortran.git}
-\BuiltInTok{cd}\NormalTok{ covof2d\_fortran}
+\FunctionTok{git}\NormalTok{ clone https://github.com/EL{-}I{-}Thiam/COVOF\_2D{-}FORTRAN.git}
+\BuiltInTok{cd}\NormalTok{ COVOF\_2D{-}FORTRAN}
 
 \CommentTok{\# 2. Configurer et compiler}
 \FunctionTok{cmake} \AttributeTok{{-}B}\NormalTok{ build }\AttributeTok{{-}DCMAKE\_BUILD\_TYPE}\OperatorTok{=}\NormalTok{Release}

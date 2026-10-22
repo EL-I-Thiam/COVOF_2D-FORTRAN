@@ -111,7 +111,7 @@ Pour compiler COVOF 2D en mode optimisé pour la production :
 
 ```bash
 # 1. Se positionner à la racine du projet
-cd covof2d
+cd COVOF_2D-FORTRAN
 
 # 2. Créer le répertoire de compilation isolé
 mkdir -p build && cd build

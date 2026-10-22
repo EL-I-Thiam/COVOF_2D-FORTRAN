@@ -178,8 +178,8 @@ Les visualisations comparatives suivantes sont générées par le script [`scrip
 ### Option A : Via CMake (Recommandé)
 ```bash
 # 1. Cloner le dépôt
-git clone https://github.com/EL-I-Thiam/covof2d_fortran.git
-cd covof2d_fortran
+git clone https://github.com/EL-I-Thiam/COVOF_2D-FORTRAN.git
+cd COVOF_2D-FORTRAN
 
 # 2. Configurer et compiler
 cmake -B build -DCMAKE_BUILD_TYPE=Release

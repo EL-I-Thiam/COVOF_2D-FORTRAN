@@ -76,7 +76,7 @@ Le code est strictement conforme au standard **Fortran 2018** et compatible avec
 
 ### 2.2. Méthode A : Compilation avec CMake (Recommandé)
 ```bash
-cd covof2d_fortran
+cd COVOF_2D-FORTRAN_fortran
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j4
 ```
