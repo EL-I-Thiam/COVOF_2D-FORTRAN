@@ -2,8 +2,10 @@
 \PassOptionsToPackage{unicode}{hyperref}
 \PassOptionsToPackage{hyphens}{url}
 \documentclass[
+  french,
 ]{article}
 \usepackage{xcolor}
+\usepackage[margin=2cm]{geometry}
 \usepackage{amsmath,amssymb}
 \setcounter{secnumdepth}{-\maxdimen} % remove section numbering
 \usepackage{iftex}
@@ -84,6 +86,14 @@
 \makeatletter
 \patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
 \makeatother
+\ifLuaTeX
+\usepackage[bidi=basic,shorthands=off]{babel}
+\else
+\usepackage[bidi=default,shorthands=off]{babel}
+\fi
+\ifLuaTeX
+  \usepackage{selnolig} % disable illegal ligatures
+\fi
 \setlength{\emergencystretch}{3em} % prevent overfull lines
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
@@ -95,6 +105,7 @@
 \@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
 \makeatother
 \hypersetup{
+  pdflang={fr},
   hidelinks,
   pdfcreator={LaTeX via pandoc}}
 
@@ -178,7 +189,7 @@ Référence Académique (I2M / UMR CNRS
     4.6. Module d'Écriture Graphique VTK Parallèle (\texttt{VTKWriter})
   \end{itemize}
 \item
-  \hyperref[5-guide-duxe9veloppeur--uxe9tendre-le-solveur-fugu-2d]{Guide
+  \hyperref[5-guide-duxe9veloppeur--uxe9tendre-le-solveur-covof-2d]{Guide
   Développeur : Étendre le Solveur COVOF 2D}
 
   \begin{itemize}
@@ -348,7 +359,7 @@ exécute la séquence algorithmique suivante :
 \begin{minipage}[b]{\linewidth}\raggedright
 Étape Algorithmique COVOF 2D
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Routine C++ FUGU
+Routine C++ COVOF
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
 Équivalent Fortran 90 Référence Académique
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
@@ -633,7 +644,7 @@ Pour ajouter une équation de transport d'une fraction massique
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
 \item
-  \textbf{Ajouter le champ dans \texttt{include/fugu/Fields2D.hpp}} :
+  \textbf{Ajouter le champ dans \texttt{include/covof/Field.hpp}} :
 
 \begin{Shaded}
 \begin{Highlighting}[]
@@ -670,7 +681,7 @@ Géométrique)}\label{tutoriel-2-impluxe9menter-un-nouveau-pruxe9conditionneur-e
 
 Toutes les classes de préconditionneurs héritent de l'interface
 abstraite \texttt{PreconditionerBase} définie dans
-\texttt{include/fugu/LinearSolver.hpp} :
+\texttt{include/covof/LinearSolver.hpp} :
 
 \begin{Shaded}
 \begin{Highlighting}[]
@@ -717,7 +728,7 @@ C++20}\label{conventions-de-codage-et-bonnes-pratiques-c20}
 \tightlist
 \item
   \textbf{Espaces de noms} : Tout le code réside exclusivement dans le
-  namespace \texttt{fugu::}.
+  namespace \texttt{covof::} (avec alias \texttt{fugu::}).
 \item
   \textbf{Typage fort et qualificatifs \texttt{const}} : Toutes les
   méthodes ne modifiant pas l'état interne de la classe doivent être
@@ -791,8 +802,8 @@ stabilisée est : - Produit matrice-vecteur Krylov (\texttt{apply\_A}) :
 Ligne}\label{visite-guiduxe9e-du-code-source-c20-et-analyse-ligne-par-ligne}
 
 \subsubsection{\texorpdfstring{7.1. Module \texttt{Mesh2D}
-(\texttt{include/fugu/Mesh2D.hpp} et
-\texttt{src/Mesh2D.cpp})}{7.1. Module Mesh2D (include/fugu/Mesh2D.hpp et src/Mesh2D.cpp)}}\label{module-mesh2d-includefugumesh2d.hpp-et-srcmesh2d.cpp}
+(\texttt{include/covof/Mesh.hpp} et
+\texttt{src/Mesh2D.cpp})}{7.1. Module Mesh2D (include/covof/Mesh.hpp et src/Mesh2D.cpp)}}\label{module-mesh2d-includecovofmesh.hpp-et-srcmesh2d.cpp}
 
 La classe \texttt{Mesh2D} encapsule la topologie cartésienne du maillage
 décalé (MAC) et gère la partition spatiale entre processus MPI.
@@ -843,7 +854,7 @@ modulaire :
 \end{Shaded}
 
 \subsubsection{\texorpdfstring{7.2. Module \texttt{FlowFields}
-(\texttt{include/fugu/Fields2D.hpp})}{7.2. Module FlowFields (include/fugu/Fields2D.hpp)}}\label{module-flowfields-includefugufields2d.hpp}
+(\texttt{include/covof/Field.hpp})}{7.2. Module FlowFields (include/covof/Field.hpp)}}\label{module-flowfields-includecovoffield.hpp}
 
 La classe \texttt{FlowFields} regroupe l'ensemble des mémoires tampons
 de simulation. Les tableaux 1D contigus permettent une allocation
@@ -1060,11 +1071,11 @@ technique de chacun des fichiers sources et en-têtes constituant
 l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
 
 \subsubsection{\texorpdfstring{10.1. En-têtes et Modules C++17
-(\texttt{COVOF\_2D-C++/include/fugu/} et
-\texttt{src/})}{10.1. En-têtes et Modules C++17 (COVOF\_2D-C++/include/fugu/ et src/)}}\label{en-tuxeates-et-modules-c17-covof_2d-cincludefugu-et-src}
+(\texttt{COVOF\_2D-C++/include/covof/} et
+\texttt{src/})}{10.1. En-têtes et Modules C++17 (COVOF\_2D-C++/include/covof/ et src/)}}\label{en-tuxeates-et-modules-c17-covof_2d-cincludecovof-et-src}
 
 \paragraph{\texorpdfstring{1.
-\texttt{include/fugu/Types.hpp}}{1. include/fugu/Types.hpp}}\label{includefugutypes.hpp}
+\texttt{include/covof/Types.hpp}}{1. include/covof/Types.hpp}}\label{includecovoftypes.hpp}
 
 \begin{itemize}
 \tightlist
@@ -1100,8 +1111,8 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
   \end{itemize}
 \end{itemize}
 
-\paragraph{\texorpdfstring{2. \texttt{include/fugu/CSRMatrix.hpp} \&
-\texttt{src/CSRMatrix.cpp}}{2. include/fugu/CSRMatrix.hpp \& src/CSRMatrix.cpp}}\label{includefugucsrmatrix.hpp-srccsrmatrix.cpp}
+\paragraph{\texorpdfstring{2. \texttt{include/covof/CSRMatrix.hpp} \&
+\texttt{src/CSRMatrix.cpp}}{2. include/covof/CSRMatrix.hpp \& src/CSRMatrix.cpp}}\label{includecovofcsrmatrix.hpp-srccsrmatrix.cpp}
 
 \begin{itemize}
 \tightlist
@@ -1130,8 +1141,8 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
   \end{itemize}
 \end{itemize}
 
-\paragraph{\texorpdfstring{3. \texttt{include/fugu/Mesh.hpp} \&
-\texttt{src/Mesh.cpp}}{3. include/fugu/Mesh.hpp \& src/Mesh.cpp}}\label{includefugumesh.hpp-srcmesh.cpp}
+\paragraph{\texorpdfstring{3. \texttt{include/covof/Mesh.hpp} \&
+\texttt{src/Mesh.cpp}}{3. include/covof/Mesh.hpp \& src/Mesh.cpp}}\label{includecovofmesh.hpp-srcmesh.cpp}
 
 \begin{itemize}
 \tightlist
@@ -1164,7 +1175,7 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
 \end{itemize}
 
 \paragraph{\texorpdfstring{4.
-\texttt{include/fugu/Field.hpp}}{4. include/fugu/Field.hpp}}\label{includefugufield.hpp}
+\texttt{include/covof/Field.hpp}}{4. include/covof/Field.hpp}}\label{includecovoffield.hpp}
 
 \begin{itemize}
 \tightlist
@@ -1197,8 +1208,8 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
   \end{itemize}
 \end{itemize}
 
-\paragraph{\texorpdfstring{5. \texttt{include/fugu/Config.hpp} \&
-\texttt{src/Config.cpp}}{5. include/fugu/Config.hpp \& src/Config.cpp}}\label{includefuguconfig.hpp-srcconfig.cpp}
+\paragraph{\texorpdfstring{5. \texttt{include/covof/Config.hpp} \&
+\texttt{src/Config.cpp}}{5. include/covof/Config.hpp \& src/Config.cpp}}\label{includecovofconfig.hpp-srcconfig.cpp}
 
 \begin{itemize}
 \tightlist
@@ -1220,8 +1231,8 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
   \end{itemize}
 \end{itemize}
 
-\paragraph{\texorpdfstring{6. \texttt{include/fugu/MpiComm.hpp} \&
-\texttt{src/MpiComm.cpp}}{6. include/fugu/MpiComm.hpp \& src/MpiComm.cpp}}\label{includefugumpicomm.hpp-srcmpicomm.cpp}
+\paragraph{\texorpdfstring{6. \texttt{include/covof/MpiComm.hpp} \&
+\texttt{src/MpiComm.cpp}}{6. include/covof/MpiComm.hpp \& src/MpiComm.cpp}}\label{includecovofmpicomm.hpp-srcmpicomm.cpp}
 
 \begin{itemize}
 \tightlist
@@ -1252,9 +1263,9 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
   \end{itemize}
 \end{itemize}
 
-\paragraph{\texorpdfstring{7. \texttt{include/fugu/Preconditioner.hpp}
+\paragraph{\texorpdfstring{7. \texttt{include/covof/Preconditioner.hpp}
 \&
-\texttt{src/Preconditioner.cpp}}{7. include/fugu/Preconditioner.hpp \& src/Preconditioner.cpp}}\label{includefugupreconditioner.hpp-srcpreconditioner.cpp}
+\texttt{src/Preconditioner.cpp}}{7. include/covof/Preconditioner.hpp \& src/Preconditioner.cpp}}\label{includecovofpreconditioner.hpp-srcpreconditioner.cpp}
 
 \begin{itemize}
 \tightlist
@@ -1279,8 +1290,8 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
   \end{itemize}
 \end{itemize}
 
-\paragraph{\texorpdfstring{8. \texttt{include/fugu/LinearSolver.hpp} \&
-\texttt{src/LinearSolver.cpp}}{8. include/fugu/LinearSolver.hpp \& src/LinearSolver.cpp}}\label{includefugulinearsolver.hpp-srclinearsolver.cpp}
+\paragraph{\texorpdfstring{8. \texttt{include/covof/LinearSolver.hpp} \&
+\texttt{src/LinearSolver.cpp}}{8. include/covof/LinearSolver.hpp \& src/LinearSolver.cpp}}\label{includecovoflinearsolver.hpp-srclinearsolver.cpp}
 
 \begin{itemize}
 \tightlist
@@ -1310,9 +1321,9 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
   \end{itemize}
 \end{itemize}
 
-\paragraph{\texorpdfstring{9. \texttt{include/fugu/InterfaceTracker.hpp}
-\&
-\texttt{src/InterfaceTracker.cpp}}{9. include/fugu/InterfaceTracker.hpp \& src/InterfaceTracker.cpp}}\label{includefuguinterfacetracker.hpp-srcinterfacetracker.cpp}
+\paragraph{\texorpdfstring{9.
+\texttt{include/covof/InterfaceTracker.hpp} \&
+\texttt{src/InterfaceTracker.cpp}}{9. include/covof/InterfaceTracker.hpp \& src/InterfaceTracker.cpp}}\label{includecovofinterfacetracker.hpp-srcinterfacetracker.cpp}
 
 \begin{itemize}
 \tightlist
@@ -1344,8 +1355,8 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
 \end{itemize}
 
 \paragraph{\texorpdfstring{10.
-\texttt{include/fugu/NavierStokesSolver.hpp} \&
-\texttt{src/NavierStokesSolver.cpp}}{10. include/fugu/NavierStokesSolver.hpp \& src/NavierStokesSolver.cpp}}\label{includefugunavierstokessolver.hpp-srcnavierstokessolver.cpp}
+\texttt{include/covof/NavierStokesSolver.hpp} \&
+\texttt{src/NavierStokesSolver.cpp}}{10. include/covof/NavierStokesSolver.hpp \& src/NavierStokesSolver.cpp}}\label{includecovofnavierstokessolver.hpp-srcnavierstokessolver.cpp}
 
 \begin{itemize}
 \tightlist
@@ -1383,8 +1394,8 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
   \end{itemize}
 \end{itemize}
 
-\paragraph{\texorpdfstring{11. \texttt{include/fugu/VTKWriter.hpp} \&
-\texttt{src/VTKWriter.cpp}}{11. include/fugu/VTKWriter.hpp \& src/VTKWriter.cpp}}\label{includefuguvtkwriter.hpp-srcvtkwriter.cpp}
+\paragraph{\texorpdfstring{11. \texttt{include/covof/VTKWriter.hpp} \&
+\texttt{src/VTKWriter.cpp}}{11. include/covof/VTKWriter.hpp \& src/VTKWriter.cpp}}\label{includecovofvtkwriter.hpp-srcvtkwriter.cpp}
 
 \begin{itemize}
 \tightlist
@@ -1407,8 +1418,8 @@ l'architecture logicielle de \textbf{COVOF 2D (C++17 et Fortran 2018)}.
   \end{itemize}
 \end{itemize}
 
-\paragraph{\texorpdfstring{12. \texttt{include/fugu/Simulation.hpp} \&
-\texttt{src/Simulation.cpp}}{12. include/fugu/Simulation.hpp \& src/Simulation.cpp}}\label{includefugusimulation.hpp-srcsimulation.cpp}
+\paragraph{\texorpdfstring{12. \texttt{include/covof/Simulation.hpp} \&
+\texttt{src/Simulation.cpp}}{12. include/covof/Simulation.hpp \& src/Simulation.cpp}}\label{includecovofsimulation.hpp-srcsimulation.cpp}
 
 \begin{itemize}
 \tightlist

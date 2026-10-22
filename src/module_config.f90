@@ -210,7 +210,7 @@ contains
     if (stat /= 0) return
 
     ! Case name & mode
-    call json_get_string(buf, "case_name", cfg%case_name, "fugu_case")
+    call json_get_string(buf, "case_name", cfg%case_name, "covof_case")
     ! Appel de sous-programme modulaire
     call json_get_string(buf, "output.case_name", cfg%case_name, cfg%case_name)
     ! Appel de sous-programme modulaire

@@ -22,7 +22,7 @@
    - 4.4. Module de Suivi d'Interface et Tension de Surface (`InterfaceTracker`)
    - 4.5. Module des Solveurs Linéaires et Préconditionneurs (`LinearSolver`)
    - 4.6. Module d'Écriture Graphique VTK Parallèle (`VTKWriter`)
-5. [Guide Développeur : Étendre le Solveur COVOF 2D](#5-guide-développeur--étendre-le-solveur-fugu-2d)
+5. [Guide Développeur : Étendre le Solveur COVOF 2D](#5-guide-développeur--étendre-le-solveur-covof-2d)
    - 5.1. Tutoriel 1 : Ajouter une Nouvelle Équation de Transport Scalaire (ex: Espèce Chimique)
    - 5.2. Tutoriel 2 : Implémenter un Nouveau Préconditionneur (ex: Multigrille Géométrique)
    - 5.3. Tutoriel 3 : Implémenter un Nouveau Solveur Linéaire ou Brancher MUMPS / PETSc
@@ -133,7 +133,7 @@ classDiagram
 
 À chaque pas de temps, la fonction maîtresse `Simulation::run()` exécute la séquence algorithmique suivante :
 
-| Étape Algorithmique COVOF 2D | Routine C++ FUGU | Équivalent Fortran 90 Référence Académique | Fonction Physique / Mathématique |
+| Étape Algorithmique COVOF 2D | Routine C++ COVOF | Équivalent Fortran 90 Référence Académique | Fonction Physique / Mathématique |
 |:---|:---|:---|:---|
 | **1. Calcul du Pas de Temps** | `compute_time_step()` | `CALDT` (`caldt.f90`) | Évalue la restriction CFL convective et capillaire |
 | **2. Transport d'Interface** | `InterfaceTracker::advect()` | `ADVECTS` (`advects.f90`) | Avance $C^{n+1}$ par VOF avec limiteur TVD Superbee |
@@ -274,7 +274,7 @@ void NavierStokesSolver::solve_energy(FlowFields& fields, double dt) {
 Pour ajouter une équation de transport d'une fraction massique $Y(\mathbf{x}, t)$ avec diffusion de Fick $D_m$ :
 $$\frac{\partial (\rho Y)}{\partial t} + \nabla \cdot (\rho \mathbf{u} Y) = \nabla \cdot (\rho D_m \nabla Y) + \dot{\omega}_Y$$
 
-1. **Ajouter le champ dans `include/fugu/Fields2D.hpp`** :
+1. **Ajouter le champ dans `include/covof/Field.hpp`** :
    ```cpp
    std::vector<double> Y;       // Fraction massique
    std::vector<double> D_fick;  // Coefficient de diffusion
@@ -292,7 +292,7 @@ $$\frac{\partial (\rho Y)}{\partial t} + \nabla \cdot (\rho \mathbf{u} Y) = \nab
 
 ### 5.2. Tutoriel 2 : Implémenter un Nouveau Préconditionneur (ex: Multigrille Géométrique)
 
-Toutes les classes de préconditionneurs héritent de l'interface abstraite `PreconditionerBase` définie dans `include/fugu/LinearSolver.hpp` :
+Toutes les classes de préconditionneurs héritent de l'interface abstraite `PreconditionerBase` définie dans `include/covof/LinearSolver.hpp` :
 
 ```cpp
 class PreconditionerBase {
@@ -325,7 +325,7 @@ Pour interfacer le solveur direct multifrontal parallèle **MUMPS** :
 
 ### 6.1. Conventions de Codage et Bonnes Pratiques C++20
 
-- **Espaces de noms** : Tout le code réside exclusivement dans le namespace `fugu::`.
+- **Espaces de noms** : Tout le code réside exclusivement dans le namespace `covof::` (avec alias `fugu::`).
 - **Typage fort et qualificatifs `const`** : Toutes les méthodes ne modifiant pas l'état interne de la classe doivent être qualifiées `const`.
 - **Passage d'arguments** : Par référence constante (`const Type&`) pour les structures et vecteurs ; par valeur pour les types primitifs (`int`, `double`, `bool`).
 - **Nommage** :
@@ -367,7 +367,7 @@ La répartition typique du temps de calcul dans une simulation COVOF 2D stabilis
 
 ## 7. Visite Guidée du Code Source C++20 et Analyse Ligne par Ligne
 
-### 7.1. Module `Mesh2D` (`include/fugu/Mesh2D.hpp` et `src/Mesh2D.cpp`)
+### 7.1. Module `Mesh2D` (`include/covof/Mesh.hpp` et `src/Mesh2D.cpp`)
 
 La classe `Mesh2D` encapsule la topologie cartésienne du maillage décalé (MAC) et gère la partition spatiale entre processus MPI.
 
@@ -407,7 +407,7 @@ int periods[2] = {is_periodic_x ? 1 : 0, is_periodic_y ? 1 : 0};
 MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 1, &cart_comm);
 ```
 
-### 7.2. Module `FlowFields` (`include/fugu/Fields2D.hpp`)
+### 7.2. Module `FlowFields` (`include/covof/Field.hpp`)
 
 La classe `FlowFields` regroupe l'ensemble des mémoires tampons de simulation. Les tableaux 1D contigus permettent une allocation vectorielle garantie sans dispersion dans le tas :
 
@@ -596,9 +596,9 @@ Pour proposer de nouveaux développements dans COVOF 2D :
 
 Cette section dresse l'inventaire exhaustif et la spécification technique de chacun des fichiers sources et en-têtes constituant l'architecture logicielle de **COVOF 2D (C++17 et Fortran 2018)**.
 
-### 10.1. En-têtes et Modules C++17 (`COVOF_2D-C++/include/fugu/` et `src/`)
+### 10.1. En-têtes et Modules C++17 (`COVOF_2D-C++/include/covof/` et `src/`)
 
-#### 1. `include/fugu/Types.hpp`
+#### 1. `include/covof/Types.hpp`
 * **Rôle et Responsabilité** : Définition des structures de données scalaires et énumérations fortement typées (`enum class`) régissant les conditions aux limites, les types de solveurs et les obstacles immergés.
 * **Structures Clés** :
   * `enum class BCType` : `DIRICHLET` (vitesse imposée), `NEUMANN` (sortie libre convective), `FREE_SLIP` (glissement parfait), `PERIODIC` (périodicité torique).
@@ -608,7 +608,7 @@ Cette section dresse l'inventaire exhaustif et la spécification technique de ch
 ho, \mu, C_p, k,  eta$).
   * `struct SolverOptions` : Paramétrage du Lagrangien augmenté ($r_{\text{al}}$, itérations d'Uzawa, tolérance de convergence $\epsilon$, type de préconditionneur).
 
-#### 2. `include/fugu/CSRMatrix.hpp` & `src/CSRMatrix.cpp`
+#### 2. `include/covof/CSRMatrix.hpp` & `src/CSRMatrix.cpp`
 * **Rôle et Responsabilité** : Format de stockage creux Compressed Sparse Row (CSR) pour l'assemblage explicite de matrices locales creuses.
 * **Algorithmes & Structures** :
   * Vecteurs `row_ptr` (taille $N+1$), `col_idx` (taille $NNZ$), `values` (taille $NNZ$), et `diag` (taille $N$).
@@ -616,7 +616,7 @@ ho, \mu, C_p, k,  eta$).
   * Méthode `matvec()` : Produit matrice-vecteur creux optimisé pour le préchargement de cache L1/L2.
   * Méthode `solve_jacobi()` : Relaxation itérative de Jacobi pour le préconditionnement local.
 
-#### 3. `include/fugu/Mesh.hpp` & `src/Mesh.cpp`
+#### 3. `include/covof/Mesh.hpp` & `src/Mesh.cpp`
 * **Rôle et Responsabilité** : Topologie spatiale 2D, gestion du communicateur cartésien MPI, métrique géométrique et partitionnement de domaine.
 * **Algorithmes & Fonctions** :
   * `init()` : Appel à `MPI_Dims_create` et `MPI_Cart_create` pour déterminer automatiquement la décomposition $(P_x, P_y)$ la plus carrée possible.
@@ -624,7 +624,7 @@ ho, \mu, C_p, k,  eta$).
   * Fonctions de coordonnées décalées : `x_face(i)` ($i-1/2$), `y_face(j)` ($j-1/2$), `x_center(i)` ($i$), `y_center(j)` ($j$).
   * `is_in_obstacle()` : Test analytique d'inclusion géométrique pour la pénalisation de Brinkman.
 
-#### 4. `include/fugu/Field.hpp`
+#### 4. `include/covof/Field.hpp`
 * **Rôle et Responsabilité** : Conteneur des champs physiques discrétisés sur grille décalée MAC (Marker-And-Cell).
 * **Données Allouées** :
   * Tableaux 2D continus indexés par $(i, j) \in [0, n_x+1] \times [0, n_y+1]$ (avec couche de cellules fantômes).
@@ -633,13 +633,13 @@ ho, \mu, C_p, k,  eta$).
   * Forces capillaires $f_{x,\sigma}, f_{y,\sigma}$ et courbure d'interface $\kappa$.
   * Masque solide `solid_mask` ($1$ pour solide, $0$ pour fluide).
 
-#### 5. `include/fugu/Config.hpp` & `src/Config.cpp`
+#### 5. `include/covof/Config.hpp` & `src/Config.cpp`
 * **Rôle et Responsabilité** : Analyseur syntaxique JSON natif, validation des paramètres physiques et géométriques de la simulation.
 * **Fonctionnalités** :
   * Extraction hiérarchique des sections `mesh`, `physics`, `time`, `boundary_conditions`, `solver`, `obstacle`, `output`.
   * Remplissage automatique des valeurs par défaut pour les options omises.
 
-#### 6. `include/fugu/MpiComm.hpp` & `src/MpiComm.cpp`
+#### 6. `include/covof/MpiComm.hpp` & `src/MpiComm.cpp`
 * **Rôle et Responsabilité** : Synchronisation distribuée des cellules fantômes (halos) par communications non-bloquantes OpenMPI.
 * **Algorithmes** :
   * `exchange_halos_scalar()` : Échange des bords pour les champs centrés ($p, T, C, \rho, \mu$).
@@ -647,14 +647,14 @@ ho, \mu, C_p, k,  eta$).
   * Utilisation systématique de paires `MPI_Isend` / `MPI_Irecv` associées à `MPI_Waitall` pour éviter tout interblocage (*deadlock*) et permettre le recouvrement calcul-communication.
   * Application des conditions aux limites physiques (Dirichlet, Neumann, Free-Slip, Périodique) sur les frontières externes non partagées.
 
-#### 7. `include/fugu/Preconditioner.hpp` & `src/Preconditioner.cpp`
+#### 7. `include/covof/Preconditioner.hpp` & `src/Preconditioner.cpp`
 * **Rôle et Responsabilité** : Interface abstraite et implémentation des préconditionneurs algébriques parallèles pour accélérer la convergence des méthodes de Krylov.
 * **Classes** :
   * `IPreconditioner` : Interface de base avec méthode virtuelle pure `apply(r, z)`.
   * `JacobiPreconditioner` : Préconditionneur diagonal par blocs $M = \text{diag}(A)$, complexité $O(1)$ sans échange réseau.
   * `SSORPreconditioner` : Relaxation symétrique de Gauss-Seidel par étapes avant-arrière.
 
-#### 8. `include/fugu/LinearSolver.hpp` & `src/LinearSolver.cpp`
+#### 8. `include/covof/LinearSolver.hpp` & `src/LinearSolver.cpp`
 * **Rôle et Responsabilité** : Implémentation des solveurs itératifs de sous-espace de Krylov Matrix-Free.
 * **Algorithmes Développés** :
   * `BiCGSTAB2Solver` : Biconjugué Gradient Stabilisé d'ordre 2 (Sleijpen & van der Vorst 1993) avec minimisation polynomiale locale d'ordre 2 pour amortir les résonances asymétriques.
@@ -663,7 +663,7 @@ ho, \mu, C_p, k,  eta$).
   * `GMRESSolver` : Résolution par orthogonalisation de modified Gram-Schmidt avec rotation de Givens.
   * Réductions globales `MPI_Allreduce` pour le calcul distribué des produits scalaires $\langle u, v \rangle = \sum_i u_i v_i$.
 
-#### 9. `include/fugu/InterfaceTracker.hpp` & `src/InterfaceTracker.cpp`
+#### 9. `include/covof/InterfaceTracker.hpp` & `src/InterfaceTracker.cpp`
 * **Rôle et Responsabilité** : Capture d'interface diphasique par la méthode Volume-Of-Fluid (VOF) et modélisation de la tension de surface CSF.
 * **Formulations Numériques** :
   * Advection géométrique par limiteur de flux non-linéaire **TVD Superbee** garantissant la stricte conservation du volume et le maintien d'une épaisseur d'interface de 1 à 2 cellules.
@@ -671,7 +671,7 @@ ho, \mu, C_p, k,  eta$).
   * Évaluation de la courbure locale $\kappa = -\nabla \cdot \mathbf{n}$.
   * Calcul de la force volumique de Brackbill $\mathbf{f}_\sigma = \sigma \kappa \nabla C$ projetée sur les faces décalées $u$ et $v$.
 
-#### 10. `include/fugu/NavierStokesSolver.hpp` & `src/NavierStokesSolver.cpp`
+#### 10. `include/covof/NavierStokesSolver.hpp` & `src/NavierStokesSolver.cpp`
 * **Rôle et Responsabilité** : Cœur hydrodynamique résolvant les équations de Navier-Stokes incompressibles couplées à l'énergie thermique.
 * **Schémas Discrets Spécifiés** :
   * **Convection semi-implicite** : Termes advectifs $(\mathbf{u}\cdot\nabla)\mathbf{u}$ discrétisés par schéma centré d'ordre 2 ou décentré upwind.
@@ -681,13 +681,13 @@ ho, \mu, C_p, k,  eta$).
   * **Thermique & Boussinesq** : Résolution de l'advection-diffusion de température et force de flottabilité $\mathbf{f}_b = -\rho \beta (T - T_0)\mathbf{g}$.
   * **Pénalisation de Brinkman** : Terme de traînée volumique $\frac{\mu}{K} \mathbf{u}$ forçant $\mathbf{u} = \mathbf{0}$ à l'intérieur des obstacles rigides sans maillage non structuré.
 
-#### 11. `include/fugu/VTKWriter.hpp` & `src/VTKWriter.cpp`
+#### 11. `include/covof/VTKWriter.hpp` & `src/VTKWriter.cpp`
 * **Rôle et Responsabilité** : Générateur de visualisations volumiques et surfaciques au standard XML VTK.
 * **Fichiers Produits** :
   * Fichiers de sous-domaines partitionnés `.vtr` (*RectilinearGrid*) écrits par chaque processus MPI de façon indépendante et parallèle.
   * Fichier maître coordinateur `.pvtr` (*ParallelRectilinearGrid*) référençant les sous-domaines locaux, directement lisible par ParaView.
 
-#### 12. `include/fugu/Simulation.hpp` & `src/Simulation.cpp`
+#### 12. `include/covof/Simulation.hpp` & `src/Simulation.cpp`
 * **Rôle et Responsabilité** : Orchestration de la boucle temporelle, régulation adaptative du pas de temps sous contrainte CFL, gestion des sorties et modes de vérification.
 * **Fonctions Spécialisées** :
   * Régulation adaptative $\Delta t = \min\left(\text{CFL} \frac{\Delta x}{\|\mathbf{u}\|_{\max}}, \frac{\rho \Delta x^2}{4\mu}\right)$.

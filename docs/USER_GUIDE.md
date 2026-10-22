@@ -135,7 +135,7 @@ L'exécutable final est automatiquement placé dans le répertoire `bin/covof2d`
 covof2d/
 ├── CMakeLists.txt              # Configuration de compilation CMake
 ├── bin/                        # Exécutable binaire final (covof2d)
-├── include/fugu/               # En-têtes C++ de la bibliothèque FUGU
+├── include/covof/               # En-têtes C++ de la bibliothèque COVOF
 │   ├── Config.hpp              # Structure de données de configuration
 │   ├── Fields2D.hpp            # Allocation mémoire des variables scalaires et vectorielles
 │   ├── InterfaceTracker.hpp    # Algorithmes VOF et modèle CSF capillaire
