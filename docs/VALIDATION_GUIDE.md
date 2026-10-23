@@ -185,19 +185,25 @@ avec une période $T = 4.0\text{ s}$. À $t = T/2$, le disque est étiré en une
 ![Déformation et Reconstitution Vortex Cas 3.19](figures/fig_cas3_19_vortex_shear_shape.png)
 
 #### Évaluation et Benchmark Comparatif des Nouvelles Implémentations VOF
-Le tableau ci-dessous synthétise les performances comparées des nouvelles méthodes de suivi d'interface intégrées dans COVOF 2D sur le maillage $64 \times 64$ avec une période complète $T = 6.0\text{ s}$ :
+Le tableau ci-dessous synthétise les performances comparées des différentes méthodes de suivi d'interface intégrées dans COVOF 2D sur le maillage $64 \times 64$ avec une période complète $T = 6.0\text{ s}$ :
 
 | Schéma d'Advection | Méthode Reconstruction | Limiteur TVD/NVD | Erreur $L_1$ | Erreur $L_2$ | Erreur $L_\infty$ | Conservation Masse | Gain Précision | Statut |
 |:---|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|
 | **`VOF_TVD`** *(Référence)* | `PLIC` | `SUPERBEE` | $5.7602 \times 10^{-2}$ | $1.5242 \times 10^{-1}$ | $0.8117$ | $98.81\,\%$ | $1.00\times$ | **PASS** |
-| **`CIAM`** | `PLIC` | `SUPERBEE` | $\mathbf{6.3865 \times 10^{-3}}$ | $\mathbf{3.8283 \times 10^{-2}}$ | $\mathbf{0.4373}$ | $105.52\,\%$ | $\mathbf{9.02\times}$ | **PASS** |
-| **`CIAM`** | `SLIC` | `SUPERBEE` | $6.3865 \times 10^{-3}$ | $3.8283 \times 10^{-2}$ | $0.4373$ | $105.52\,\%$ | $9.02\times$ | **PASS** |
-| **`WEYMOUTH_YUE`** | `ELVIRA` | `SUPERBEE` | $\mathbf{1.1970 \times 10^{-2}}$ | $\mathbf{4.2235 \times 10^{-2}}$ | $\mathbf{0.4373}$ | $\mathbf{100.00\,\%}$ | $\mathbf{4.81\times}$ | **PASS** |
-| **`WEYMOUTH_YUE`** | `LVIRA` | `SUPERBEE` | $1.9472 \times 10^{-2}$ | $5.7659 \times 10^{-2}$ | $0.4373$ | $100.00\,\%$ | $2.96\times$ | **PASS** |
-| **`WEYMOUTH_YUE`** | `PLIC` | `SUPERBEE` | $1.9473 \times 10^{-2}$ | $5.7659 \times 10^{-2}$ | $0.4373$ | $100.00\,\%$ | $2.96\times$ | **PASS** |
+| **`CIAM`** | `ELVIRA` | *N/A (Géométrique)* | $\mathbf{6.2345 \times 10^{-3}}$ | $\mathbf{3.7795 \times 10^{-2}}$ | $\mathbf{0.4373}$ | $104.77\,\%$ | $\mathbf{9.24\times}$ | **PASS** |
+| **`CIAM`** | `PLIC` | *N/A (Géométrique)* | $\mathbf{6.3865 \times 10^{-3}}$ | $\mathbf{3.8283 \times 10^{-2}}$ | $\mathbf{0.4373}$ | $105.52\,\%$ | $\mathbf{9.02\times}$ | **PASS** |
+| **`CIAM`** | `SLIC` | *N/A (Géométrique)* | $6.3865 \times 10^{-3}$ | $3.8283 \times 10^{-2}$ | $0.4373$ | $105.52\,\%$ | $9.02\times$ | **PASS** |
+| **`WEYMOUTH_YUE`** | `ELVIRA` | *N/A (Scaling W&Y)* | $\mathbf{1.1970 \times 10^{-2}}$ | $\mathbf{4.2235 \times 10^{-2}}$ | $\mathbf{0.4373}$ | $\mathbf{100.00000\,\%}$ | $\mathbf{4.81\times}$ | **PASS** |
+| **`WEYMOUTH_YUE`** | `PLIC` | *N/A (Scaling W&Y)* | $1.1970 \times 10^{-2}$ | $4.2235 \times 10^{-2}$ | $0.4373$ | $100.00000\,\%$ | $4.81\times$ | **PASS** |
+| **`WEYMOUTH_YUE`** | `SLIC` | *N/A (Scaling W&Y)* | $1.1970 \times 10^{-2}$ | $4.2235 \times 10^{-2}$ | $0.4373$ | $100.00000\,\%$ | $4.81\times$ | **PASS** |
 | **`VOF_TVD`** | `PLIC` | `HRIC` | $4.1667 \times 10^{-2}$ | $1.3216 \times 10^{-1}$ | $0.6901$ | $98.87\,\%$ | $1.38\times$ | **PASS** |
 | **`VOF_TVD`** | `PLIC` | `MUSCL` | $6.4622 \times 10^{-2}$ | $1.6452 \times 10^{-1}$ | $0.8366$ | $98.72\,\%$ | $0.89\times$ | **PASS** |
 | **`VOF_TVD`** | `PLIC` | `VAN_LEER` | $6.7242 \times 10^{-2}$ | $1.6908 \times 10^{-1}$ | $0.8482$ | $98.67\,\%$ | $0.86\times$ | **PASS** |
+
+> **Remarque fondamentale sur les limiteurs de flux** :
+> 1. Les schémas géométriques (**CIAM** et **Weymouth & Yue**) ne requièrent **aucun limiteur algébrique TVD/NVD** : les flux sont calculés par intégration géométrique analytique des boîtes de flux découpées par l'interface reconstruite.
+> 2. Pour **Weymouth & Yue**, la bornitude $0 \le C \le 1$ et l'exactitude de conservation de masse ($100.00000\,\%$) sont assurées par un partitionnement symétrique multidimensionnel des flux de coins et de faces.
+> 3. Les limiteurs TVD/NVD (`SUPERBEE`, `HRIC`, `MUSCL`, `VAN_LEER`) s'appliquent exclusivement au schéma de transport algébrique **`VOF_TVD`**.
 
 ![Comparaison Multi-Méthodes de Reconstitution Vortex Cas 3.19](figures/fig_cas3_19_vortex_comparative.png)
 

@@ -627,7 +627,7 @@ Implémentations
 VOF}\label{uxe9valuation-et-benchmark-comparatif-des-nouvelles-impluxe9mentations-vof}
 
 Le tableau ci-dessous synthétise les performances comparées des
-nouvelles méthodes de suivi d'interface intégrées dans COVOF 2D sur le
+différentes méthodes de suivi d'interface intégrées dans COVOF 2D sur le
 maillage \(64 \times 64\) avec une période complète \(T = 6.0\text{ s}\)
 :
 
@@ -670,23 +670,27 @@ Statut
 \texttt{SUPERBEE} & \(5.7602 \times 10^{-2}\) &
 \(1.5242 \times 10^{-1}\) & \(0.8117\) & \(98.81\,\%\) & \(1.00\times\)
 & \textbf{PASS} \\
-\textbf{\texttt{CIAM}} & \texttt{PLIC} & \texttt{SUPERBEE} &
+\textbf{\texttt{CIAM}} & \texttt{ELVIRA} & \emph{N/A (Géométrique)} &
+\(\mathbf{6.2345 \times 10^{-3}}\) & \(\mathbf{3.7795 \times 10^{-2}}\)
+& \(\mathbf{0.4373}\) & \(104.77\,\%\) & \(\mathbf{9.24\times}\) &
+\textbf{PASS} \\
+\textbf{\texttt{CIAM}} & \texttt{PLIC} & \emph{N/A (Géométrique)} &
 \(\mathbf{6.3865 \times 10^{-3}}\) & \(\mathbf{3.8283 \times 10^{-2}}\)
 & \(\mathbf{0.4373}\) & \(105.52\,\%\) & \(\mathbf{9.02\times}\) &
 \textbf{PASS} \\
-\textbf{\texttt{CIAM}} & \texttt{SLIC} & \texttt{SUPERBEE} &
+\textbf{\texttt{CIAM}} & \texttt{SLIC} & \emph{N/A (Géométrique)} &
 \(6.3865 \times 10^{-3}\) & \(3.8283 \times 10^{-2}\) & \(0.4373\) &
 \(105.52\,\%\) & \(9.02\times\) & \textbf{PASS} \\
-\textbf{\texttt{WEYMOUTH\_YUE}} & \texttt{ELVIRA} & \texttt{SUPERBEE} &
-\(\mathbf{1.1970 \times 10^{-2}}\) & \(\mathbf{4.2235 \times 10^{-2}}\)
-& \(\mathbf{0.4373}\) & \(\mathbf{100.00\,\%}\) &
-\(\mathbf{4.81\times}\) & \textbf{PASS} \\
-\textbf{\texttt{WEYMOUTH\_YUE}} & \texttt{LVIRA} & \texttt{SUPERBEE} &
-\(1.9472 \times 10^{-2}\) & \(5.7659 \times 10^{-2}\) & \(0.4373\) &
-\(100.00\,\%\) & \(2.96\times\) & \textbf{PASS} \\
-\textbf{\texttt{WEYMOUTH\_YUE}} & \texttt{PLIC} & \texttt{SUPERBEE} &
-\(1.9473 \times 10^{-2}\) & \(5.7659 \times 10^{-2}\) & \(0.4373\) &
-\(100.00\,\%\) & \(2.96\times\) & \textbf{PASS} \\
+\textbf{\texttt{WEYMOUTH\_YUE}} & \texttt{ELVIRA} & \emph{N/A (Scaling
+W\&Y)} & \(\mathbf{1.1970 \times 10^{-2}}\) &
+\(\mathbf{4.2235 \times 10^{-2}}\) & \(\mathbf{0.4373}\) &
+\(\mathbf{100.00000\,\%}\) & \(\mathbf{4.81\times}\) & \textbf{PASS} \\
+\textbf{\texttt{WEYMOUTH\_YUE}} & \texttt{PLIC} & \emph{N/A (Scaling
+W\&Y)} & \(1.1970 \times 10^{-2}\) & \(4.2235 \times 10^{-2}\) &
+\(0.4373\) & \(100.00000\,\%\) & \(4.81\times\) & \textbf{PASS} \\
+\textbf{\texttt{WEYMOUTH\_YUE}} & \texttt{SLIC} & \emph{N/A (Scaling
+W\&Y)} & \(1.1970 \times 10^{-2}\) & \(4.2235 \times 10^{-2}\) &
+\(0.4373\) & \(100.00000\,\%\) & \(4.81\times\) & \textbf{PASS} \\
 \textbf{\texttt{VOF\_TVD}} & \texttt{PLIC} & \texttt{HRIC} &
 \(4.1667 \times 10^{-2}\) & \(1.3216 \times 10^{-1}\) & \(0.6901\) &
 \(98.87\,\%\) & \(1.38\times\) & \textbf{PASS} \\
@@ -698,6 +702,20 @@ Statut
 \(98.67\,\%\) & \(0.86\times\) & \textbf{PASS} \\
 \end{longtable}
 }
+
+\begin{quote}
+\textbf{Remarque fondamentale sur les limiteurs de flux} : 1. Les
+schémas géométriques (\textbf{CIAM} et \textbf{Weymouth \& Yue}) ne
+requièrent \textbf{aucun limiteur algébrique TVD/NVD} : les flux sont
+calculés par intégration géométrique analytique des boîtes de flux
+découpées par l'interface reconstruite. 2. Pour \textbf{Weymouth \&
+Yue}, la bornitude \(0 \le C \le 1\) et l'exactitude de conservation de
+masse (\(100.00000\,\%\)) sont assurées par un partitionnement
+symétrique multidimensionnel des flux de coins et de faces. 3. Les
+limiteurs TVD/NVD (\texttt{SUPERBEE}, \texttt{HRIC}, \texttt{MUSCL},
+\texttt{VAN\_LEER}) s'appliquent exclusivement au schéma de transport
+algébrique \textbf{\texttt{VOF\_TVD}}.
+\end{quote}
 
 \begin{figure}
 \centering

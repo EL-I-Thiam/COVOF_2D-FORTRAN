@@ -1,0 +1,75 @@
+{
+  "mode": "VORTEX_ADVECTION",
+  "mesh": {
+    "nx": 64,
+    "ny": 64,
+    "lx": 1.0,
+    "ly": 1.0
+  },
+  "physics": {
+    "enable_two_phase": true,
+    "enable_surface_tension": false,
+    "enable_convection": true,
+    "sigma": 0.0,
+    "fluid1": {
+      "rho": 1000.0,
+      "mu": 0.001
+    },
+    "fluid2": {
+      "rho": 1.0,
+      "mu": 1e-05
+    }
+  },
+  "vof": {
+    "reconstruction_method": "LVIRA",
+    "advection_method": "CIAM",
+    "tvd_limiter": "SUPERBEE",
+    "cfl_vof": 0.5
+  },
+  "initial_condition": {
+    "type": "VORTEX_SHEAR",
+    "center_x": 0.5,
+    "center_y": 0.75,
+    "radius": 0.125
+  },
+  "time": {
+    "dt": 0.005,
+    "t_final": 6.0,
+    "adaptive_dt": false
+  },
+  "boundary_conditions": {
+    "left": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "right": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "bottom": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "top": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    }
+  },
+  "solver": {
+    "type": "AUGMENTED_LAGRANGIAN",
+    "linear_solver": "BICGSTAB2",
+    "tolerance": 1e-07,
+    "max_iterations": 500,
+    "augmented_lagrangian_r": 500.0,
+    "uzawa_iterations": 1
+  },
+  "output": {
+    "output_dir": "output_vortex_shear_ciam_lvira",
+    "vtk_interval": 120,
+    "write_ascii": true
+  }
+}

@@ -212,14 +212,17 @@ def verify_all():
 
     # Évaluation comparative détaillée des nouvelles implémentations VOF (Cas 3.19)
     vort_variants = [
-        ("CIAM + PLIC (Géométrique)", "output_vortex_shear_ciam_plic/vortex_error.csv"),
-        ("CIAM + SLIC (Géométrique)", "output_vortex_shear_ciam_slic/vortex_error.csv"),
-        ("Weymouth & Yue + ELVIRA",   "output_vortex_shear_weymouth_yue_elvira/vortex_error.csv"),
-        ("Weymouth & Yue + LVIRA",    "output_vortex_shear_weymouth_yue_lvira/vortex_error.csv"),
-        ("Weymouth & Yue + PLIC",     "output_vortex_shear_weymouth_yue_plic/vortex_error.csv"),
-        ("VOF-TVD HRIC (NVD)",        "output_vortex_shear_vof_tvd_hric/vortex_error.csv"),
-        ("VOF-TVD MUSCL",             "output_vortex_shear_vof_tvd_muscl/vortex_error.csv"),
-        ("VOF-TVD Van Leer",          "output_vortex_shear_vof_tvd_vanleer/vortex_error.csv"),
+        ("CIAM + PLIC (Géométrique)",   "output_vortex_shear_ciam_plic/vortex_error.csv"),
+        ("CIAM + SLIC (Géométrique)",   "output_vortex_shear_ciam_slic/vortex_error.csv"),
+        ("CIAM + ELVIRA (Géométrique)", "output_vortex_shear_ciam_elvira/vortex_error.csv"),
+        ("Weymouth & Yue + ELVIRA",     "output_vortex_shear_weymouth_yue_elvira/vortex_error.csv"),
+        ("Weymouth & Yue + PLIC",       "output_vortex_shear_weymouth_yue_plic/vortex_error.csv"),
+        ("Weymouth & Yue + SLIC",       "output_vortex_shear_weymouth_yue_slic/vortex_error.csv"),
+        ("Weymouth & Yue + LVIRA",      "output_vortex_shear_weymouth_yue_lvira/vortex_error.csv"),
+        ("CIAM + LVIRA",                "output_vortex_shear_ciam_lvira/vortex_error.csv"),
+        ("VOF-TVD HRIC (NVD)",          "output_vortex_shear_vof_tvd_hric/vortex_error.csv"),
+        ("VOF-TVD MUSCL",               "output_vortex_shear_vof_tvd_muscl/vortex_error.csv"),
+        ("VOF-TVD Van Leer",            "output_vortex_shear_vof_tvd_vanleer/vortex_error.csv"),
     ]
 
     vort_comparison_data = []
