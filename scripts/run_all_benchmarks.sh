@@ -51,7 +51,17 @@ mpirun -np ${NP} "${EXEC}" cases/poiseuille_variable_viscosity.json
 
 echo ""
 echo ">>> [5/13] Cas 3.19 : Advection VOF Vortex Cisaillement Reversible <<<"
+echo "    -> [5.1/13] VOF-TVD Superbee (Reference)..."
+rm -rf output_vortex_shear/*
 mpirun -np ${NP} "${EXEC}" cases/vortex_shear_advection.json
+
+echo "    -> [5.2/13] Geometrique CIAM + PLIC..."
+rm -rf output_vortex_shear_ciam_plic/*
+mpirun -np ${NP} "${EXEC}" cases/vortex_shear_ciam_plic.json
+
+echo "    -> [5.3/13] Multidimensionnel Weymouth & Yue + ELVIRA..."
+rm -rf output_vortex_shear_weymouth_yue_elvira/*
+mpirun -np ${NP} "${EXEC}" cases/vortex_shear_weymouth_yue_elvira.json
 
 echo ""
 echo ">>> [6/13] Cas 4.1 : Marche Descendante (Armaly Re=100) <<<"

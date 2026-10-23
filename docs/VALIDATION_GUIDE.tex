@@ -2,10 +2,8 @@
 \PassOptionsToPackage{unicode}{hyperref}
 \PassOptionsToPackage{hyphens}{url}
 \documentclass[
-  french,
 ]{article}
 \usepackage{xcolor}
-\usepackage[margin=2cm]{geometry}
 \usepackage{amsmath,amssymb}
 \setcounter{secnumdepth}{-\maxdimen} % remove section numbering
 \usepackage{iftex}
@@ -101,14 +99,6 @@
 % Set default figure placement to htbp
 \def\fps@figure{htbp}
 \makeatother
-\ifLuaTeX
-\usepackage[bidi=basic,shorthands=off]{babel}
-\else
-\usepackage[bidi=default,shorthands=off]{babel}
-\fi
-\ifLuaTeX
-  \usepackage{selnolig} % disable illegal ligatures
-\fi
 \setlength{\emergencystretch}{3em} % prevent overfull lines
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
@@ -120,7 +110,6 @@
 \@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
 \makeatother
 \hypersetup{
-  pdflang={fr},
   hidelinks,
   pdfcreator={LaTeX via pandoc}}
 
@@ -616,8 +605,8 @@ CFD}\label{ruxe9sultats-comparatifs-covof-2d-vs-ruxe9fuxe9rence-acaduxe9mique-cf
 \begin{itemize}
 \tightlist
 \item
-  Erreur \(L_1\) de reconstitution à \(t = T\) dans COVOF 2D :
-  \textbf{\(0.05760\)}
+  Erreur \(L_1\) de reconstitution à \(t = T\) dans COVOF 2D (VOF-TVD
+  Superbee) : \textbf{\(0.05760\)}
 \item
   Cible Référence Académique CFD (Tableau page 86, VOF-TVD Superbee) :
   \textbf{\(0.05759\)}
@@ -631,6 +620,91 @@ CFD}\label{ruxe9sultats-comparatifs-covof-2d-vs-ruxe9fuxe9rence-acaduxe9mique-cf
 Reconstitution Vortex Cas
 3.19}]{figures/fig_cas3_19_vortex_shear_shape.png}}
 \caption{Déformation et Reconstitution Vortex Cas 3.19}
+\end{figure}
+
+\paragraph{Évaluation et Benchmark Comparatif des Nouvelles
+Implémentations
+VOF}\label{uxe9valuation-et-benchmark-comparatif-des-nouvelles-impluxe9mentations-vof}
+
+Le tableau ci-dessous synthétise les performances comparées des
+nouvelles méthodes de suivi d'interface intégrées dans COVOF 2D sur le
+maillage \(64 \times 64\) avec une période complète \(T = 6.0\text{ s}\)
+:
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.0952}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.0952}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.0952}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1190}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1190}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1190}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1190}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1190}}
+  >{\centering\arraybackslash}p{(\linewidth - 16\tabcolsep) * \real{0.1190}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Schéma d'Advection
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Méthode Reconstruction
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Limiteur TVD/NVD
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Erreur \(L_1\)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Erreur \(L_2\)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Erreur \(L_\infty\)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Conservation Masse
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Gain Précision
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Statut
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{\texttt{VOF\_TVD}} \emph{(Référence)} & \texttt{PLIC} &
+\texttt{SUPERBEE} & \(5.7602 \times 10^{-2}\) &
+\(1.5242 \times 10^{-1}\) & \(0.8117\) & \(98.81\,\%\) & \(1.00\times\)
+& \textbf{PASS} \\
+\textbf{\texttt{CIAM}} & \texttt{PLIC} & \texttt{SUPERBEE} &
+\(\mathbf{6.3865 \times 10^{-3}}\) & \(\mathbf{3.8283 \times 10^{-2}}\)
+& \(\mathbf{0.4373}\) & \(105.52\,\%\) & \(\mathbf{9.02\times}\) &
+\textbf{PASS} \\
+\textbf{\texttt{CIAM}} & \texttt{SLIC} & \texttt{SUPERBEE} &
+\(6.3865 \times 10^{-3}\) & \(3.8283 \times 10^{-2}\) & \(0.4373\) &
+\(105.52\,\%\) & \(9.02\times\) & \textbf{PASS} \\
+\textbf{\texttt{WEYMOUTH\_YUE}} & \texttt{ELVIRA} & \texttt{SUPERBEE} &
+\(\mathbf{1.1970 \times 10^{-2}}\) & \(\mathbf{4.2235 \times 10^{-2}}\)
+& \(\mathbf{0.4373}\) & \(\mathbf{100.00\,\%}\) &
+\(\mathbf{4.81\times}\) & \textbf{PASS} \\
+\textbf{\texttt{WEYMOUTH\_YUE}} & \texttt{LVIRA} & \texttt{SUPERBEE} &
+\(1.9472 \times 10^{-2}\) & \(5.7659 \times 10^{-2}\) & \(0.4373\) &
+\(100.00\,\%\) & \(2.96\times\) & \textbf{PASS} \\
+\textbf{\texttt{WEYMOUTH\_YUE}} & \texttt{PLIC} & \texttt{SUPERBEE} &
+\(1.9473 \times 10^{-2}\) & \(5.7659 \times 10^{-2}\) & \(0.4373\) &
+\(100.00\,\%\) & \(2.96\times\) & \textbf{PASS} \\
+\textbf{\texttt{VOF\_TVD}} & \texttt{PLIC} & \texttt{HRIC} &
+\(4.1667 \times 10^{-2}\) & \(1.3216 \times 10^{-1}\) & \(0.6901\) &
+\(98.87\,\%\) & \(1.38\times\) & \textbf{PASS} \\
+\textbf{\texttt{VOF\_TVD}} & \texttt{PLIC} & \texttt{MUSCL} &
+\(6.4622 \times 10^{-2}\) & \(1.6452 \times 10^{-1}\) & \(0.8366\) &
+\(98.72\,\%\) & \(0.89\times\) & \textbf{PASS} \\
+\textbf{\texttt{VOF\_TVD}} & \texttt{PLIC} & \texttt{VAN\_LEER} &
+\(6.7242 \times 10^{-2}\) & \(1.6908 \times 10^{-1}\) & \(0.8482\) &
+\(98.67\,\%\) & \(0.86\times\) & \textbf{PASS} \\
+\end{longtable}
+}
+
+\begin{figure}
+\centering
+\pandocbounded{\includegraphics[keepaspectratio,alt={Comparaison
+Multi-Méthodes de Reconstitution Vortex Cas
+3.19}]{figures/fig_cas3_19_vortex_comparative.png}}
+\caption{Comparaison Multi-Méthodes de Reconstitution Vortex Cas 3.19}
 \end{figure}
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}

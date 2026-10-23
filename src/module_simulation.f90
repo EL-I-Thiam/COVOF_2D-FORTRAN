@@ -689,6 +689,14 @@ contains
     real(dp) :: T_period, dt, t, cos_factor, x_u, y_c, x_c, y_v, sx, sy
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: local_err_l1, global_err_l1, local_cells, global_cells, err_l1
+    ! Déclaration des variables pour erreurs L2, Linf et bilan de conservation de masse
+    real(dp) :: local_err_l2, global_err_l2, err_l2
+    ! Déclaration de l'erreur absolue maximale locale et globale
+    real(dp) :: local_err_linf, global_err_linf, err_linf
+    ! Déclaration des masses initiale et finale locales et globales
+    real(dp) :: local_mass_init, global_mass_init, local_mass_final, global_mass_final
+    ! Déclaration du volume de maille, écart local et ratio de conservation
+    real(dp) :: cell_vol, diff, mass_conservation
     ! Déclaration de variable locale / paramètre de calcul
     character(len=256) :: err_file
     ! Déclaration de variable locale / paramètre de calcul
@@ -809,44 +817,95 @@ contains
        end if
     end do
 
-    ! Calcul de l'erreur L1 entre C_initial et C(T)
+    ! Calcul des erreurs L1, L2, Linf et du bilan de masse entre C_initial et C(T)
     local_err_l1 = 0.0_dp
-    ! Affectation et calcul numérique
+    ! Affectation et initialisation numérique de la somme d'erreur quadratique L2
+    local_err_l2 = 0.0_dp
+    ! Affectation et initialisation numérique de l'erreur absolue maximale Linf
+    local_err_linf = 0.0_dp
+    ! Affectation et initialisation numérique de la masse initiale locale
+    local_mass_init = 0.0_dp
+    ! Affectation et initialisation numérique de la masse finale locale
+    local_mass_final = 0.0_dp
+    ! Affectation et calcul du nombre de cellules locales
     local_cells = real(this%mesh%nx_local * this%mesh%ny_local, dp)
+    ! Affectation et calcul de l'aire géométrique élémentaire de cellule
+    cell_vol = this%mesh%dx * this%mesh%dy
+
     ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
     do j = 1, this%mesh%ny_local
        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, this%mesh%nx_local
-          ! Évaluation de la norme du résidu ou de l'erreur numérique
-          local_err_l1 = local_err_l1 + abs(this%fields%C(i, j) - C_initial(i, j))
+          ! Évaluation de l'écart absolu entre la fraction finale et la fraction exacte initiale
+          diff = abs(this%fields%C(i, j) - C_initial(i, j))
+          ! Accumulation pour la norme L1 moyenne
+          local_err_l1 = local_err_l1 + diff
+          ! Accumulation quadratique pour la norme L2
+          local_err_l2 = local_err_l2 + diff * diff
+          ! Recherche du maximum pour la norme Linf
+          if (diff > local_err_linf) local_err_linf = diff
+          ! Intégration de la masse initiale
+          local_mass_init = local_mass_init + C_initial(i, j) * cell_vol
+          ! Intégration de la masse finale
+          local_mass_final = local_mass_final + this%fields%C(i, j) * cell_vol
        end do
     end do
 
-    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    ! Réduction parallèle MPI globale de la somme d'erreur L1
     global_err_l1 = global_sum(this%mesh, local_err_l1)
-    ! Affectation et calcul numérique
+    ! Réduction parallèle MPI globale de la somme quadratique L2
+    global_err_l2 = global_sum(this%mesh, local_err_l2)
+    ! Réduction parallèle MPI globale de l'erreur maximale Linf
+    global_err_linf = global_max(this%mesh, local_err_linf)
+    ! Réduction parallèle MPI globale de la masse totale initiale
+    global_mass_init = global_sum(this%mesh, local_mass_init)
+    ! Réduction parallèle MPI globale de la masse totale finale
+    global_mass_final = global_sum(this%mesh, local_mass_final)
+    ! Affectation et calcul du nombre global de cellules du maillage
     global_cells  = global_sum(this%mesh, local_cells)
-    ! Évaluation de la norme du résidu ou de l'erreur numérique
-    err_l1 = global_err_l1 / global_cells
 
-    ! Évaluation de la condition logique
+    ! Normalisation de l'erreur moyenne L1
+    err_l1 = global_err_l1 / global_cells
+    ! Normalisation et racine de l'erreur quadratique moyenne L2
+    err_l2 = sqrt(global_err_l2 / global_cells)
+    ! Erreur maximale locale Linf
+    err_linf = global_err_linf
+    ! Évaluation du taux de conservation de masse du fluide
+    if (global_mass_init > 1.0e-14_dp) then
+       mass_conservation = global_mass_final / global_mass_init
+    else
+       mass_conservation = 1.0_dp
+    end if
+
+    ! Évaluation de la condition logique pour le processus maître de rang 0
     if (this%mesh%rank == 0) then
        write(*, '(A)') ""
        write(*, '(A)') ">>> RESULTAT DU CAS 3.19 : ADVECTION VORTEX COVOF 2D <<<"
-       write(*, '(A,I0,A,I0)') "  Maillage : ", nx, " x ", ny
-       write(*, '(A,ES14.6)')  "  Erreur L1 : ", err_l1
+       write(*, '(A,A)')       "  Methode Advection  : ", trim(this%config%advection_method)
+       write(*, '(A,A)')       "  Reconstruction     : ", trim(this%config%reconstruction_method)
+       write(*, '(A,A)')       "  Limiteur TVD/NVD   : ", trim(this%config%tvd_limiter)
+       write(*, '(A,I0,A,I0)') "  Maillage           : ", nx, " x ", ny
+       write(*, '(A,ES14.6)')  "  Erreur L1          : ", err_l1
+       write(*, '(A,ES14.6)')  "  Erreur L2          : ", err_l2
+       write(*, '(A,ES14.6)')  "  Erreur Linf        : ", err_linf
+       write(*, '(A,F10.5,A)') "  Conservation Masse : ", mass_conservation * 100.0_dp, " %"
        ! Affectation et calcul numérique
        write(*, '(A)') "========================================================"
 
-       ! Appel de sous-programme modulaire
+       ! Appel de sous-programme modulaire pour création du dossier de sortie
        call execute_command_line("mkdir -p " // trim(this%config%output_dir))
-       ! Évaluation de la norme du résidu ou de l'erreur numérique
+       ! Chemin d'accès au fichier CSV des erreurs et bilans de masse
        err_file = trim(this%config%output_dir) // "/vortex_error.csv"
-       ! Affectation et calcul numérique
+       ! Ouverture en écriture du fichier récapitulatif
        open(newunit=err_unit, file=trim(err_file), status="replace", action="write")
-       write(err_unit, '(A)') "nx,ny,dt,T,err_l1"
-       write(err_unit, '(I0,",",I0,",",ES14.6,",",ES14.6,",",ES14.6)') &
-         nx, ny, dt, T_period, err_l1
+       ! Écriture de l'en-tête CSV avec l'ensemble des métadonnées
+       write(err_unit, '(A)') "nx,ny,dt,T,advection,reconstruction,limiter,err_l1,err_l2,err_linf,mass_init,mass_final,mass_conservation"
+       ! Écriture formatée des valeurs numériques
+       write(err_unit, '(I0,",",I0,",",ES14.6,",",ES14.6,",",A,",",A,",",A,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6)') &
+         nx, ny, dt, T_period, &
+         trim(this%config%advection_method), trim(this%config%reconstruction_method), trim(this%config%tvd_limiter), &
+         err_l1, err_l2, err_linf, global_mass_init, global_mass_final, mass_conservation
+       ! Fermeture propre du flux fichier
        close(err_unit)
     end if
 

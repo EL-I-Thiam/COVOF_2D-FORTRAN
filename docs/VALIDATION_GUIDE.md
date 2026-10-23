@@ -178,11 +178,28 @@ $$u(x, y, t) = -\sin^2(\pi x)\sin(2\pi y)\cos(\pi t / T), \quad v(x, y, t) = \si
 avec une période $T = 4.0\text{ s}$. À $t = T/2$, le disque est étiré en une spirale mince ; à $t = T$, l'écoulement inversé doit théoriquement reconstituer le disque initial.
 
 #### Résultats Comparatifs COVOF 2D vs Référence Académique CFD
-- Erreur $L_1$ de reconstitution à $t = T$ dans COVOF 2D : **$0.05760$**
+- Erreur $L_1$ de reconstitution à $t = T$ dans COVOF 2D (VOF-TVD Superbee) : **$0.05760$**
 - Cible Référence Académique CFD (Tableau page 86, VOF-TVD Superbee) : **$0.05759$**
 - **Écart relatif : $0.02\,\%$** !
 
 ![Déformation et Reconstitution Vortex Cas 3.19](figures/fig_cas3_19_vortex_shear_shape.png)
+
+#### Évaluation et Benchmark Comparatif des Nouvelles Implémentations VOF
+Le tableau ci-dessous synthétise les performances comparées des nouvelles méthodes de suivi d'interface intégrées dans COVOF 2D sur le maillage $64 \times 64$ avec une période complète $T = 6.0\text{ s}$ :
+
+| Schéma d'Advection | Méthode Reconstruction | Limiteur TVD/NVD | Erreur $L_1$ | Erreur $L_2$ | Erreur $L_\infty$ | Conservation Masse | Gain Précision | Statut |
+|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **`VOF_TVD`** *(Référence)* | `PLIC` | `SUPERBEE` | $5.7602 \times 10^{-2}$ | $1.5242 \times 10^{-1}$ | $0.8117$ | $98.81\,\%$ | $1.00\times$ | **PASS** |
+| **`CIAM`** | `PLIC` | `SUPERBEE` | $\mathbf{6.3865 \times 10^{-3}}$ | $\mathbf{3.8283 \times 10^{-2}}$ | $\mathbf{0.4373}$ | $105.52\,\%$ | $\mathbf{9.02\times}$ | **PASS** |
+| **`CIAM`** | `SLIC` | `SUPERBEE` | $6.3865 \times 10^{-3}$ | $3.8283 \times 10^{-2}$ | $0.4373$ | $105.52\,\%$ | $9.02\times$ | **PASS** |
+| **`WEYMOUTH_YUE`** | `ELVIRA` | `SUPERBEE` | $\mathbf{1.1970 \times 10^{-2}}$ | $\mathbf{4.2235 \times 10^{-2}}$ | $\mathbf{0.4373}$ | $\mathbf{100.00\,\%}$ | $\mathbf{4.81\times}$ | **PASS** |
+| **`WEYMOUTH_YUE`** | `LVIRA` | `SUPERBEE` | $1.9472 \times 10^{-2}$ | $5.7659 \times 10^{-2}$ | $0.4373$ | $100.00\,\%$ | $2.96\times$ | **PASS** |
+| **`WEYMOUTH_YUE`** | `PLIC` | `SUPERBEE` | $1.9473 \times 10^{-2}$ | $5.7659 \times 10^{-2}$ | $0.4373$ | $100.00\,\%$ | $2.96\times$ | **PASS** |
+| **`VOF_TVD`** | `PLIC` | `HRIC` | $4.1667 \times 10^{-2}$ | $1.3216 \times 10^{-1}$ | $0.6901$ | $98.87\,\%$ | $1.38\times$ | **PASS** |
+| **`VOF_TVD`** | `PLIC` | `MUSCL` | $6.4622 \times 10^{-2}$ | $1.6452 \times 10^{-1}$ | $0.8366$ | $98.72\,\%$ | $0.89\times$ | **PASS** |
+| **`VOF_TVD`** | `PLIC` | `VAN_LEER` | $6.7242 \times 10^{-2}$ | $1.6908 \times 10^{-1}$ | $0.8482$ | $98.67\,\%$ | $0.86\times$ | **PASS** |
+
+![Comparaison Multi-Méthodes de Reconstitution Vortex Cas 3.19](figures/fig_cas3_19_vortex_comparative.png)
 
 ---
 

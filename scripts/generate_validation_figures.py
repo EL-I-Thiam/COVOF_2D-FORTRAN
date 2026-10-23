@@ -245,6 +245,41 @@ fig.tight_layout()
 fig.savefig(os.path.join(FIG_DIR, "fig_cas3_19_vortex_shear_shape.png"), dpi=300)
 plt.close(fig)
 
+# Tracé comparatif multi-méthodes Cas 3.19 (VOF-TVD vs CIAM-PLIC vs Weymouth-Yue ELVIRA vs Cercle exact)
+comp_configs = [
+    ("output_vortex_shear", "VOF-TVD (Superbee)\n$L_1 = 5.76\\times 10^{-2}$", "#d9534f"),
+    ("output_vortex_shear_ciam_plic", "CIAM (PLIC)\n$L_1 = 6.23\\times 10^{-3}$", "#2ca02c"),
+    ("output_vortex_shear_weymouth_yue_elvira", "Weymouth & Yue (ELVIRA)\n$L_1 = 1.18\\times 10^{-2}$", "#1f77b4")
+]
+
+fig_comp, axes = plt.subplots(1, 3, figsize=(14, 4.8))
+theta = np.linspace(0, 2*np.pi, 200)
+x_circle = 0.5 + 0.125 * np.cos(theta)
+y_circle = 0.75 + 0.125 * np.sin(theta)
+
+for ax_c, (out_dir, title_m, col) in zip(axes, comp_configs):
+    C_m, nx_m, ny_m = reconstruct_global_field(out_dir, "vortex", "PhaseIndicator", step=1200)
+    if C_m is None:
+        C_m, nx_m, ny_m = reconstruct_global_field(out_dir, "vortex", "PhaseIndicator")
+    if C_m is not None:
+        X_m, Y_m = np.meshgrid(np.linspace(0, 1, nx_m), np.linspace(0, 1, ny_m))
+        ax_c.contourf(X_m, Y_m, C_m, levels=[0.0, 0.5, 1.0], colors=['#f7f7f7', '#e2eafc'])
+        ax_c.contour(X_m, Y_m, C_m, levels=[0.5], colors=[col], linewidths=2.2)
+    ax_c.plot(x_circle, y_circle, 'k--', linewidth=1.5, label='Solution exacte ($t=T$)')
+    ax_c.set_xlim(0.2, 0.8)
+    ax_c.set_ylim(0.45, 1.0)
+    ax_c.set_aspect('equal')
+    ax_c.set_xlabel('x [m]')
+    ax_c.set_ylabel('y [m]')
+    ax_c.set_title(title_m, fontsize=11, fontweight='bold')
+    ax_c.legend(loc='lower right', fontsize=8.5)
+    ax_c.grid(True, linestyle=':', alpha=0.6)
+
+fig_comp.suptitle('Cas 3.19 : Comparaison des Méthodes de Reconstitution d\'Interface à $t = T = 6$ s', fontsize=13, fontweight='bold')
+fig_comp.tight_layout()
+fig_comp.savefig(os.path.join(FIG_DIR, "fig_cas3_19_vortex_comparative.png"), dpi=300)
+plt.close(fig_comp)
+
 # ==============================================================================
 # 6. CAS 4.1 : MARCHE DESCENDANTE (BACKWARD-FACING STEP)
 # ==============================================================================

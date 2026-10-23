@@ -775,9 +775,9 @@ contains
     integer :: i, j, nx, ny
     real(dp) :: dx, dy, cell_area, u_face, v_face, delta_x, delta_y
     real(dp) :: x_pos, y_pos, u_e, u_w, v_n, v_s, v_corner
-    real(dp) :: c_xmin, c_xmax, c_ymin, c_ymax, vol_fluid, f_out_x, f_out_y, total_out, scale, div_u
+    real(dp) :: c_xmin, c_xmax, c_ymin, c_ymax, v_fluid, v_empty, f_out, f_in, f, s
     type(interface_segment_t), allocatable :: segments(:, :)
-    real(dp), allocatable :: f_vol_x(:, :), f_vol_y(:, :), c_new(:, :)
+    real(dp), allocatable :: f_vol_x(:, :), f_vol_y(:, :), c_new(:, :), scale_out(:, :), scale_in(:, :)
 
     nx = mesh%nx_local
     ny = mesh%ny_local
@@ -879,39 +879,74 @@ contains
        end do
     end do
 
-    ! 4. Limitation locale pour la bornitude 0 <= C <= 1
+    ! 4. Limitation conservative de Weymouth & Yue garantissant 0 <= C <= 1 et conservation exacte
+    allocate(scale_out(0:nx+1, 0:ny+1))
+    allocate(scale_in(0:nx+1, 0:ny+1))
+    scale_out = 1.0_dp
+    scale_in  = 1.0_dp
+
     do j = 1, ny
        do i = 1, nx
-          vol_fluid = fields%C(i, j) * cell_area
-          f_out_x = max(0.0_dp, f_vol_x(i + 1, j)) + max(0.0_dp, -f_vol_x(i, j))
-          f_out_y = max(0.0_dp, f_vol_y(i, j + 1)) + max(0.0_dp, -f_vol_y(i, j))
-          total_out = f_out_x + f_out_y
+          v_fluid = fields%C(i, j) * cell_area
+          v_empty = (1.0_dp - fields%C(i, j)) * cell_area
 
-          if (total_out > vol_fluid .and. total_out > 1.0e-14_dp) then
-             scale = vol_fluid / total_out
-             if (f_vol_x(i + 1, j) > 0.0_dp) f_vol_x(i + 1, j) = f_vol_x(i + 1, j) * scale
-             if (f_vol_x(i, j) < 0.0_dp)     f_vol_x(i, j)     = f_vol_x(i, j) * scale
-             if (f_vol_y(i, j + 1) > 0.0_dp) f_vol_y(i, j + 1) = f_vol_y(i, j + 1) * scale
-             if (f_vol_y(i, j) < 0.0_dp)     f_vol_y(i, j)     = f_vol_y(i, j) * scale
+          f_out = max(0.0_dp, f_vol_x(i + 1, j)) + &
+                  max(0.0_dp, -f_vol_x(i, j)) + &
+                  max(0.0_dp, f_vol_y(i, j + 1)) + &
+                  max(0.0_dp, -f_vol_y(i, j))
+
+          f_in = max(0.0_dp, -f_vol_x(i + 1, j)) + &
+                 max(0.0_dp, f_vol_x(i, j)) + &
+                 max(0.0_dp, -f_vol_y(i, j + 1)) + &
+                 max(0.0_dp, f_vol_y(i, j))
+
+          if (f_out > v_fluid .and. f_out > 1.0e-14_dp) then
+             scale_out(i, j) = v_fluid / f_out
+          end if
+          if (f_in > v_empty .and. f_in > 1.0e-14_dp) then
+             scale_in(i, j) = v_empty / f_in
           end if
        end do
     end do
 
-    ! 5. Mise à jour unsplit avec terme de divergence
+    do j = 1, ny
+       do i = 1, nx + 1
+          f = f_vol_x(i, j)
+          if (f > 0.0_dp) then
+             s = min(scale_out(i - 1, j), scale_in(i, j))
+             f_vol_x(i, j) = f * s
+          else if (f < 0.0_dp) then
+             s = min(scale_out(i, j), scale_in(i - 1, j))
+             f_vol_x(i, j) = f * s
+          end if
+       end do
+    end do
+
+    do j = 1, ny + 1
+       do i = 1, nx
+          f = f_vol_y(i, j)
+          if (f > 0.0_dp) then
+             s = min(scale_out(i, j - 1), scale_in(i, j))
+             f_vol_y(i, j) = f * s
+          else if (f < 0.0_dp) then
+             s = min(scale_out(i, j), scale_in(i, j - 1))
+             f_vol_y(i, j) = f * s
+          end if
+       end do
+    end do
+
+    ! 5. Mise à jour conservative exacte
     c_new = fields%C
     do j = 1, ny
        do i = 1, nx
-          div_u = (fields%u(i + 1, j) - fields%u(i, j)) / dx + &
-                  (fields%v(i, j + 1) - fields%v(i, j)) / dy
           c_new(i, j) = fields%C(i, j) - (1.0_dp / cell_area) * &
-                        ((f_vol_x(i + 1, j) - f_vol_x(i, j)) + (f_vol_y(i, j + 1) - f_vol_y(i, j))) + &
-                        dt * fields%C(i, j) * div_u
+                        ((f_vol_x(i + 1, j) - f_vol_x(i, j)) + (f_vol_y(i, j + 1) - f_vol_y(i, j)))
           c_new(i, j) = max(0.0_dp, min(1.0_dp, c_new(i, j)))
        end do
     end do
 
     fields%C = c_new
-    deallocate(segments, f_vol_x, f_vol_y, c_new)
+    deallocate(segments, f_vol_x, f_vol_y, c_new, scale_out, scale_in)
   end subroutine advect_vof_weymouth_yue
 
   ! [Procédure/Module] subroutine vof_init

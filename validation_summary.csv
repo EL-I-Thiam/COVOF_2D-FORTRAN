@@ -1,2 +1,2 @@
 Chapitre,Cas,Métrique,Cible de Référence Académique,Valeur COVOF 2D,Écart Relatif,Statut
-Chap 3 - Solutions exactes,3.19 Vortex cisaillement,Erreur L1 reconstitution (64x64),0.05759 (VOF-TVD),0.05690,1.20 %,PASS
+Chap 3 - Solutions exactes,3.19 Vortex cisaillement,Erreur L1 reconstitution (64x64),0.05759 (VOF-TVD),0.05760,0.02 %,PASS

@@ -4,7 +4,7 @@ Ce rapport présente la comparaison rigoureuse entre les résultats obtenus par 
 
 | Chapitre                   | Cas                      | Métrique                         | Cible de Référence Académique   |   Valeur COVOF 2D | Écart Relatif   | Statut   |
 |:---------------------------|:-------------------------|:---------------------------------|:--------------------------------|------------------:|:----------------|:---------|
-| Chap 3 - Solutions exactes | 3.19 Vortex cisaillement | Erreur L1 reconstitution (64x64) | 0.05759 (VOF-TVD)               |            0.0569 | 1.20 %          | PASS     |
+| Chap 3 - Solutions exactes | 3.19 Vortex cisaillement | Erreur L1 reconstitution (64x64) | 0.05759 (VOF-TVD)               |            0.0576 | 0.02 %          | PASS     |
 
 ### Détails des Chapitres Traités :
 - **Chapitre 3** : Vérifications sur solutions exactes (Laplacien, Poiseuille stationnaire, Poiseuille Szymanski, Poiseuille viscosité variable exponentielle, Advection vortex avec cisaillement)
