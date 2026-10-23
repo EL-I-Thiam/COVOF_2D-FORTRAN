@@ -2,8 +2,10 @@
 \PassOptionsToPackage{unicode}{hyperref}
 \PassOptionsToPackage{hyphens}{url}
 \documentclass[
+  french,
 ]{article}
 \usepackage{xcolor}
+\usepackage[margin=2cm]{geometry}
 \usepackage{amsmath,amssymb}
 \setcounter{secnumdepth}{-\maxdimen} % remove section numbering
 \usepackage{iftex}
@@ -46,6 +48,14 @@
 \makeatletter
 \patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
 \makeatother
+\ifLuaTeX
+\usepackage[bidi=basic,shorthands=off]{babel}
+\else
+\usepackage[bidi=default,shorthands=off]{babel}
+\fi
+\ifLuaTeX
+  \usepackage{selnolig} % disable illegal ligatures
+\fi
 \setlength{\emergencystretch}{3em} % prevent overfull lines
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
@@ -57,6 +67,7 @@
 \@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
 \makeatother
 \hypersetup{
+  pdflang={fr},
   hidelinks,
   pdfcreator={LaTeX via pandoc}}
 
@@ -774,6 +785,190 @@ Cette formulation garantit que le saut de pression théorique de Laplace
 : \[\Delta P = \frac{\sigma}{R}\] est exactement compensé par la force
 capillaire discrète, maintenant les vitesses parasites résiduelles sous
 le seuil de \(10^{-3}\text{ m/s}\).
+
+\subsubsection{6.6. Limiteurs TVD et Diagramme NVD Avancés (Superbee,
+Van Leer, Minmod, MUSCL,
+HRIC)}\label{limiteurs-tvd-et-diagramme-nvd-avancuxe9s-superbee-van-leer-minmod-muscl-hric}
+
+Le transport convectif de la fraction volumique \(C\) est modélisé par
+l'équation conservative :
+\[\frac{\partial C}{\partial t} + \nabla \cdot (C \mathbf{u}) = 0\]
+
+Pour préserver la monotonie stricte (\(0 \le C \le 1\)) et la netteté de
+l'interface sans diffusion excessive, COVOF 2D dispose de limiteurs de
+flux formulés soit dans le formalisme TVD (Total Variation Diminishing,
+Harten 1983) en fonction du ratio de pente \(\theta\), soit dans le
+formalisme NVD (Normalized Variable Diagram, Leonard 1991).
+
+Le flux convectif à travers une face \(i+1/2\) s'exprime par :
+\[F_{i+1/2} = u_{i+1/2} \left[ C_{up} + \frac{1}{2} (1 - |\nu_{i+1/2}|) \Phi(\theta) (C_{down} - C_{up}) \right]\]
+où \(\nu_{i+1/2} = u_{i+1/2} \frac{\Delta t}{\Delta x}\) est le nombre
+de Courant local de face, \(C_{up}\) la valeur amont (upwind),
+\(C_{down}\) la valeur aval (downwind), et \(\theta\) le rapport des
+gradients amont/aval :
+\[\theta = \frac{C_{up} - C_{up-1}}{C_{down} - C_{up}}\]
+
+Dans le formalisme NVD de Leonard (1991), la variable normalisée s'écrit
+: \[\tilde{C} = \frac{C - C_U}{C_A - C_U} = \frac{\theta}{\theta + 1}\]
+où \(U\) désigne le nœud amont, \(A\) le nœud accepteur et \(D\) le nœud
+donneur.
+
+Les limiteurs implémentés dans COVOF 2D sont :
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Superbee (Roe, 1985)} : Limiteur compressif d'extrême
+  précision pour les interfaces diphasiques :
+  \[\Phi_{Superbee}(\theta) = \max \left( 0, \max(\min(2\theta, 1), \min(\theta, 2)) \right)\]
+\item
+  \textbf{Van Leer (1979)} : Limiteur lisse et continu :
+  \[\Phi_{VanLeer}(\theta) = \frac{\theta + |\theta|}{1 + |\theta|}\]
+\item
+  \textbf{Minmod (Roe, 1986)} : Limiteur le plus dissipatif et le plus
+  stable : \[\Phi_{Minmod}(\theta) = \max(0, \min(1, \theta))\]
+\item
+  \textbf{MUSCL (Monotonic Upstream-Centered Scheme for Conservation
+  Laws, Van Leer 1979)} :
+  \[\Phi_{MUSCL}(\theta) = \max \left( 0, \min \left( 2\theta, \min \left( \frac{1 + \theta}{2}, 2 \right) \right) \right)\]
+\item
+  \textbf{HRIC (High-Resolution Interface Capturing, Muzaferija \& Peric
+  1999)} : Formulé nativement dans le diagramme NVD avec correction
+  locale du nombre de Courant \(Co\) :
+  \[\tilde{C}_f^* = \begin{cases} 2 \tilde{C} & \text{si } 0 \le \tilde{C} < 0.5 \\ 1 & \text{si } 0.5 \le \tilde{C} \le 1 \\ \tilde{C} & \text{sinon} \end{cases}\]
+  \[\tilde{C}_f = \sqrt{Co} \, \tilde{C}_f^* + (1 - \sqrt{Co}) \, \tilde{C} \quad (0 \le Co \le 1)\]
+  Le coefficient de flux équivalent TVD est déduit par la transformation
+  canonique :
+  \[\Phi_{HRIC}(\theta) = \frac{2}{1 - Co} \left( \frac{\tilde{C}_f - \tilde{C}}{1 - \tilde{C}} \right) \quad (\tilde{C} \neq 1)\]
+\end{enumerate}
+
+\subsubsection{6.7. Méthodes Géométriques de Reconstruction d'Interface
+(SLIC, PLIC, LVIRA,
+ELVIRA)}\label{muxe9thodes-guxe9omuxe9triques-de-reconstruction-dinterface-slic-plic-lvira-elvira}
+
+Dans une cellule diphasique mixte
+(\(10^{-6} < C_{i, j} < 1 - 10^{-6}\)), l'interface réelle est approchée
+localement par un segment de droite :
+\[\mathbf{n} \cdot (\mathbf{x} - \mathbf{x}_0) = 0 \quad \iff \quad n_x x + n_y y + \alpha = 0\]
+avec le vecteur normal unitaire sortant normalisé
+\(\|\mathbf{n}\|_2 = \sqrt{n_x^2 + n_y^2} = 1\). Quatre algorithmes de
+reconstruction sont implémentés dans COVOF 2D :
+
+\paragraph{6.7.1. SLIC (Simple Line Interface Calculation, Noh \&
+Woodward
+1976)}\label{slic-simple-line-interface-calculation-noh-woodward-1976}
+
+Approximation d'ordre 1 où le segment est aligné strictement avec l'un
+des axes cartésiens. En analysant les gradients horizontaux et verticaux
+voisins, la normale est fixée à :
+\[\mathbf{n} \in \{ (1, 0), (-1, 0), (0, 1), (0, -1) \}\] Le paramètre
+de position \(\alpha\) est ensuite déterminé de façon univoque par la
+fraction volumique locale \(C_{i, j}\).
+
+\paragraph{6.7.2. PLIC (Piecewise Linear Interface Calculation, Youngs
+1982, Scardovelli \& Zaleski
+1999)}\label{plic-piecewise-linear-interface-calculation-youngs-1982-scardovelli-zaleski-1999}
+
+Approximation linéaire continue d'ordre 2. Le vecteur normal est estimé
+par un gradient centré pondéré sur le stencil \(3 \times 3\) :
+\[n_x = - \frac{1}{\Delta x} \left[ (C_{i+1, j+1} + 2 C_{i+1, j} + C_{i+1, j-1}) - (C_{i-1, j+1} + 2 C_{i-1, j} + C_{i-1, j-1}) \right]\]
+\[n_y = - \frac{1}{\Delta y} \left[ (C_{i+1, j+1} + 2 C_{i, j+1} + C_{i-1, j+1}) - (C_{i+1, j-1} + 2 C_{i, j-1} + C_{i-1, j-1}) \right]\]
+\[\mathbf{n} = \frac{\mathbf{n}}{\|\mathbf{n}\|_2}\]
+
+\paragraph{6.7.3. LVIRA (Least-Squares Volume-of-Fluid Interface
+Reconstruction Algorithm, Puckett
+1991)}\label{lvira-least-squares-volume-of-fluid-interface-reconstruction-algorithm-puckett-1991}
+
+Optimisation continue de l'angle d'interface \(\theta \in [0, 2\pi]\)
+minimisant au sens des moindres carrés la différence entre les fractions
+volumiques prescrites et les volumes tronqués sur les 9 cellules du
+stencil :
+\[\theta^* = \arg\min_{\theta} E(\theta) = \arg\min_{\theta} \sum_{k=-1}^1 \sum_{l=-1}^1 \left[ C_{i+k, j+l}^{num}(\mathbf{n}(\theta), \alpha) - C_{i+k, j+l} \right]^2\]
+Dans COVOF 2D, cette minimisation non linéaire unimodale par morceaux
+est résolue par la méthode de la section dorée (Golden Section Search).
+
+\paragraph{6.7.4. ELVIRA (Efficient Least-Squares Volume-of-Fluid
+Interface Reconstruction Algorithm, Pilliod \& Puckett
+2004)}\label{elvira-efficient-least-squares-volume-of-fluid-interface-reconstruction-algorithm-pilliod-puckett-2004}
+
+Algorithme haute performance qui évalue un ensemble discret de 6 pentes
+candidates issues de fonctions de hauteur (Height Functions) colonnes et
+lignes : - Pentes verticales :
+\(m_{v1} = \frac{h_y(i+1) - h_y(i-1)}{2\Delta x}\),
+\(m_{v2} = \frac{h_y(i+1) - h_y(i)}{\Delta x}\),
+\(m_{v3} = \frac{h_y(i) - h_y(i-1)}{\Delta x}\) - Pentes horizontales :
+\(m_{h1} = \frac{h_x(j+1) - h_x(j-1)}{2\Delta y}\),
+\(m_{h2} = \frac{h_x(j+1) - h_x(j)}{\Delta y}\),
+\(m_{h3} = \frac{h_x(j) - h_x(j-1)}{\Delta y}\) - Candidat de Youngs :
+\(\mathbf{n}_{Youngs}\)
+
+La pente candidate sélectionnée est celle qui minimise rigoureusement
+l'erreur quadratique \(\sum |C_{num} - C_{exact}|^2\) sur le stencil
+\(3 \times 3\). Cette méthode garantit un ordre de convergence
+géométrique de 2 pour des interfaces régulières arbitrairement
+inclinées.
+
+\subsubsection{6.8. Découpe Polygonale de Sutherland-Hodgman et
+Inversion de
+Volume}\label{duxe9coupe-polygonale-de-sutherland-hodgman-et-inversion-de-volume}
+
+Pour calculer la constante \(\alpha\) correspondant exactement à une
+fraction volumique \(C_{i, j}\), COVOF 2D utilise une formulation
+analytique exacte basée sur l'algorithme de Sutherland-Hodgman (1974) :
+1. La cellule cartésienne
+\([x_{min}, x_{max}] \times [y_{min}, y_{max}]\) est initialisée comme
+polygone à 4 sommets. 2. Le polygone est découpé successivement par les
+4 demi-plans formant le rectangle, puis par le demi-plan interfacial :
+\[\mathcal{H} = \{ (x, y) \in \mathbb{R}^2 \mid n_x x + n_y y + \alpha \le 0 \}\]
+3. L'aire du polygone résultant
+\(\mathcal{P} = \{ (x_k, y_k) \}_{k=1}^m\) est calculée par la formule
+des lacets de Gauss (Shoelace formula) :
+\[\mathcal{A}(\alpha) = \frac{1}{2} \left| \sum_{k=1}^m (x_k y_{k+1} - x_{k+1} y_k) \right| \quad \text{avec } (x_{m+1}, y_{m+1}) = (x_1, y_1)\]
+4. La fonction \(\alpha \mapsto \mathcal{A}(\alpha)\) étant strictement
+monotone et continue sur \([-D, D]\), la solution exacte de :
+\[\mathcal{A}(\alpha) = C_{i, j} \Delta x \Delta y\] est obtenue par
+recherche dichotomique (Bisection) en 40 itérations avec une tolérance
+relative inférieure à \(10^{-12}\).
+
+\subsubsection{6.9. Algorithme d'Advection Géométrique CIAM (Calcul
+d'Interface Affine par
+Morceaux)}\label{algorithme-dadvection-guxe9omuxe9trique-ciam-calcul-dinterface-affine-par-morceaux}
+
+La méthode CIAM (Lafaurie et al.~1994, Scardovelli \& Zaleski 1999)
+résout l'advection du fluide par découpage directionnel d'opérateurs
+(Strang splitting) :
+\[C^{n+1} = \mathcal{L}_y \left( \mathcal{L}_x (C^n) \right) \quad \text{en alternance avec} \quad C^{n+2} = \mathcal{L}_x \left( \mathcal{L}_y (C^{n+1}) \right)\]
+
+Pour chaque sous-étape unidimensionnelle (par exemple suivant \(x\)) :
+1. L'interface affine est reconstruite dans chaque maille donneuse
+\(i\). 2. Le volume balayé à travers la face \(i+1/2\) pendant le pas
+\(\Delta t\) correspond au rectangle :
+\[\delta \Omega_{i+1/2} = \begin{cases} [x_{i+1/2} - u_{i+1/2}\Delta t, x_{i+1/2}] \times [y_{j-1/2}, y_{j+1/2}] & \text{si } u_{i+1/2} > 0 \\ [x_{i+1/2}, x_{i+1/2} - u_{i+1/2}\Delta t] \times [y_{j-1/2}, y_{j+1/2}] & \text{si } u_{i+1/2} < 0 \end{cases}\]
+3. Le flux géométrique interfacial \(F_{x, i+1/2}\) est l'aire exacte
+découpée dans ce rectangle par le segment de droite de la maille
+donneuse via Sutherland-Hodgman. 4. La fraction volumique intermédiaire
+est mise à jour avec correction de compressibilité 1D :
+\[C_i^* = \frac{C_i^n - \frac{1}{\Delta x} (F_{x, i+1/2} - F_{x, i-1/2})}{1 - \frac{\Delta t}{\Delta x} (u_{i+1/2} - u_{i-1/2})}\]
+
+\subsubsection{6.10. Algorithme Non Découpé Multidimensionnel de
+Weymouth et Yue
+(2010)}\label{algorithme-non-duxe9coupuxe9-multidimensionnel-de-weymouth-et-yue-2010}
+
+L'algorithme de Weymouth et Yue (2010) élimine tout découpage
+directionnel d'opérateur et met à jour la fraction volumique de manière
+multidimensionnelle non découplée :
+\[C_i^{n+1} = C_i^n - \frac{1}{\Delta x \Delta y} \left( F_{x, i+1/2} - F_{x, i-1/2} + F_{y, j+1/2} - F_{y, j-1/2} \right)\]
+
+Pour éliminer l'erreur de double comptage dans les coins en écoulement
+diagonal (\(u \neq 0, v \neq 0\)), l'algorithme calcule le flux de coin
+géométrique \(V_{xy}\) sur la boîte
+\([0, |u|\Delta t] \times [0, |v|\Delta t]\) et effectue une correction
+symétrique :
+\[F_x = F_{x0} - \frac{1}{2} V_{xy} \operatorname{sgn}(u), \quad F_y = F_{y0} + \frac{1}{2} V_{xy} \operatorname{sgn}(v)\]
+où \(F_{x0}, F_{y0}\) sont les flux géométriques unidimensionnels bruts.
+Enfin, une redistribution conservative locale garantit strictement la
+bornitude \(C \in [0, 1]\) même sous fort cisaillement ou déformation
+tourbillonnaire.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 

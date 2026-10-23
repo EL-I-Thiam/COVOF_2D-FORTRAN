@@ -38,26 +38,26 @@ Pour optimiser votre prise en main selon vos objectifs, trois parcours de lectur
 
 ### 🚀 Parcours 1 : L'Utilisateur et l'Ingénieur CFD
 *Objectif : Installer COVOF 2D, configurer une simulation physique, la lancer sur station ou supercalculateur, et exploiter les résultats sous ParaView.*
-1. **[USER_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/USER_GUIDE.md)**
+1. **[USER_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/USER_GUIDE.md)**
    - Section 2 : Installation rapide et compilation CMake.
    - Section 3 : Dictionnaire complet des mots-clés du fichier de configuration JSON.
    - Section 4 : Tutoriels pas à pas (Cavité entraînée, Convection naturelle, Rupture de barrage).
    - Section 5 : Exécution parallèle avec OpenMPI et soumission de jobs SLURM.
    - Section 7 : Visualisation sous ParaView (lignes de courant, profils, isosurfaces).
-2. **[VALIDATION_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/VALIDATION_GUIDE.md)**
+2. **[VALIDATION_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/VALIDATION_GUIDE.md)**
    - Consultation des cas tests prêts à l'emploi similaires à votre application.
 
 ---
 
 ### 💻 Parcours 2 : Le Développeur et l'Architecte HPC
 *Objectif : Comprendre l'organisation du code source C++20, étendre les fonctionnalités, ajouter un solveur ou une équation de transport.*
-1. **[DEVELOPER_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/DEVELOPER_GUIDE.md)**
+1. **[DEVELOPER_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/DEVELOPER_GUIDE.md)**
    - Section 1 : Architecture logicielle, diagramme de classes et cycle de calcul.
    - Section 2 : Structures de données `FlowFields` et gestion des cellules fantômes (halos).
    - Section 4 : Analyse des modules fondamentaux (`MpiComm`, `NavierStokesSolver`, `LinearSolver`).
    - Section 5 : Tutoriels pas à pas pour étendre le solveur (nouvelle équation, solveur MUMPS, nouveau préconditionneur).
    - Section 6 : Bonnes pratiques C++20, débogage MPI (GDB/Valgrind) et profilage de performance.
-2. **[MATHEMATICAL_THEORY.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/MATHEMATICAL_THEORY.md)**
+2. **[MATHEMATICAL_THEORY.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/MATHEMATICAL_THEORY.md)**
    - Section 4 : Discrétisation spatiale sur grille décalée MAC et stencils discrets.
    - Section 7 : Algorithmes de Krylov BiCGSTAB(2), GMRES et Gradient Conjugué.
 
@@ -65,12 +65,12 @@ Pour optimiser votre prise en main selon vos objectifs, trois parcours de lectur
 
 ### 🔬 Parcours 3 : Le Chercheur et l'Enseignant-Chercheur
 *Objectif : Étudier la rigueur mathématique des modèles, la convergence spatio-temporelle et les benchmarks académiques confrontés au code Référence Académique CFD.*
-1. **[MATHEMATICAL_THEORY.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/MATHEMATICAL_THEORY.md)**
+1. **[MATHEMATICAL_THEORY.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/MATHEMATICAL_THEORY.md)**
    - Section 2 : Équations de Navier-Stokes à propriétés variables et modèle "One-Fluid".
    - Section 3 : Méthode du Lagrangien Augmenté, analyse spectrale et élimination du bloc zéro.
    - Section 6 : Modèle continu de tension de surface (CSF) de Brackbill et formulation Balanced-Force.
    - Section 8 : Restrictions de stabilité CFL convective, visqueuse et capillaire.
-2. **[VALIDATION_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/VALIDATION_GUIDE.md)**
+2. **[VALIDATION_GUIDE.md](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/VALIDATION_GUIDE.md)**
    - Section 1 : Cadre méthodologique de Vérification et Validation (ASME V&V 20).
    - Section 2 : Fiches des solutions exactes (Laplacien, Poiseuille stationnaire/instationnaire/variable, Vortex TVD).
    - Sections 3 à 5 : Fiches de validation physique (Marche Armaly, Cylindre, Cavité carrée et en L, Vahl Davis, Hysing, Rupture de barrage, Rayleigh-Taylor).
@@ -82,10 +82,10 @@ Pour optimiser votre prise en main selon vos objectifs, trois parcours de lectur
 
 | Document | Rôle Principal | Public Cible | Longueur & Richesse | Lien d'Accès Direct |
 |:---|:---|:---|:---:|:---|
-| **Notice Théorique** | Dérivations mathématiques, équations différentielles, schémas volumes finis | Chercheurs, Numériciens | ~520 lignes, 35+ équations | [`MATHEMATICAL_THEORY.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/MATHEMATICAL_THEORY.md) |
-| **Manuel Utilisateur** | Configuration JSON, exécution MPI/SLURM, diagnostics, ParaView | Utilisateurs, Ingénieurs | ~500 lignes, dictionnaires | [`USER_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/USER_GUIDE.md) |
-| **Manuel Développeur** | Architecture C++20, structures mémoire, halos MPI, guides d'extension | Développeurs C++, HPC | ~420 lignes, diagrammes UML | [`DEVELOPER_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/DEVELOPER_GUIDE.md) |
-| **Cahier de Validation** | 13 Fiches de V&V, tableaux d'erreurs, comparaison Référence Académique CFD | Auditeurs qualité, Chercheurs | ~450 lignes, tableaux $L_1/L_2$ | [`VALIDATION_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/VALIDATION_GUIDE.md) |
+| **Notice Théorique** | Dérivations mathématiques, équations différentielles, schémas volumes finis | Chercheurs, Numériciens | ~520 lignes, 35+ équations | [`MATHEMATICAL_THEORY.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/MATHEMATICAL_THEORY.md) |
+| **Manuel Utilisateur** | Configuration JSON, exécution MPI/SLURM, diagnostics, ParaView | Utilisateurs, Ingénieurs | ~500 lignes, dictionnaires | [`USER_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/USER_GUIDE.md) |
+| **Manuel Développeur** | Architecture C++20, structures mémoire, halos MPI, guides d'extension | Développeurs C++, HPC | ~420 lignes, diagrammes UML | [`DEVELOPER_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/DEVELOPER_GUIDE.md) |
+| **Cahier de Validation** | 13 Fiches de V&V, tableaux d'erreurs, comparaison Référence Académique CFD | Auditeurs qualité, Chercheurs | ~450 lignes, tableaux $L_1/L_2$ | [`VALIDATION_GUIDE.md`](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/VALIDATION_GUIDE.md) |
 | **Rapport de Synthèse** | Rapport exécutif avec 14 figures haute définition intégrées | Décideurs, Ingénieurs | Artéfact interactif | [`covof2d_validation_report.md`](file:///Users/elhadjiibrahimathiam/.gemini/antigravity/brain/d891e39d-85a0-4365-9d86-f527fe9e206c/covof2d_validation_report.md) |
 
 ---

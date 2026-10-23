@@ -222,20 +222,42 @@ Numériques}\label{fonctionnalituxe9s-physiques-et-numuxe9riques}
     pression.
   \end{itemize}
 \item
-  \textbf{Méthode Diphasique Volume-Of-Fluid (VOF-TVD Superbee)} :
+  \textbf{Méthode Diphasique Volume-Of-Fluid (VOF Multi-Méthodes)} :
 
   \begin{itemize}
   \tightlist
   \item
-    Conservation exacte de masse du fluide dispersé par transport de la
-    fraction volumique \(C \in [0, 1]\).
+    \textbf{Reconstruction géométrique d'interface} : \textbf{SLIC}
+    (ordre 1 cartésien), \textbf{PLIC} (ordre 2 linéaire continu, Youngs
+    / Scardovelli \& Zaleski), \textbf{LVIRA} (moindres carrés continus
+    par section dorée), \textbf{ELVIRA} (sélection optimale de fonctions
+    de hauteur discrètes, Pilliod \& Puckett). Découpage polygonal exact
+    par algorithme de \textbf{Sutherland-Hodgman} et formule des lacets
+    de Gauss.
   \item
-    Limiteur de flux haute résolution \textbf{TVD Superbee} garantissant
-    la compacité des interfaces sans étalement artificiel.
+    \textbf{Algorithmes d'advection VOF configurables} :
+
+    \begin{itemize}
+    \tightlist
+    \item
+      \textbf{VOF-TVD} : transport algébrique haute résolution
+      compressif.
+    \item
+      \textbf{CIAM (Calcul d'Interface Affine par Morceaux)} : transport
+      géométrique directionnel à découpage de Strang.
+    \item
+      \textbf{Weymouth \& Yue (2010)} : transport géométrique
+      multidimensionnel non découplé avec correction de coin \(V_{xy}\)
+      et préservation stricte de la bornitude \(C \in [0, 1]\).
+    \end{itemize}
+  \item
+    \textbf{Catalogue complet de limiteurs TVD / NVD} :
+    \textbf{Superbee}, \textbf{Van Leer}, \textbf{Minmod},
+    \textbf{MUSCL}, \textbf{HRIC} (High-Resolution Interface Capturing).
   \item
     Tension superficielle par la méthode \textbf{CSF (Continuum Surface
-    Force)} de Brackbill et al.~avec courbure calculée par
-    différentiation directe des normales.
+    Force)} de Brackbill et al.~avec formulation \textbf{Balanced-Force}
+    supprimant les courants parasites.
   \end{itemize}
 \item
   \textbf{Énergie Thermique et Convection Naturelle} :

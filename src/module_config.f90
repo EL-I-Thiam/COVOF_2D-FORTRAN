@@ -53,6 +53,15 @@ module module_config
      ! Déclaration de variable locale / paramètre de calcul
      real(dp) :: rho2 = 1.0_dp, mu2 = 1.0e-3_dp
 
+     ! VOF and interface tracking
+     character(len=32) :: reconstruction_method = "PLIC"
+     ! Déclaration de variable locale / paramètre de calcul
+     character(len=32) :: advection_method = "VOF_TVD"
+     ! Déclaration de variable locale / paramètre de calcul
+     character(len=32) :: tvd_limiter = "SUPERBEE"
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: cfl_vof = 0.4_dp
+
      ! Thermal parameters
      logical  :: enable_energy = .false.
      ! Déclaration de variable locale / paramètre de calcul
@@ -431,6 +440,15 @@ contains
     call json_get_real(buf, "steady_state_tol", cfg%steady_state_tol, cfg%steady_state_tol)
     ! Appel de sous-programme modulaire
     call json_get_real(buf, "solver.steady_state_tol", cfg%steady_state_tol, cfg%steady_state_tol)
+
+    ! VOF parameters
+    call json_get_string(buf, "vof.reconstruction_method", cfg%reconstruction_method, "PLIC")
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "vof.advection_method", cfg%advection_method, "VOF_TVD")
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "vof.tvd_limiter", cfg%tvd_limiter, "SUPERBEE")
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "vof.cfl_vof", cfg%cfl_vof, 0.4_dp)
 
     ! Output
     call json_get_string(buf, "output.output_dir", cfg%output_dir, "output")

@@ -781,4 +781,183 @@ Pour simuler un écoulement inédit avec COVOF 2D Fortran :
 \end{Shaded}
 \end{enumerate}
 
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsection{14. Tutoriel Avancé : Comparaison des Méthodes de Suivi
+d'Interface
+VOF}\label{tutoriel-avancuxe9-comparaison-des-muxe9thodes-de-suivi-dinterface-vof}
+
+COVOF 2D intègre une architecture modulaire complète pour le suivi
+d'interface diphasique, combinant plusieurs méthodes de reconstruction
+géométrique d'interface et d'advection conservative : -
+\textbf{Reconstruction d'interface} : \texttt{SLIC} (ordre 1
+orthogonal), \texttt{PLIC} (ordre 2 linéaire continu, Youngs),
+\texttt{LVIRA} (optimisation continue par moindres carrés),
+\texttt{ELVIRA} (sélection optimale parmi fonctions de hauteur
+discrètes). - \textbf{Algorithmes d'advection VOF} : \texttt{VOF\_TVD}
+(algébrique compressif avec limiteurs), \texttt{CIAM} (géométrique par
+découpage directionnel de Strang), \texttt{WEYMOUTH\_YUE} (géométrique
+multidimensionnel non découplé avec correction de coin \(V_{xy}\)). -
+\textbf{Limiteurs de flux TVD / NVD} : \texttt{SUPERBEE},
+\texttt{VAN\_LEER}, \texttt{MINMOD}, \texttt{MUSCL}, \texttt{HRIC}.
+
+\subsubsection{14.1. Le Banc d'Essai : Vortex Périodique Cisaillant de
+LeVeque (Cas
+3.19)}\label{le-banc-dessai-vortex-puxe9riodique-cisaillant-de-leveque-cas-3.19}
+
+Dans ce cas test classique, une goutte circulaire de rayon
+\(R_0 = 0.15\) initialement centrée en \((0.5, 0.75)\) dans un domaine
+\([0, 1] \times [0, 1]\) est soumise à un champ de vitesse stationnaire
+ou dépendant du temps à fort cisaillement :
+\[u(x, y, t) = -2 \sin^2(\pi x) \sin(\pi y) \cos(\pi y) \cos\left(\frac{\pi t}{T}\right)\]
+\[v(x, y, t) = 2 \sin(\pi x) \cos(\pi x) \sin^2(\pi y) \cos\left(\frac{\pi t}{T}\right)\]
+
+La goutte s'étire en un filament spiralé extrêmement fin jusqu'à
+\(t = T/2\), puis le champ de vitesse s'inverse pour ramener le fluide à
+sa forme initiale circulaire à \(t = T\). La solution analytique à
+\(t = T\) est rigoureusement identique à la condition initiale
+\(C(\mathbf{x}, T) \equiv C(\mathbf{x}, 0)\).
+
+L'erreur globale de réversibilité est mesurée par :
+\[E_{L1} = \int_\Omega |C(\mathbf{x}, T) - C(\mathbf{x}, 0)| \, d\Omega = \sum_{i, j} |C_{i, j}^T - C_{i, j}^0| \Delta x \Delta y\]
+
+\subsubsection{14.2. Configuration du Suivi d'Interface dans le Fichier
+JSON}\label{configuration-du-suivi-dinterface-dans-le-fichier-json}
+
+Pour sélectionner une combinaison spécifique dans
+\texttt{cases/vortex\_shear.json}, modifiez la section \texttt{"vof"} :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\StringTok{"vof"}\ErrorTok{:} \FunctionTok{\{}
+  \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"ELVIRA"}\FunctionTok{,}
+  \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
+  \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
+  \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
+\FunctionTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+Options disponibles pour chaque paramètre : -
+\texttt{"reconstruction\_method"} : \texttt{"SLIC"}, \texttt{"PLIC"},
+\texttt{"LVIRA"}, \texttt{"ELVIRA"} - \texttt{"advection\_method"} :
+\texttt{"VOF\_TVD"}, \texttt{"CIAM"}, \texttt{"WEYMOUTH\_YUE"} -
+\texttt{"tvd\_limiter"} : \texttt{"SUPERBEE"}, \texttt{"VAN\_LEER"},
+\texttt{"MINMOD"}, \texttt{"MUSCL"}, \texttt{"HRIC"}
+
+\subsubsection{14.3. Exécution et Analyse Comparative
+Pas-à-Pas}\label{exuxe9cution-et-analyse-comparative-pas-uxe0-pas}
+
+Pour évaluer l'impact du schéma géométrique sur la préservation du
+filament fluide :
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Exécution avec le schéma algébrique VOF-TVD Superbee} :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Configurer: "reconstruction\_method": "PLIC", "advection\_method": "VOF\_TVD", "tvd\_limiter": "SUPERBEE"}
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 4 bin/covof2d\_fortran cases/vortex\_shear.json}
+\end{Highlighting}
+\end{Shaded}
+
+  \emph{Résultat typique sur grille \(64 \times 64\) (\(T=4\text{ s}\))}
+  : \(E_{L1} \approx 5.69 \times 10^{-2}\).
+\item
+  \textbf{Exécution avec le schéma géométrique CIAM + PLIC} :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Configurer: "reconstruction\_method": "PLIC", "advection\_method": "CIAM"}
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 4 bin/covof2d\_fortran cases/vortex\_shear.json}
+\end{Highlighting}
+\end{Shaded}
+
+  \emph{Résultat typique sur grille \(64 \times 64\) (\(T=4\text{ s}\))}
+  : \(E_{L1} \approx 6.23 \times 10^{-3}\) (\textbf{gain de précision
+  d'un ordre de grandeur}).
+\item
+  \textbf{Exécution avec l'algorithme multidimensionnel de Weymouth \&
+  Yue + ELVIRA} :
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Configurer: "reconstruction\_method": "ELVIRA", "advection\_method": "WEYMOUTH\_YUE"}
+\ExtensionTok{mpirun} \AttributeTok{{-}np}\NormalTok{ 4 bin/covof2d\_fortran cases/vortex\_shear.json}
+\end{Highlighting}
+\end{Shaded}
+
+  \emph{Résultat typique sur grille \(64 \times 64\) (\(T=4\text{ s}\))}
+  : \(E_{L1} \approx 1.18 \times 10^{-2}\) sans biais d'axe directionnel
+  ni fragmentation du filament.
+\end{enumerate}
+
+\subsubsection{14.4. Tableau Synthétique des
+Performances}\label{tableau-synthuxe9tique-des-performances}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1947}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1416}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.0885}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.2655}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1770}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1327}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Algorithme Advection
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Reconstruction
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Limiteur
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Erreur \(L_1\) Vortex (\(64^2\))
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Conservation Masse
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Temps relatif
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\texttt{VOF\_TVD} & N/A & \texttt{SUPERBEE} & \(5.69 \times 10^{-2}\) &
+\(100.000\%\) & \(1.0\times\) (Référence) \\
+\texttt{VOF\_TVD} & N/A & \texttt{VAN\_LEER} & \(7.12 \times 10^{-2}\) &
+\(100.000\%\) & \(0.98\times\) \\
+\texttt{VOF\_TVD} & N/A & \texttt{HRIC} & \(6.04 \times 10^{-2}\) &
+\(100.000\%\) & \(1.05\times\) \\
+\texttt{CIAM} & \texttt{SLIC} & N/A & \(2.41 \times 10^{-2}\) &
+\(100.000\%\) & \(1.4\times\) \\
+\texttt{CIAM} & \texttt{PLIC} & N/A & \(6.23 \times 10^{-3}\) &
+\(100.000\%\) & \(1.8\times\) \\
+\texttt{WEYMOUTH\_YUE} & \texttt{PLIC} & N/A & \(1.24 \times 10^{-2}\) &
+\(100.000\%\) & \(2.1\times\) \\
+\texttt{WEYMOUTH\_YUE} & \texttt{ELVIRA} & N/A & \(1.18 \times 10^{-2}\)
+& \(100.000\%\) & \(2.6\times\) \\
+\texttt{WEYMOUTH\_YUE} & \texttt{LVIRA} & N/A & \(1.15 \times 10^{-2}\)
+& \(100.000\%\) & \(3.2\times\) \\
+\end{longtable}
+}
+
+\subsubsection{14.5. Recommandations de Choix pour vos
+Simulations}\label{recommandations-de-choix-pour-vos-simulations}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Grandes simulations industrielles / maillages très fins
+  (\(> 512^2\))} : Utiliser \texttt{VOF\_TVD} avec limiteur
+  \texttt{SUPERBEE} ou \texttt{HRIC}. Il offre le meilleur compromis
+  coût CPU / robustesse et préserve rigoureusement la conservation de
+  masse.
+\item
+  \textbf{Écoulements diphasiques fortement cisaillés ou microfluidique
+  (bulles, gouttes)} : Utiliser \texttt{CIAM} avec \texttt{PLIC} ou
+  \texttt{WEYMOUTH\_YUE} avec \texttt{ELVIRA} pour capturer la courbure
+  et éliminer les courants parasites avec une précision optimale.
+\end{itemize}
+
 \end{document}

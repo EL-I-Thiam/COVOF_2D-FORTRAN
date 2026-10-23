@@ -690,6 +690,46 @@ Augmenté)}{3.2.8. Module solver (Solveurs Algébriques et Lagrangien Augmenté)
   d'itérations d'Uzawa par pas de temps.
 \end{itemize}
 
+\paragraph{\texorpdfstring{3.2.10. Module \texttt{vof} (Capture
+d'Interface et Advection
+Avancée)}{3.2.10. Module vof (Capture d'Interface et Advection Avancée)}}\label{module-vof-capture-dinterface-et-advection-avancuxe9e}
+
+Contrôle le modèle géométrique de reconstruction d'interface et les
+algorithmes de transport de la fraction volumique : -
+\texttt{reconstruction\_method} (chaîne, défaut: \texttt{"PLIC"}) : -
+\texttt{"SLIC"} : \emph{Simple Line Interface Calculation} (Noh \&
+Woodward 1976). Reconstruit des segments d'interface orthogonaux aux
+axes cartésiens (ordre 1). - \texttt{"PLIC"} : \emph{Piecewise Linear
+Interface Calculation} (Youngs 1982 / Scardovelli \& Zaleski 1999).
+Reconstruit des segments de droite obliques avec inversion analytique
+exacte volume-droite (ordre 2). - \texttt{"LVIRA"} : \emph{Least Squares
+VOF Interface Reconstruction Algorithm} (Pilliod \& Puckett 2004).
+Optimisation continue de l'angle normal par moindres carrés sur stencil
+\(3 \times 3\). - \texttt{"ELVIRA"} : \emph{Efficient LVIRA} (Pilliod \&
+Puckett 2004). Sélection discrète optimale parmi 6 candidats issus de
+fonctions de hauteur (\emph{Height Functions}). Précision stricte
+d'ordre 2 sans itération coûteuse. - \texttt{advection\_method} (chaîne,
+défaut: \texttt{"VOF\_TVD"}) : - \texttt{"VOF\_TVD"} : Advection
+algébrique Volumes Finis haute résolution non diffusive. -
+\texttt{"CIAM"} : \emph{Calcul d'Interface Affine par Morceaux}
+(Lafaurie et al.~1994, Gueyffier et al.~1999). Advection géométrique
+directionnelle alternée (\(X-Y\) puis \(Y-X\)) avec découpe polygonale
+exacte des rectangles donneurs (\emph{Sutherland-Hodgman}). -
+\texttt{"WEYMOUTH\_YUE"} : \emph{Conservative VOF} multidimensionnel
+unsplit (Weymouth \& Yue 2010). Intègre une correction exacte des flux
+de coins (\emph{corner flux overlap}) et un bornage conservatif strict
+garantissant \(0 \le C \le 1\) sans aucun écrêtage artificiel. -
+\texttt{tvd\_limiter} (chaîne, défaut: \texttt{"SUPERBEE"}, actif si
+\texttt{advection\_method\ =\ "VOF\_TVD"}) : - \texttt{"SUPERBEE"} :
+Limiteur compressif de Roe (recommandé pour maintenir la raideur des
+interfaces diphasiques). - \texttt{"VAN\_LEER"} : Limiteur harmonique
+doux. - \texttt{"MUSCL"} : Limiteur linéaire par morceaux de Van Leer
+(1979). - \texttt{"HRIC"} : \emph{High Resolution Interface Capturing}
+(Muzaferija \& Peric 1999) dans l'espace normalisé NVD (\emph{Normalized
+Variable Diagram}). - \texttt{cfl\_vof} (réel, défaut: \texttt{0.4}) :
+Nombre CFL limite recommandé pour la stabilité géométrique du transport
+VOF.
+
 \paragraph{\texorpdfstring{3.2.9. Module \texttt{output} (Sauvegardes et
 Visualisation)}{3.2.9. Module output (Sauvegardes et Visualisation)}}\label{module-output-sauvegardes-et-visualisation}
 
@@ -1062,10 +1102,10 @@ consommation de RAM pour de grands maillages.
 \textbf{Q : Comment modéliser un profil de vitesse pulsé ou
 instationnaire à l'entrée ?}\\
 \emph{R :} Consultez le
-\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/DEVELOPER_GUIDE.md}{Manuel
+\href{file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/DEVELOPER_GUIDE.md}{Manuel
 Développeur} pour surcharger la méthode
 \texttt{apply\_velocity\_boundary\_conditions} dans
-\texttt{src/MpiComm.cpp}.
+\texttt{src/module\_mpi\_comm.f90}.
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 

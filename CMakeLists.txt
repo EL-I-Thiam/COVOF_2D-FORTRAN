@@ -16,6 +16,7 @@ set(SOURCES
     src/module_mesh.f90
     src/module_fields.f90
     src/module_mpi_comm.f90
+    src/module_interface_reconstruction.f90
     src/module_interface_vof.f90
     src/module_navier_stokes.f90
     src/module_linear_solvers.f90

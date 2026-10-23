@@ -287,6 +287,25 @@ Définit la distribution initiale des variables à $t=0$ :
 - `r_al` (réel, défaut: `500.0`) : Paramètre de pénalité de divergence $r$ $[\text{kg/(m}^3\cdot\text{s)}]$.
 - `uzawa_iter` (entier, défaut: `1`) : Nombre d'itérations d'Uzawa par pas de temps.
 
+
+#### 3.2.10. Module `vof` (Capture d'Interface et Advection Avancée)
+Contrôle le modèle géométrique de reconstruction d'interface et les algorithmes de transport de la fraction volumique :
+- `reconstruction_method` (chaîne, défaut: `"PLIC"`) :
+  - `"SLIC"` : *Simple Line Interface Calculation* (Noh & Woodward 1976). Reconstruit des segments d'interface orthogonaux aux axes cartésiens (ordre 1).
+  - `"PLIC"` : *Piecewise Linear Interface Calculation* (Youngs 1982 / Scardovelli & Zaleski 1999). Reconstruit des segments de droite obliques avec inversion analytique exacte volume-droite (ordre 2).
+  - `"LVIRA"` : *Least Squares VOF Interface Reconstruction Algorithm* (Pilliod & Puckett 2004). Optimisation continue de l'angle normal par moindres carrés sur stencil $3 \times 3$.
+  - `"ELVIRA"` : *Efficient LVIRA* (Pilliod & Puckett 2004). Sélection discrète optimale parmi 6 candidats issus de fonctions de hauteur (*Height Functions*). Précision stricte d'ordre 2 sans itération coûteuse.
+- `advection_method` (chaîne, défaut: `"VOF_TVD"`) :
+  - `"VOF_TVD"` : Advection algébrique Volumes Finis haute résolution non diffusive.
+  - `"CIAM"` : *Calcul d'Interface Affine par Morceaux* (Lafaurie et al. 1994, Gueyffier et al. 1999). Advection géométrique directionnelle alternée ($X-Y$ puis $Y-X$) avec découpe polygonale exacte des rectangles donneurs (*Sutherland-Hodgman*).
+  - `"WEYMOUTH_YUE"` : *Conservative VOF* multidimensionnel unsplit (Weymouth & Yue 2010). Intègre une correction exacte des flux de coins (*corner flux overlap*) et un bornage conservatif strict garantissant $0 \le C \le 1$ sans aucun écrêtage artificiel.
+- `tvd_limiter` (chaîne, défaut: `"SUPERBEE"`, actif si `advection_method = "VOF_TVD"`) :
+  - `"SUPERBEE"` : Limiteur compressif de Roe (recommandé pour maintenir la raideur des interfaces diphasiques).
+  - `"VAN_LEER"` : Limiteur harmonique doux.
+  - `"MUSCL"` : Limiteur linéaire par morceaux de Van Leer (1979).
+  - `"HRIC"` : *High Resolution Interface Capturing* (Muzaferija & Peric 1999) dans l'espace normalisé NVD (*Normalized Variable Diagram*).
+- `cfl_vof` (réel, défaut: `0.4`) : Nombre CFL limite recommandé pour la stabilité géométrique du transport VOF.
+
 #### 3.2.9. Module `output` (Sauvegardes et Visualisation)
 - `directory` (chaîne) : Nom du dossier où sont enregistrés les fichiers de sortie.
 - `vtk_interval` (entier) : Intervalle d'écriture des fichiers ParaView `.pvtr` / `.vtr` (en nombre de pas).
@@ -492,7 +511,7 @@ Reconstitue les sous-domaines MPI partagés, extrait les champs scalaires et vec
 *R :* BiCGSTAB(2) ne requiert le stockage que de quelques vecteurs de travail (empreinte mémoire minime et fixe), tout en éliminant les décrochages de convergence propres au BiCGSTAB simple. GMRES nécessite de stocker la base de Krylov complète, ce qui augmente fortement la consommation de RAM pour de grands maillages.
 
 **Q : Comment modéliser un profil de vitesse pulsé ou instationnaire à l'entrée ?**  
-*R :* Consultez le [Manuel Développeur](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/covof2d/docs/DEVELOPER_GUIDE.md) pour surcharger la méthode `apply_velocity_boundary_conditions` dans `src/MpiComm.cpp`.
+*R :* Consultez le [Manuel Développeur](file:///Users/elhadjiibrahimathiam/Documents/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN/docs/DEVELOPER_GUIDE.md) pour surcharger la méthode `apply_velocity_boundary_conditions` dans `src/module_mpi_comm.f90`.
 
 
 ---

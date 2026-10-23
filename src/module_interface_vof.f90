@@ -6,6 +6,8 @@ module module_interface_vof
   use module_fields, only: flow_fields_t
   use module_config, only: config_t
   use module_mpi_comm, only: exchange_halos_scalar, apply_vof_bc
+  use module_interface_reconstruction, only: interface_segment_t, cut_box_area, compute_alpha, &
+                                            reconstruct_interface, evaluate_limiter
   implicit none
   private
 
@@ -14,6 +16,9 @@ module module_interface_vof
   public :: advect_vof
   public :: update_physical_properties
   public :: compute_curvature_and_csf
+
+  ! Compteur de pas pour Strang splitting alterné
+  integer, save :: vof_step_count = 0
 
   type :: interface_vof_t
      ! Déclaration de variable locale / paramètre de calcul
@@ -450,153 +455,116 @@ contains
 
   ! [Procédure/Module] subroutine advect_vof
   subroutine advect_vof(fields, mesh, cfg, dt)
-    ! Déclaration de variable locale / paramètre de calcul
     type(flow_fields_t), intent(inout) :: fields
-    ! Déclaration de variable locale / paramètre de calcul
     type(mesh_2d_t), intent(in) :: mesh
-    ! Déclaration de variable locale / paramètre de calcul
     type(config_t), intent(in) :: cfg
-    ! Déclaration de variable locale / paramètre de calcul
     real(dp), intent(in) :: dt
 
-    ! Déclaration de variable locale / paramètre de calcul
+    select case (trim(cfg%advection_method))
+    case ("CIAM")
+       call advect_vof_ciam(fields, mesh, cfg, dt)
+    case ("WEYMOUTH_YUE")
+       call advect_vof_weymouth_yue(fields, mesh, cfg, dt)
+    case default
+       call advect_vof_tvd(fields, mesh, cfg, dt)
+    end select
+
+    vof_step_count = vof_step_count + 1
+
+    call exchange_halos_scalar(fields%C, mesh)
+    call apply_vof_bc(fields, mesh, cfg)
+    call update_physical_properties(fields, mesh, cfg)
+    call compute_curvature_and_csf(fields, mesh, cfg)
+  end subroutine advect_vof
+
+  ! [Procédure/Module] subroutine advect_vof_tvd
+  subroutine advect_vof_tvd(fields, mesh, cfg, dt)
+    type(flow_fields_t), intent(inout) :: fields
+    type(mesh_2d_t), intent(in) :: mesh
+    type(config_t), intent(in) :: cfg
+    real(dp), intent(in) :: dt
+
     integer :: i, j, nx, ny, i_up, i_down, j_up, j_down
-    ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: dx, dy, u_face, v_face, c_l, c_r, c_b, c_t
-    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: dx, dy, u_face, v_face, c_l, c_r, c_b, c_t, c_u
     real(dp) :: dc_up, dc_loc, r, phi, fx_in, fx_out, fy_in, fy_out
-    ! Déclaration de variable locale / paramètre de calcul
     real(dp), allocatable :: flux_x(:, :), flux_y(:, :), c_new(:, :)
 
-    ! Affectation et calcul numérique
     nx = mesh%nx_local
-    ! Affectation et calcul numérique
     ny = mesh%ny_local
-    ! Calcul de la métrique spatiale élémentaire
     dx = mesh%dx
-    ! Calcul de la métrique spatiale élémentaire
     dy = mesh%dy
 
-    ! Allocation dynamique de tableau contigu en mémoire
     allocate(flux_x(0:nx+1, 0:ny+1), flux_y(0:nx+1, 0:ny+1))
-    ! Allocation dynamique de tableau contigu en mémoire
     allocate(c_new(0:nx+1, 0:ny+1))
-    ! Affectation et calcul numérique
     flux_x = 0.0_dp
-    ! Affectation et calcul numérique
     flux_y = 0.0_dp
-    ! Affectation et calcul numérique
     c_new = fields%C
 
-    ! Flux selon X avec limiteur Superbee
+    ! Flux selon X
     do j = 1, ny
-       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx + 1
-          ! Affectation et calcul numérique
           u_face = fields%u(i, j)
-          ! Affectation et calcul numérique
           c_l = fields%C(i-1, j)
-          ! Affectation et calcul numérique
           c_r = fields%C(i, j)
 
-          ! Évaluation de la condition logique
           if (u_face >= 0.0_dp) then
-             ! Affectation et calcul numérique
              i_up = max(0, i - 2)
-             ! Affectation et calcul numérique
-             dc_up = c_l - fields%C(i_up, j)
-             ! Affectation et calcul numérique
+             c_u = fields%C(i_up, j)
+             dc_up = c_l - c_u
              dc_loc = c_r - c_l
-             ! Évaluation de la condition logique
              if (abs(dc_loc) > 1.0e-12_dp) then
-                ! Affectation et calcul numérique
                 r = dc_up / dc_loc
-             ! Branche par défaut si condition non satisfaite
              else
-                ! Affectation et calcul numérique
                 r = 0.0_dp
              end if
-             ! Affectation et calcul numérique
-             phi = superbee(r)
-             ! Affectation et calcul numérique
+             phi = evaluate_limiter(cfg%tvd_limiter, r, c_l, c_u, c_r)
              flux_x(i, j) = u_face * (c_l + 0.5_dp * phi * (1.0_dp - u_face * dt / dx) * dc_loc)
-          ! Branche par défaut si condition non satisfaite
           else
-             ! Affectation et calcul numérique
              i_down = min(nx + 1, i + 1)
-             ! Affectation et calcul numérique
-             dc_up = fields%C(i_down, j) - c_r
-             ! Affectation et calcul numérique
+             c_u = fields%C(i_down, j)
+             dc_up = c_u - c_r
              dc_loc = c_r - c_l
-             ! Évaluation de la condition logique
              if (abs(dc_loc) > 1.0e-12_dp) then
-                ! Affectation et calcul numérique
                 r = dc_up / dc_loc
-             ! Branche par défaut si condition non satisfaite
              else
-                ! Affectation et calcul numérique
                 r = 0.0_dp
              end if
-             ! Affectation et calcul numérique
-             phi = superbee(r)
-             ! Affectation et calcul numérique
+             phi = evaluate_limiter(cfg%tvd_limiter, r, c_r, c_u, c_l)
              flux_x(i, j) = u_face * (c_r - 0.5_dp * phi * (1.0_dp + u_face * dt / dx) * dc_loc)
           end if
        end do
     end do
 
-    ! Flux selon Y avec limiteur Superbee
+    ! Flux selon Y
     do j = 1, ny + 1
-       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
-          ! Affectation et calcul numérique
           v_face = fields%v(i, j)
-          ! Affectation et calcul numérique
           c_b = fields%C(i, j-1)
-          ! Affectation et calcul numérique
           c_t = fields%C(i, j)
 
-          ! Évaluation de la condition logique
           if (v_face >= 0.0_dp) then
-             ! Affectation et calcul numérique
              j_up = max(0, j - 2)
-             ! Affectation et calcul numérique
-             dc_up = c_b - fields%C(i, j_up)
-             ! Affectation et calcul numérique
+             c_u = fields%C(i, j_up)
+             dc_up = c_b - c_u
              dc_loc = c_t - c_b
-             ! Évaluation de la condition logique
              if (abs(dc_loc) > 1.0e-12_dp) then
-                ! Affectation et calcul numérique
                 r = dc_up / dc_loc
-             ! Branche par défaut si condition non satisfaite
              else
-                ! Affectation et calcul numérique
                 r = 0.0_dp
              end if
-             ! Affectation et calcul numérique
-             phi = superbee(r)
-             ! Affectation et calcul numérique
+             phi = evaluate_limiter(cfg%tvd_limiter, r, c_b, c_u, c_t)
              flux_y(i, j) = v_face * (c_b + 0.5_dp * phi * (1.0_dp - v_face * dt / dy) * dc_loc)
-          ! Branche par défaut si condition non satisfaite
           else
-             ! Affectation et calcul numérique
              j_down = min(ny + 1, j + 1)
-             ! Affectation et calcul numérique
-             dc_up = fields%C(i, j_down) - c_t
-             ! Affectation et calcul numérique
+             c_u = fields%C(i, j_down)
+             dc_up = c_u - c_t
              dc_loc = c_t - c_b
-             ! Évaluation de la condition logique
              if (abs(dc_loc) > 1.0e-12_dp) then
-                ! Affectation et calcul numérique
                 r = dc_up / dc_loc
-             ! Branche par défaut si condition non satisfaite
              else
-                ! Affectation et calcul numérique
                 r = 0.0_dp
              end if
-             ! Affectation et calcul numérique
-             phi = superbee(r)
-             ! Affectation et calcul numérique
+             phi = evaluate_limiter(cfg%tvd_limiter, r, c_t, c_u, c_b)
              flux_y(i, j) = v_face * (c_t - 0.5_dp * phi * (1.0_dp + v_face * dt / dy) * dc_loc)
           end if
        end do
@@ -604,39 +572,347 @@ contains
 
     ! Mise à jour conservative
     do j = 1, ny
-       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
-          ! Affectation et calcul numérique
           fx_in  = flux_x(i, j)
-          ! Affectation et calcul numérique
           fx_out = flux_x(i+1, j)
-          ! Affectation et calcul numérique
           fy_in  = flux_y(i, j)
-          ! Affectation et calcul numérique
           fy_out = flux_y(i, j+1)
 
-          ! Affectation et calcul numérique
           c_new(i, j) = fields%C(i, j) - (dt / dx) * (fx_out - fx_in) - (dt / dy) * (fy_out - fy_in)
-          ! Affectation et calcul numérique
           c_new(i, j) = max(0.0_dp, min(1.0_dp, c_new(i, j)))
        end do
     end do
 
-    ! Affectation et calcul numérique
     fields%C = c_new
-    ! Appel de sous-programme modulaire
-    call exchange_halos_scalar(fields%C, mesh)
-    ! Appel de sous-programme modulaire
-    call apply_vof_bc(fields, mesh, cfg)
-
-    ! Appel de sous-programme modulaire
-    call update_physical_properties(fields, mesh, cfg)
-    ! Appel de sous-programme modulaire
-    call compute_curvature_and_csf(fields, mesh, cfg)
-
-    ! Libération de la mémoire allouée
     deallocate(flux_x, flux_y, c_new)
-  end subroutine advect_vof
+  end subroutine advect_vof_tvd
+
+  ! [Procédure/Module] subroutine advect_vof_ciam
+  subroutine advect_vof_ciam(fields, mesh, cfg, dt)
+    type(flow_fields_t), intent(inout) :: fields
+    type(mesh_2d_t), intent(in) :: mesh
+    type(config_t), intent(in) :: cfg
+    real(dp), intent(in) :: dt
+
+    integer :: i, j, nx, ny, donor_idx
+    real(dp) :: dx, dy, delta_x, delta_y, u_face, v_face
+    real(dp) :: x_pos, y_pos, b_xmin, b_xmax, b_ymin, b_ymax, denom
+    type(interface_segment_t), allocatable :: segments(:, :)
+    real(dp), allocatable :: flux_vol(:, :), c_star(:, :), c_final(:, :)
+    logical :: x_first
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+
+    allocate(segments(0:nx+1, 0:ny+1))
+    allocate(flux_vol(0:nx+1, 0:ny+1))
+    allocate(c_star(0:nx+1, 0:ny+1))
+    allocate(c_final(0:nx+1, 0:ny+1))
+
+    x_first = (mod(vof_step_count, 2) == 0)
+
+    if (x_first) then
+       ! 1. Passe X
+       call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx + 1
+             u_face = fields%u(i, j)
+             delta_x = abs(u_face) * dt
+             if (delta_x <= 1.0e-14_dp) cycle
+             x_pos = x_face(mesh, i)
+             if (u_face > 0.0_dp) then
+                b_xmin = x_pos - delta_x; b_xmax = x_pos
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+             else
+                b_xmin = x_pos; b_xmax = x_pos + delta_x
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
+       end do
+
+       c_star = fields%C
+       do j = 1, ny
+          do i = 1, nx
+             denom = dx - dt * (fields%u(i + 1, j) - fields%u(i, j))
+             if (denom > 1.0e-12_dp) then
+                c_star(i, j) = (fields%C(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j))) / denom
+             else
+                c_star(i, j) = fields%C(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / dx
+             end if
+             c_star(i, j) = max(0.0_dp, min(1.0_dp, c_star(i, j)))
+          end do
+       end do
+       call exchange_halos_scalar(c_star, mesh)
+
+       ! 2. Passe Y
+       call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny + 1
+          do i = 1, nx
+             v_face = fields%v(i, j)
+             delta_y = abs(v_face) * dt
+             if (delta_y <= 1.0e-14_dp) cycle
+             y_pos = y_face(mesh, j)
+             if (v_face > 0.0_dp) then
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos - delta_y; b_ymax = y_pos
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
+             else
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos; b_ymax = y_pos + delta_y
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
+       end do
+
+       c_final = c_star
+       do j = 1, ny
+          do i = 1, nx
+             denom = dy - dt * (fields%v(i, j + 1) - fields%v(i, j))
+             if (denom > 1.0e-12_dp) then
+                c_final(i, j) = (c_star(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j))) / denom
+             else
+                c_final(i, j) = c_star(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / dy
+             end if
+             c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
+          end do
+       end do
+    else
+       ! 1. Passe Y
+       call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny + 1
+          do i = 1, nx
+             v_face = fields%v(i, j)
+             delta_y = abs(v_face) * dt
+             if (delta_y <= 1.0e-14_dp) cycle
+             y_pos = y_face(mesh, j)
+             if (v_face > 0.0_dp) then
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos - delta_y; b_ymax = y_pos
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
+             else
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos; b_ymax = y_pos + delta_y
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
+       end do
+
+       c_star = fields%C
+       do j = 1, ny
+          do i = 1, nx
+             denom = dy - dt * (fields%v(i, j + 1) - fields%v(i, j))
+             if (denom > 1.0e-12_dp) then
+                c_star(i, j) = (fields%C(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j))) / denom
+             else
+                c_star(i, j) = fields%C(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / dy
+             end if
+             c_star(i, j) = max(0.0_dp, min(1.0_dp, c_star(i, j)))
+          end do
+       end do
+       call exchange_halos_scalar(c_star, mesh)
+
+       ! 2. Passe X
+       call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx + 1
+             u_face = fields%u(i, j)
+             delta_x = abs(u_face) * dt
+             if (delta_x <= 1.0e-14_dp) cycle
+             x_pos = x_face(mesh, i)
+             if (u_face > 0.0_dp) then
+                b_xmin = x_pos - delta_x; b_xmax = x_pos
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+             else
+                b_xmin = x_pos; b_xmax = x_pos + delta_x
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
+       end do
+
+       c_final = c_star
+       do j = 1, ny
+          do i = 1, nx
+             denom = dx - dt * (fields%u(i + 1, j) - fields%u(i, j))
+             if (denom > 1.0e-12_dp) then
+                c_final(i, j) = (c_star(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j))) / denom
+             else
+                c_final(i, j) = c_star(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / dx
+             end if
+             c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
+          end do
+       end do
+    end if
+
+    fields%C = c_final
+    deallocate(segments, flux_vol, c_star, c_final)
+  end subroutine advect_vof_ciam
+
+  ! [Procédure/Module] subroutine advect_vof_weymouth_yue
+  subroutine advect_vof_weymouth_yue(fields, mesh, cfg, dt)
+    type(flow_fields_t), intent(inout) :: fields
+    type(mesh_2d_t), intent(in) :: mesh
+    type(config_t), intent(in) :: cfg
+    real(dp), intent(in) :: dt
+
+    integer :: i, j, nx, ny
+    real(dp) :: dx, dy, cell_area, u_face, v_face, delta_x, delta_y
+    real(dp) :: x_pos, y_pos, u_e, u_w, v_n, v_s, v_corner
+    real(dp) :: c_xmin, c_xmax, c_ymin, c_ymax, vol_fluid, f_out_x, f_out_y, total_out, scale, div_u
+    type(interface_segment_t), allocatable :: segments(:, :)
+    real(dp), allocatable :: f_vol_x(:, :), f_vol_y(:, :), c_new(:, :)
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+    cell_area = dx * dy
+
+    allocate(segments(0:nx+1, 0:ny+1))
+    allocate(f_vol_x(0:nx+1, 0:ny+1))
+    allocate(f_vol_y(0:nx+1, 0:ny+1))
+    allocate(c_new(0:nx+1, 0:ny+1))
+    f_vol_x = 0.0_dp
+    f_vol_y = 0.0_dp
+
+    ! 1. Unique étape de reconstruction géométrique sur le champ C^n
+    call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+
+    ! 2. Flux 1D sur faces X
+    do j = 1, ny
+       do i = 1, nx + 1
+          u_face = fields%u(i, j)
+          delta_x = abs(u_face) * dt
+          if (delta_x <= 1.0e-14_dp) cycle
+          x_pos = x_face(mesh, i)
+          if (u_face > 0.0_dp) then
+             f_vol_x(i, j) = cut_box_area(x_pos - delta_x, x_pos, y_face(mesh, j), y_face(mesh, j + 1), &
+                                         segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+          else
+             f_vol_x(i, j) = -cut_box_area(x_pos, x_pos + delta_x, y_face(mesh, j), y_face(mesh, j + 1), &
+                                          segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+          end if
+       end do
+    end do
+
+    ! 2. Flux 1D sur faces Y
+    do j = 1, ny + 1
+       do i = 1, nx
+          v_face = fields%v(i, j)
+          delta_y = abs(v_face) * dt
+          if (delta_y <= 1.0e-14_dp) cycle
+          y_pos = y_face(mesh, j)
+          if (v_face > 0.0_dp) then
+             f_vol_y(i, j) = cut_box_area(x_face(mesh, i), x_face(mesh, i + 1), y_pos - delta_y, y_pos, &
+                                         segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
+          else
+             f_vol_y(i, j) = -cut_box_area(x_face(mesh, i), x_face(mesh, i + 1), y_pos, y_pos + delta_y, &
+                                          segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+          end if
+       end do
+    end do
+
+    ! 3. Correction multidimensionnelle des flux de coin
+    do j = 1, ny
+       do i = 1, nx
+          u_e = fields%u(i + 1, j)
+          u_w = fields%u(i, j)
+          v_n = fields%v(i, j + 1)
+          v_s = fields%v(i, j)
+
+          ! Nord-Est
+          if (u_e > 0.0_dp .and. v_n > 0.0_dp) then
+             c_xmin = x_face(mesh, i + 1) - u_e * dt; c_xmax = x_face(mesh, i + 1)
+             c_ymin = y_face(mesh, j + 1) - v_n * dt; c_ymax = y_face(mesh, j + 1)
+             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
+                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             f_vol_x(i + 1, j) = f_vol_x(i + 1, j) - 0.5_dp * v_corner
+             f_vol_y(i, j + 1) = f_vol_y(i, j + 1) - 0.5_dp * v_corner
+          end if
+
+          ! Nord-Ouest
+          if (u_w < 0.0_dp .and. v_n > 0.0_dp) then
+             c_xmin = x_face(mesh, i); c_xmax = x_face(mesh, i) - u_w * dt
+             c_ymin = y_face(mesh, j + 1) - v_n * dt; c_ymax = y_face(mesh, j + 1)
+             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
+                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             f_vol_x(i, j) = f_vol_x(i, j) + 0.5_dp * v_corner
+             f_vol_y(i, j + 1) = f_vol_y(i, j + 1) - 0.5_dp * v_corner
+          end if
+
+          ! Sud-Est
+          if (u_e > 0.0_dp .and. v_s < 0.0_dp) then
+             c_xmin = x_face(mesh, i + 1) - u_e * dt; c_xmax = x_face(mesh, i + 1)
+             c_ymin = y_face(mesh, j); c_ymax = y_face(mesh, j) - v_s * dt
+             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
+                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             f_vol_x(i + 1, j) = f_vol_x(i + 1, j) - 0.5_dp * v_corner
+             f_vol_y(i, j) = f_vol_y(i, j) + 0.5_dp * v_corner
+          end if
+
+          ! Sud-Ouest
+          if (u_w < 0.0_dp .and. v_s < 0.0_dp) then
+             c_xmin = x_face(mesh, i); c_xmax = x_face(mesh, i) - u_w * dt
+             c_ymin = y_face(mesh, j); c_ymax = y_face(mesh, j) - v_s * dt
+             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
+                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             f_vol_x(i, j) = f_vol_x(i, j) + 0.5_dp * v_corner
+             f_vol_y(i, j) = f_vol_y(i, j) + 0.5_dp * v_corner
+          end if
+       end do
+    end do
+
+    ! 4. Limitation locale pour la bornitude 0 <= C <= 1
+    do j = 1, ny
+       do i = 1, nx
+          vol_fluid = fields%C(i, j) * cell_area
+          f_out_x = max(0.0_dp, f_vol_x(i + 1, j)) + max(0.0_dp, -f_vol_x(i, j))
+          f_out_y = max(0.0_dp, f_vol_y(i, j + 1)) + max(0.0_dp, -f_vol_y(i, j))
+          total_out = f_out_x + f_out_y
+
+          if (total_out > vol_fluid .and. total_out > 1.0e-14_dp) then
+             scale = vol_fluid / total_out
+             if (f_vol_x(i + 1, j) > 0.0_dp) f_vol_x(i + 1, j) = f_vol_x(i + 1, j) * scale
+             if (f_vol_x(i, j) < 0.0_dp)     f_vol_x(i, j)     = f_vol_x(i, j) * scale
+             if (f_vol_y(i, j + 1) > 0.0_dp) f_vol_y(i, j + 1) = f_vol_y(i, j + 1) * scale
+             if (f_vol_y(i, j) < 0.0_dp)     f_vol_y(i, j)     = f_vol_y(i, j) * scale
+          end if
+       end do
+    end do
+
+    ! 5. Mise à jour unsplit avec terme de divergence
+    c_new = fields%C
+    do j = 1, ny
+       do i = 1, nx
+          div_u = (fields%u(i + 1, j) - fields%u(i, j)) / dx + &
+                  (fields%v(i, j + 1) - fields%v(i, j)) / dy
+          c_new(i, j) = fields%C(i, j) - (1.0_dp / cell_area) * &
+                        ((f_vol_x(i + 1, j) - f_vol_x(i, j)) + (f_vol_y(i, j + 1) - f_vol_y(i, j))) + &
+                        dt * fields%C(i, j) * div_u
+          c_new(i, j) = max(0.0_dp, min(1.0_dp, c_new(i, j)))
+       end do
+    end do
+
+    fields%C = c_new
+    deallocate(segments, f_vol_x, f_vol_y, c_new)
+  end subroutine advect_vof_weymouth_yue
 
   ! [Procédure/Module] subroutine vof_init
   subroutine vof_init(this, cfg)

@@ -33,10 +33,14 @@ Le solveur exploite la puissance du calcul matriciel natif et du stockage contig
 * **Couplage Vitesse-Pression par Lagrangien Augmenté** :
   * Terme de pénalisation de divergence $r_{\text{al}} \nabla(\nabla \cdot \mathbf{u})$ couplé à des itérations d'Uzawa pour assurer $\nabla \cdot \mathbf{u} = 0$ à la précision machine ($\sim 10^{-10}$).
   * Formulation Monolithique robuste insensible aux instabilités de pression.
-* **Méthode Diphasique Volume-Of-Fluid (VOF-TVD Superbee)** :
-  * Conservation exacte de masse du fluide dispersé par transport de la fraction volumique $C \in [0, 1]$.
-  * Limiteur de flux haute résolution **TVD Superbee** garantissant la compacité des interfaces sans étalement artificiel.
-  * Tension superficielle par la méthode **CSF (Continuum Surface Force)** de Brackbill et al. avec courbure calculée par différentiation directe des normales.
+* **Méthode Diphasique Volume-Of-Fluid (VOF Multi-Méthodes)** :
+  * **Reconstruction géométrique d'interface** : **SLIC** (ordre 1 cartésien), **PLIC** (ordre 2 linéaire continu, Youngs / Scardovelli & Zaleski), **LVIRA** (moindres carrés continus par section dorée), **ELVIRA** (sélection optimale de fonctions de hauteur discrètes, Pilliod & Puckett). Découpage polygonal exact par algorithme de **Sutherland-Hodgman** et formule des lacets de Gauss.
+  * **Algorithmes d'advection VOF configurables** :
+    * **VOF-TVD** : transport algébrique haute résolution compressif.
+    * **CIAM (Calcul d'Interface Affine par Morceaux)** : transport géométrique directionnel à découpage de Strang.
+    * **Weymouth & Yue (2010)** : transport géométrique multidimensionnel non découplé avec correction de coin $V_{xy}$ et préservation stricte de la bornitude $C \in [0, 1]$.
+  * **Catalogue complet de limiteurs TVD / NVD** : **Superbee**, **Van Leer**, **Minmod**, **MUSCL**, **HRIC** (High-Resolution Interface Capturing).
+  * Tension superficielle par la méthode **CSF (Continuum Surface Force)** de Brackbill et al. avec formulation **Balanced-Force** supprimant les courants parasites.
 * **Énergie Thermique et Convection Naturelle** :
   * Équation d'advection-diffusion scalaire pour le champ de température $T$.
   * Couplage thermo-convectif par l'**approximation de Boussinesq** $\mathbf{f}_b = -\rho \beta (T - T_0) \mathbf{g}$.
