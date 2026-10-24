@@ -683,6 +683,8 @@ contains
     real(dp) :: rho_u, rho_v, diag_bc, val, u_bc, v_bc, y_pos, h_step, grad_p
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: mu_N, mu_S, mu_W, mu_E, T_v
+    ! Déclaration des variables pour l'injecteur JET_INLET (Cas 3.3 Fluids 2021)
+    real(dp) :: xc_jet, half_w_jet
 
     ! Calcul de la métrique spatiale élémentaire
     dx = mesh%dx
@@ -842,8 +844,18 @@ contains
             (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) then
           ! Affectation et calcul numérique
           v_bc = 0.0_dp
-          ! Affectation et calcul numérique
-          if (cfg%bc_top%btype == BC_DIRICHLET) v_bc = cfg%bc_top%v
+          ! Évaluation du profil d'injecteur JET_INLET (Cas 3.3 Fluids 2021)
+          if (trim(cfg%bc_top%profile) == "JET_INLET") then
+             xc_jet = merge(cfg%bc_top%jet_center, 0.5_dp * mesh%lx, cfg%bc_top%jet_center > 0.0_dp)
+             half_w_jet = merge(0.5_dp * cfg%bc_top%jet_width, 0.04_dp, cfg%bc_top%jet_width > 0.0_dp)
+             if (abs(x_center(mesh, i) - xc_jet) <= half_w_jet) then
+                v_bc = cfg%bc_top%v
+             else
+                v_bc = -cfg%bc_top%v * (2.0_dp * half_w_jet) / (mesh%lx - 2.0_dp * half_w_jet)
+             end if
+          else if (cfg%bc_top%btype == BC_DIRICHLET) then
+             v_bc = cfg%bc_top%v
+          end if
           ! Affectation et calcul numérique
           rhs(dof) = diag_bc * v_bc
           cycle

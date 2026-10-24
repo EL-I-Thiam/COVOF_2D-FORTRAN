@@ -74,6 +74,8 @@ contains
     real(dp) :: frac, y_step, h, u_mean, y_val, u_val, x_val
     ! Déclaration des paramètres pour la nappe liquide cisaillée (Cas 3.2 Fluids 2021)
     real(dp) :: y_c_ls, delta_ls, k_ls, amp_ls, factor_u_ls, dy_c_ls, sgn_y_ls, exp_decay_ls, c_u_ls, a_val_ls
+    ! Déclaration des variables pour l'amorce de jet visqueux (Cas 3.3 Fluids 2021)
+    real(dp) :: x_c_vj, half_w_vj, stub_h_vj, v_in_vj
 
     ! Affectation et calcul numérique
     success = .false.
@@ -196,6 +198,29 @@ contains
 
        call sync_u(this%mesh, this%fields%u)
        call sync_v(this%mesh, this%fields%v)
+    end if
+
+    ! Initialisation du champ de vitesse pour VISCOUS_JET (Cas 3.3 Fluids 2021)
+    if (this%config%ic_type == IC_VISCOUS_JET) then
+       x_c_vj = merge(this%config%ic_center_x, 0.5_dp * this%mesh%lx, this%config%ic_center_x > 0.0_dp)
+       half_w_vj = merge(0.5_dp * this%config%ic_jet_width, 0.04_dp, this%config%ic_jet_width > 0.0_dp)
+       stub_h_vj = 2.0_dp * this%mesh%dy
+       v_in_vj = merge(this%config%bc_top%v, -0.6_dp, this%config%bc_top%v /= 0.0_dp)
+
+       v_ny = this%mesh%ny_local
+       if (this%mesh%is_boundary_top) v_ny = v_ny + 1
+       do j = 1, v_ny
+          y_val = y_face(this%mesh, j)
+          do i = 1, this%mesh%nx_local
+             x_val = x_center(this%mesh, i)
+             if (y_val >= this%mesh%ly - stub_h_vj .and. abs(x_val - x_c_vj) <= half_w_vj) then
+                this%fields%v(i, j) = v_in_vj
+             end if
+          end do
+       end do
+       call sync_v(this%mesh, this%fields%v)
+       call apply_velocity_bc(this%fields, this%mesh, this%config, .false.)
+       call apply_vof_bc(this%fields, this%mesh, this%config)
     end if
 
     ! Initialisation du champ thermique si activé
@@ -369,6 +394,9 @@ contains
        if (this%config%enable_two_phase) then
           ! Appel de sous-programme modulaire
           call this%tracker%advect(this%mesh, this%fields, dt)
+          ! Actualisation des conditions aux limites
+          call apply_velocity_bc(this%fields, this%mesh, this%config, .false.)
+          call apply_vof_bc(this%fields, this%mesh, this%config)
        end if
 
        ! 2. Assemblage des blocs du préconditionneur

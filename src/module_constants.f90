@@ -97,6 +97,8 @@ module module_constants
   integer, parameter, public :: IC_LAPLACIAN_TEST   = 8
   ! Nappe liquide cisaillée périodique (Cas 3.2 de l'article Fluids 2021)
   integer, parameter, public :: IC_LIQUID_SHEET     = 9
+  ! Jet liquide visqueux injecté / flambement (Cas 3.3 de l'article Fluids 2021)
+  integer, parameter, public :: IC_VISCOUS_JET      = 10
 
   ! --- 10. Formes Géométriques d'Obstacles Immergés (Brinkman) ---
   ! Aucun obstacle immergé dans le domaine fluide

@@ -531,6 +531,32 @@ def verify_all():
             })
             print(f"      -> Conservation Ek/Ek0 = {ke_ratio_final:.4f} (+{(ke_ratio_final-1.0)*100:.2f}%), Vol = {vol_cons:.2f}% [{status_sheet}]")
 
+    # [Benchmark Fluids 2021] Cas 3.3 : Flambement d'un jet visqueux (ratios 1529 / 2.7e5)
+    jet_csv = "output_viscous_jet_case1/viscous_jet_case1_history.csv"
+    if os.path.exists(jet_csv):
+        print("[Bonus] Cas 3.3 : Flambement jet visqueux (rho2/rho1 = 1529, mu2/mu1 = 2.7e5, Fluids 2021)...")
+        df_jet = pd.read_csv(jet_csv)
+        if len(df_jet) > 5:
+            t_jet = df_jet['time'].to_numpy()
+            vol_jet = df_jet['bubble_volume'].to_numpy()
+            v0_jet, d_jet = 0.6, 0.08
+            vol_theo_jet = vol_jet[0] + v0_jet * d_jet * t_jet
+            vol_err_final = abs(vol_jet[-1] - vol_theo_jet[-1]) / vol_theo_jet[-1] * 100.0
+            re_jet = (1800.0 * d_jet * v0_jet) / 500.0
+            aspect_jet = 1.0 / d_jet
+            div_max_jet = np.max(df_jet['max_div'].to_numpy()[1:])
+            status_jet = "PASS" if (vol_err_final < 1.0 and re_jet < 0.52 and aspect_jet > 3.0 * np.pi and div_max_jet < 0.1) else "FAIL"
+            report_rows.append({
+                "Chapitre": "Fluids 2021 (Ratios 10^5)",
+                "Cas": "3.3 Flambement jet visqueux",
+                "Métrique": "Erreur débit massique & Div max",
+                "Cible de Référence Académique": "Err_vol < 1.0%, Re=0.17 < 0.52",
+                "Valeur COVOF 2D": f"Err_vol={vol_err_final:.3f}%, Div={div_max_jet:.2e}",
+                "Écart Relatif": f"{vol_err_final:.3f}% (dev)",
+                "Statut": status_jet
+            })
+            print(f"      -> Erreur volume final = {vol_err_final:.3f}%, Div max = {div_max_jet:.2e} s-1, Re = {re_jet:.4f} [{status_jet}]")
+
     # ==========================================================================
     # SYNTHÈSE GLOBALE ET EXPORT DU TABLEAU DE SYNTHESE
     # ==========================================================================

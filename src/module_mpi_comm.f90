@@ -293,6 +293,8 @@ contains
     real(dp) :: u_l, v_l, u_r, v_r, u_b, v_b, u_t, v_t
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: y, h, u_inlet
+    ! Déclaration des variables pour injecteur supérieur (Cas 3.3 Fluids 2021)
+    real(dp) :: x_c, xc_top, half_w_top, v_out_top
 
     ! Affectation et calcul numérique
     nx = mesh%nx_local
@@ -449,32 +451,42 @@ contains
 
     ! Bord Nord physique (y = Ly)
     if (mesh%neighbor_north == MPI_PROC_NULL .and. cfg%bc_top%btype /= BC_PERIODIC) then
-       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
-       do i = 1, nx
-          ! Évaluation de la condition logique
-          if (cfg%bc_top%btype == BC_DIRICHLET) then
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             if (.not. homogeneous) fields%v(i, ny+1) = v_t
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             fields%v(i, ny+1) = v_t
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             fields%u(i, ny+1) = 2.0_dp * u_t - fields%u(i, ny)
-          ! Branche conditionnelle alternative
-          else if (cfg%bc_top%btype == BC_FREESLIP) then
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             if (.not. homogeneous) fields%v(i, ny+1) = 0.0_dp
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             fields%v(i, ny+1) = 0.0_dp
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             fields%u(i, ny+1) = fields%u(i, ny)
-          ! Branche conditionnelle alternative
-          else if (cfg%bc_top%btype == BC_NEUMANN) then
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             fields%u(i, ny+1) = fields%u(i, ny)
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             fields%v(i, ny+1) = fields%v(i, ny)
-          end if
-       end do
+       ! Traitement du profil d'injecteur JET_INLET (Cas 3.3 Fluids 2021)
+       if (trim(cfg%bc_top%profile) == "JET_INLET") then
+          xc_top = merge(cfg%bc_top%jet_center, 0.5_dp * mesh%lx, cfg%bc_top%jet_center > 0.0_dp)
+          half_w_top = merge(0.5_dp * cfg%bc_top%jet_width, 0.04_dp, cfg%bc_top%jet_width > 0.0_dp)
+          v_out_top = -v_t * (2.0_dp * half_w_top) / (mesh%lx - 2.0_dp * half_w_top)
+          do i = 1, nx
+             x_c = x_center(mesh, i)
+             if (abs(x_c - xc_top) <= half_w_top) then
+                if (.not. homogeneous) fields%v(i, ny+1) = v_t
+                fields%u(i, ny+1) = 0.0_dp
+             else
+                if (.not. homogeneous) fields%v(i, ny+1) = v_out_top
+                fields%u(i, ny+1) = fields%u(i, ny)
+             end if
+          end do
+       else
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, nx
+             ! Évaluation de la condition logique
+             if (cfg%bc_top%btype == BC_DIRICHLET) then
+                ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+                if (.not. homogeneous) fields%v(i, ny+1) = v_t
+                fields%u(i, ny+1) = 2.0_dp * u_t - fields%u(i, ny)
+             ! Branche conditionnelle alternative
+             else if (cfg%bc_top%btype == BC_FREESLIP) then
+                ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+                if (.not. homogeneous) fields%v(i, ny+1) = 0.0_dp
+                fields%u(i, ny+1) = fields%u(i, ny)
+             ! Branche conditionnelle alternative
+             else if (cfg%bc_top%btype == BC_NEUMANN) then
+                ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+                fields%u(i, ny+1) = fields%u(i, ny)
+                fields%v(i, ny+1) = fields%v(i, ny)
+             end if
+          end do
+       end if
     end if
   end subroutine apply_velocity_bc
 
@@ -584,7 +596,8 @@ contains
     type(config_t), intent(in) :: cfg
 
     ! Déclaration de variable locale / paramètre de calcul
-    integer :: nx, ny
+    integer :: nx, ny, i
+    real(dp) :: x_c, xc_top, half_w_top
     ! Affectation et calcul numérique
     nx = mesh%nx_local
     ! Affectation et calcul numérique
@@ -596,8 +609,23 @@ contains
     if (mesh%neighbor_east == MPI_PROC_NULL)  fields%C(nx+1, 1:ny) = fields%C(nx, 1:ny)
     ! Affectation et calcul numérique
     if (mesh%neighbor_south == MPI_PROC_NULL) fields%C(1:nx, 0)    = fields%C(1:nx, 1)
-    ! Affectation et calcul numérique
-    if (mesh%neighbor_north == MPI_PROC_NULL) fields%C(1:nx, ny+1) = fields%C(1:nx, ny)
+    ! Affectation et calcul numérique pour bord Nord
+    if (mesh%neighbor_north == MPI_PROC_NULL) then
+       if (trim(cfg%bc_top%profile) == "JET_INLET") then
+          xc_top = merge(cfg%bc_top%jet_center, 0.5_dp * mesh%lx, cfg%bc_top%jet_center > 0.0_dp)
+          half_w_top = merge(0.5_dp * cfg%bc_top%jet_width, 0.04_dp, cfg%bc_top%jet_width > 0.0_dp)
+          do i = 1, nx
+             x_c = x_center(mesh, i)
+             if (abs(x_c - xc_top) <= half_w_top) then
+                fields%C(i, ny+1) = 0.0_dp ! Injection continue de liquide (Fluide 2)
+             else
+                fields%C(i, ny+1) = fields%C(i, ny) ! Évacuation libre du gaz
+             end if
+          end do
+       else
+          fields%C(1:nx, ny+1) = fields%C(1:nx, ny)
+       end if
+    end if
   end subroutine apply_vof_bc
 
   ! Déclaration de variable locale / paramètre de calcul

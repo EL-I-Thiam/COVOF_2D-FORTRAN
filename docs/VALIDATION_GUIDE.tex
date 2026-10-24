@@ -1,3 +1,123 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\documentclass[
+]{article}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\newenvironment{Shaded}{}{}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.49,0.56,0.16}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\BuiltInTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{#1}}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textit{#1}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.53,0.00,0.00}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.56,0.13,0.00}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.73,0.13,0.13}{\textit{#1}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.02,0.16,0.49}{#1}}
+\newcommand{\ImportTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{\textbf{#1}}}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.40,0.40,0.40}{#1}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.74,0.48,0.00}{#1}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.73,0.40,0.53}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.10,0.09,0.49}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\usepackage{longtable,booktabs,array}
+\usepackage{caption}
+\captionsetup[table]{skip=6pt}
+\newcounter{none} % for unnumbered tables
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+\usepackage{graphicx}
+\makeatletter
+\newsavebox\pandoc@box
+\newcommand*\pandocbounded[1]{% scales image to fit in text height/width
+  \sbox\pandoc@box{#1}%
+  \Gscale@div\@tempa{\textheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
+  \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
+  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi% select the smaller of both
+  \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
+  \else\usebox{\pandoc@box}%
+  \fi%
+}
+% Set default figure placement to htbp
+\def\fps@figure{htbp}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\usepackage{bookmark}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+% fallback for those not using the hyperref driver hyperxmp:
+\makeatletter
+\@ifundefined{xmpquote}{\newcommand{\xmpquote}[1]{#1}}{}
+\makeatother
+\hypersetup{
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\author{}
+\date{}
+
+\begin{document}
+
 \section{Cahier de Référence de Validation et Vérification Numérique -
 Solveur COVOF
 2D}\label{cahier-de-ruxe9fuxe9rence-de-validation-et-vuxe9rification-numuxe9rique---solveur-covof-2d}
@@ -853,6 +973,146 @@ Fortran}
 
 \begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
 
+\subsubsection{\texorpdfstring{2.8. Cas 3.3 (Fluids 2021) : Flambement
+d'un Jet Visqueux sous Ratios Extrêmes
+(\(\rho_2/\rho_1 = 1529, \ \mu_2/\mu_1 = 2.7 \times 10^5\))}{2.8. Cas 3.3 (Fluids 2021) : Flambement d'un Jet Visqueux sous Ratios Extrêmes (\textbackslash rho\_2/\textbackslash rho\_1 = 1529, \textbackslash{} \textbackslash mu\_2/\textbackslash mu\_1 = 2.7 \textbackslash times 10\^{}5)}}\label{cas-3.3-fluids-2021-flambement-dun-jet-visqueux-sous-ratios-extruxeames-rho_2rho_1-1529-mu_2mu_1-2.7-times-105}
+
+\paragraph{Référence Scientifique}\label{ruxe9fuxe9rence-scientifique-2}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Article fondateur} : M. El Ouafa, S. Vincent, V. Le Chenadec,
+  \emph{``Monolithic Solvers for Incompressible Two-Phase Flows at Large
+  Density and Viscosity Ratios''}, \textbf{Fluids} 2021, 6(1), 23
+  (Section 3.3, Tableau 4, Figures 6, 7, 8).
+\item
+  \textbf{Critères théoriques de flambement} : M. F. Tomé, N.
+  Mangiavacchi, S. McKee, \emph{``A numerical technique for solving
+  unsteady non-Newtonian free surface flows''}, \emph{J. Non-Newton.
+  Fluid Mech.} 1996, 67, 145--166.
+\end{itemize}
+
+\paragraph{Contexte Physique et
+Modélisation}\label{contexte-physique-et-moduxe9lisation-1}
+
+Le benchmark simule l'injection verticale d'un jet de propergol liquide
+hautement visqueux dans une cavité d'air au repos sous l'effet de la
+pesanteur (\(\mathbf{g} = (0, -9.81)\text{ m/s}^2\)). L'instabilité
+périodique de flambement (\emph{viscous buckling}) apparaît lors de
+l'impact contre la paroi inférieure lorsque deux conditions
+fondamentales sont vérifiées : 1. \textbf{Rapport d'aspect géométrique}
+: \(H / D > 3\pi \approx 9.42\) 2. \textbf{Faible nombre de Reynolds
+d'injection} : \(Re = \frac{\rho_2 D V_0}{\mu_2} < 0.52\)
+
+\paragraph{Paramètres du Problème (Fluids 2021, Tableau
+4)}\label{paramuxe8tres-du-probluxe8me-fluids-2021-tableau-4}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Domaine} : Cavité fermée \([0, L] \times [0, H]\) avec
+  \(L = 1.0\text{ m}, H = 1.0\text{ m}\).
+\item
+  \textbf{Injecteur supérieur (\(y = 1.0\text{ m}\))} : Largeur
+  \(D = 0.08\text{ m}\), centré en \(x_c = 0.5\text{ m}\). Vitesse
+  d'injection \(V_0 = 0.6\text{ m/s}\) (\(v_{in} = -0.6\text{ m/s}\)).
+\item
+  \textbf{Fluide 1 (Gaz)} :
+  \(\rho_1 = 1.1768\text{ kg/m}^3, \mu_1 = 1.85 \times 10^{-3}\text{ Pa}\cdot\text{s}\).
+\item
+  \textbf{Fluide 2 (Propergol)} :
+  \(\rho_2 = 1800.0\text{ kg/m}^3, \mu_2 = 500.0\text{ Pa}\cdot\text{s}\).
+\item
+  \textbf{Rapports de saut} :
+  \(\rho_2/\rho_1 = 1529.6, \ \mu_2/\mu_1 = 2.70 \times 10^5\).
+\item
+  \textbf{Vérification théorique} : \(H/D = 12.50 > 9.42\),
+  \(Re = 0.1728 < 0.52\) (régime de flambement garanti).
+\item
+  \textbf{Condition d'évacuation gazeuse compensatoire} : Pour préserver
+  la nullité du flux total \(\oint \mathbf{u} \cdot \mathbf{n} = 0\), la
+  paroi supérieure hors-injecteur évacue le gaz avec une vitesse
+  \(v_{\text{out}} = V_0 \frac{D}{L - D} \approx +0.05217\text{ m/s}\).
+\end{itemize}
+
+\paragraph{Bilan de Masse Analytique et Résultats
+Comparatifs}\label{bilan-de-masse-analytique-et-ruxe9sultats-comparatifs}
+
+Le volume théorique de liquide injecté suit la droite analytique
+\(V_{\text{theo}}(t) = V(0) + (V_0 D) t\).
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1176}}
+  >{\centering\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1471}}
+  >{\centering\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1471}}
+  >{\centering\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1471}}
+  >{\centering\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1471}}
+  >{\centering\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1471}}
+  >{\centering\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1471}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Grandeur \& Métrique
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Cible Académique / Théorique
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Référence Fluids 2021 (Table 4)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+COVOF 2D C++17
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+COVOF 2D Fortran 2018
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Écart Dual C++/Fortran
+\end{minipage} & \begin{minipage}[b]{\linewidth}\centering
+Statut
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Rapport d'aspect \(H/D\)} & \(> 3\pi \approx 9.42\) & \(12.50\)
+& \textbf{\(12.50\)} & \textbf{\(12.50\)} & \(0.00\,\%\) &
+\textbf{PASS} \\
+\textbf{Nombre de Reynolds \(Re\)} & \(< 0.52\) & \(0.173\) &
+\textbf{\(0.1728\)} & \textbf{\(0.1728\)} & \(0.00\,\%\) &
+\textbf{PASS} \\
+\textbf{Rapport de viscosité \(\mu_2/\mu_1\)} & \(2.70 \times 10^5\) &
+\(2.70 \times 10^5\) & \textbf{\(2.70 \times 10^5\)} &
+\textbf{\(2.70 \times 10^5\)} & \(0.00\,\%\) & \textbf{PASS} \\
+\textbf{Volume liquide final \(V(0.5\text{s})\)} &
+\(0.025875\text{ m}^2\) (Analytique) & Bilan débit &
+\textbf{\(0.025966\text{ m}^2\)} & \textbf{\(0.025966\text{ m}^2\)} &
+\textbf{\(3.85 \times 10^{-5}\,\%\)} & \textbf{PASS} \\
+\textbf{Erreur de débit injecté} & \(< 1.0\,\%\) & Conservation &
+\textbf{\(0.353\,\%\)} & \textbf{\(0.353\,\%\)} & \(< 10^{-4}\,\%\) &
+\textbf{PASS} \\
+\textbf{Position \(Y_c(0.5\text{s})\)} & Descente sous gravité &
+Trajectoire & \textbf{\(0.7761\text{ m}\)} &
+\textbf{\(0.7761\text{ m}\)} & \textbf{\(1.93 \times 10^{-4}\,\%\)} &
+\textbf{PASS} \\
+\textbf{Vitesse maximale \(u_{\max}\)} & Accélération gravitaire &
+Dynamique & \textbf{\(1.1360\text{ m/s}\)} &
+\textbf{\(1.1360\text{ m/s}\)} & \textbf{\(3.08 \times 10^{-3}\,\%\)} &
+\textbf{PASS} \\
+\textbf{Divergence résiduelle max} & \(< 0.1\text{ s}^{-1}\) &
+Solénoïdal & \textbf{\(2.80 \times 10^{-2}\text{ s}^{-1}\)} &
+\textbf{\(2.92 \times 10^{-2}\text{ s}^{-1}\)} & Conforme &
+\textbf{PASS} \\
+\end{longtable}
+}
+
+\begin{figure}
+\centering
+\pandocbounded{\includegraphics[keepaspectratio,alt={Flambement de Jet
+Visqueux Cas 3.3 Fluids 2021 Dual C++ vs
+Fortran}]{figures/fig_cas3_3_viscous_jet_dual.png}}
+\caption{Flambement de Jet Visqueux Cas 3.3 Fluids 2021 Dual C++ vs
+Fortran}
+\end{figure}
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
 \subsection{3. Chapitre 4 : Fiches de Validation Monophasique Isotherme
 Laminaire}\label{chapitre-4-fiches-de-validation-monophasique-isotherme-laminaire}
 
@@ -1469,3 +1729,33 @@ Figure 5b de l'article. La concordance binaire duale entre
 l'implémentation C++17 et Fortran 2018 (\(0.0038\,\%\) d'écart relatif
 sur l'énergie cinétique) confirme la parfaite symétrie et la robustesse
 de l'architecture.
+
+\begin{center}\rule{0.5\linewidth}{0.5pt}\end{center}
+
+\subsubsection{7.14. Cas 3.3 (Fluids 2021) : Analyse Théorique du
+Flambement et Préservation du Débit
+Massique}\label{cas-3.3-fluids-2021-analyse-thuxe9orique-du-flambement-et-pruxe9servation-du-duxe9bit-massique}
+
+\paragraph{\texorpdfstring{Évacuation Compensatoire et Incompressibilité
+sous Ratios de Viscosité Extrêmes
+(\(2.7 \times 10^5\))}{Évacuation Compensatoire et Incompressibilité sous Ratios de Viscosité Extrêmes (2.7 \textbackslash times 10\^{}5)}}\label{uxe9vacuation-compensatoire-et-incompressibilituxe9-sous-ratios-de-viscosituxe9-extruxeames-2.7-times-105}
+
+L'injection d'un fluide très dense et visqueux
+(\(\mu_2 = 500\text{ Pa}\cdot\text{s}\)) dans une cavité fermée sans
+évent pose un problème classique de surpression globale incompatible
+avec la formulation incompressible de Navier-Stokes. L'implémentation de
+la vitesse d'évacuation gazeuse compensatoire :
+\[v_{\text{out}} = V_0 \frac{D}{L - D}\] assure la satisfaction exacte
+de la condition de compatibilité discrète
+\(\oint_{\partial\Omega} \mathbf{u} \cdot \mathbf{n} = 0\). Grâce au
+Lagrangien Augmenté (\(r_{al} = 10^4\)), la divergence maximale reste
+confinée à \(\le 2.92 \times 10^{-2}\text{ s}^{-1}\) tout au long des
+1000 pas de temps de l'injection, sans aucun signe d'instabilité ou de
+blocage du solveur de Krylov BiCGSTAB(2). Le débit massique théorique
+injecté est préservé à \textbf{\(99.65\,\%\)} (erreur inférieure à
+\(0.353\,\%\)), et l'écart dual entre C++17 et Fortran 2018 est
+inférieur à \(4 \times 10^{-5}\,\%\), validant la fidélité académique du
+code pour les écoulements de fluides complexes et les jets capillaires
+visqueux.
+
+\end{document}

@@ -15,6 +15,12 @@ module module_config
      real(dp) :: u = 0.0_dp
      ! Déclaration de variable locale / paramètre de calcul
      real(dp) :: v = 0.0_dp
+     ! Profil spécifique pour la frontière ("UNIFORM", "PARABOLIC", "JET_INLET")
+     character(len=32) :: profile = "UNIFORM"
+     ! Largeur de l'injecteur pour profil JET_INLET [m] (Cas 3.3 Fluids 2021)
+     real(dp) :: jet_width = 0.08_dp
+     ! Position centrale de l'injecteur selon X [m]
+     real(dp) :: jet_center = 0.5_dp
      ! Déclaration de variable locale / paramètre de calcul
      integer  :: thermal_type = THERMAL_NEUMANN
      ! Déclaration de variable locale / paramètre de calcul
@@ -102,6 +108,8 @@ module module_config
      real(dp) :: ic_pert_amp = 0.05_dp, ic_pert_k = 1.0_dp
      ! Déclaration de l'épaisseur initiale de nappe liquide (Cas 3.2 Fluids 2021)
      real(dp) :: ic_thickness = 0.0003_dp
+     ! Déclaration de la largeur initiale de jet liquide (Cas 3.3 Fluids 2021)
+     real(dp) :: ic_jet_width = 0.08_dp
 
      ! Solvers
      integer  :: solver_type = SOLVER_AUGMENTED_LAGRANGIAN
@@ -177,6 +185,12 @@ contains
     call json_get_real(buf, trim(prefix) // ".v", bc%v, 0.0_dp)
     ! Appel de sous-programme modulaire
     call json_get_real(buf, trim(prefix) // ".v_val", bc%v, bc%v)
+    ! Lecture du profil de frontière (Cas 3.3 Fluids 2021)
+    call json_get_string(buf, trim(prefix) // ".profile", bc%profile, "UNIFORM")
+    ! Lecture de la largeur de l'injecteur
+    call json_get_real(buf, trim(prefix) // ".jet_width", bc%jet_width, 0.08_dp)
+    ! Lecture du centre de l'injecteur
+    call json_get_real(buf, trim(prefix) // ".jet_center", bc%jet_center, 0.5_dp)
 
     ! Appel de sous-programme modulaire
     call json_get_string(buf, trim(prefix) // ".T_type", ttype_str, "NEUMANN")
@@ -367,6 +381,10 @@ contains
     else if (trim(str_val) == "LIQUID_SHEET") then
        ! Affectation et calcul numérique
        cfg%ic_type = IC_LIQUID_SHEET
+    ! Branche conditionnelle alternative pour jet liquide visqueux (Cas 3.3 Fluids 2021)
+    else if (trim(str_val) == "VISCOUS_JET" .or. trim(str_val) == "JET_BUCKLING") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_VISCOUS_JET
     ! Branche conditionnelle alternative
     else if (trim(str_val) == "LAPLACIAN_TEST") then
        ! Affectation et calcul numérique
@@ -401,6 +419,8 @@ contains
     call json_get_real(buf, "initial_condition.pert_k", cfg%ic_pert_k, 1.0_dp)
     ! Lecture de l'épaisseur de nappe liquide (Cas 3.2 Fluids 2021)
     call json_get_real(buf, "initial_condition.thickness", cfg%ic_thickness, 0.0003_dp)
+    ! Lecture de la largeur de jet liquide (Cas 3.3 Fluids 2021)
+    call json_get_real(buf, "initial_condition.jet_width", cfg%ic_jet_width, 0.08_dp)
 
     ! Solver
     call json_get_string(buf, "solver.type", str_val, "AUGMENTED_LAGRANGIAN")

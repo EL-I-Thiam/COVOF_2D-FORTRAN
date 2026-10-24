@@ -46,7 +46,7 @@ contains
     ! Déclaration de variable locale / paramètre de calcul
     integer :: i, j, nx, ny
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: x, y, dist, eps, int_y
+    real(dp) :: x, y, dist, eps, int_y, x_c_jet, half_w_jet, stub_h_jet
 
     ! Affectation et calcul numérique
     nx = mesh%nx_local
@@ -138,6 +138,25 @@ contains
              else
                 fields%C(i, j) = 0.5_dp + dist / (2.0_dp * eps) + &
                      (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+             end if
+
+          case (IC_VISCOUS_JET)
+             ! Jet liquide visqueux injecté (Cas 3.3 de l'article Fluids 2021)
+             if (cfg%ic_center_x > 0.0_dp) then
+                x_c_jet = cfg%ic_center_x
+             else
+                x_c_jet = 0.5_dp * mesh%lx
+             end if
+             if (cfg%ic_jet_width > 0.0_dp) then
+                half_w_jet = 0.5_dp * cfg%ic_jet_width
+             else
+                half_w_jet = 0.04_dp
+             end if
+             stub_h_jet = 2.0_dp * mesh%dy
+             if (y >= mesh%ly - stub_h_jet .and. abs(x - x_c_jet) <= half_w_jet) then
+                fields%C(i, j) = 0.0_dp ! Amorce liquide (fluide 2)
+             else
+                fields%C(i, j) = 1.0_dp ! Cavité de gaz (fluide 1)
              end if
 
           case (IC_VORTEX_SHEAR)
