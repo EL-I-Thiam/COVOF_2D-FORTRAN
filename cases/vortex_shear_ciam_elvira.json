@@ -61,15 +61,15 @@
   },
   "solver": {
     "type": "AUGMENTED_LAGRANGIAN",
-    "linear_solver": "BICGSTAB2",
-    "tolerance": 1e-07,
-    "max_iterations": 500,
-    "augmented_lagrangian_r": 500.0,
-    "uzawa_iterations": 1
+    "tol": 1e-07,
+    "max_iter": 500,
+    "r_al": 500.0
   },
   "output": {
     "output_dir": "output_vortex_shear_ciam_elvira",
+    "case_name": "vortex",
     "vtk_interval": 120,
-    "write_ascii": true
+    "log_interval": 100,
+    "write_csv_history": true
   }
 }

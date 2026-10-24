@@ -24,17 +24,33 @@
     "adaptive_dt": false
   },
   "boundary_conditions": {
-    "left":   { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
-    "right":  { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
-    "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
-    "top":    { "type": "DIRICHLET", "u": 1.0, "v": 0.0 }
+    "left": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "right": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "bottom": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "top": {
+      "type": "DIRICHLET",
+      "u": 1.0,
+      "v": 0.0
+    }
   },
   "initial_condition": {
     "type": "SINGLE_PHASE"
   },
   "solver": {
     "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1.0e-5,
+    "tol": 1e-05,
     "max_iter": 200,
     "r_al": 100.0,
     "uzawa_iter": 1,

@@ -30,21 +30,43 @@
     "adaptive_dt": false
   },
   "boundary_conditions": {
-    "left":   { "type": "DIRICHLET", "u": 0.0, "v": 0.0, "T_type": "DIRICHLET", "T": 1.0 },
-    "right":  { "type": "DIRICHLET", "u": 0.0, "v": 0.0, "T_type": "DIRICHLET", "T": 0.0 },
-    "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0, "T_type": "NEUMANN" },
-    "top":    { "type": "DIRICHLET", "u": 0.0, "v": 0.0, "T_type": "NEUMANN" }
+    "left": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0,
+      "T_type": "DIRICHLET",
+      "T": 1.0
+    },
+    "right": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0,
+      "T_type": "DIRICHLET",
+      "T": 0.0
+    },
+    "bottom": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0,
+      "T_type": "NEUMANN"
+    },
+    "top": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0,
+      "T_type": "NEUMANN"
+    }
   },
   "solver": {
     "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1e-7,
+    "tol": 1e-07,
     "max_iter": 400,
     "r_al": 100.0,
     "uzawa_iter": 1,
     "use_precond": true,
     "precond_type": "JACOBI"
   },
-  "steady_state_tol": 1e-5,
+  "steady_state_tol": 1e-05,
   "output": {
     "output_dir": "output_natural_convection_ra1e4",
     "case_name": "nat_conv_ra1e4",

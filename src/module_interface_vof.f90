@@ -556,7 +556,7 @@ contains
                 r = 0.0_dp
              end if
              phi = evaluate_limiter(cfg%tvd_limiter, r, c_l, c_u, c_r)
-             flux_x(i, j) = u_face * (c_l + 0.5_dp * phi * (1.0_dp - u_face * dt / dx) * dc_loc)
+             flux_x(i, j) = u_face * (c_l + 0.5_dp * phi * (1.0_dp - min(1.0_dp, abs(u_face) * dt / dx)) * dc_loc)
           else
              i_down = min(nx + 1, i + 1)
              c_u = fields%C(i_down, j)
@@ -568,7 +568,7 @@ contains
                 r = 0.0_dp
              end if
              phi = evaluate_limiter(cfg%tvd_limiter, r, c_r, c_u, c_l)
-             flux_x(i, j) = u_face * (c_r - 0.5_dp * phi * (1.0_dp + u_face * dt / dx) * dc_loc)
+             flux_x(i, j) = u_face * (c_r - 0.5_dp * phi * (1.0_dp - min(1.0_dp, abs(u_face) * dt / dx)) * dc_loc)
           end if
        end do
     end do
@@ -591,7 +591,7 @@ contains
                 r = 0.0_dp
              end if
              phi = evaluate_limiter(cfg%tvd_limiter, r, c_b, c_u, c_t)
-             flux_y(i, j) = v_face * (c_b + 0.5_dp * phi * (1.0_dp - v_face * dt / dy) * dc_loc)
+             flux_y(i, j) = v_face * (c_b + 0.5_dp * phi * (1.0_dp - min(1.0_dp, abs(v_face) * dt / dy)) * dc_loc)
           else
              j_down = min(ny + 1, j + 1)
              c_u = fields%C(i, j_down)
@@ -603,7 +603,7 @@ contains
                 r = 0.0_dp
              end if
              phi = evaluate_limiter(cfg%tvd_limiter, r, c_t, c_u, c_b)
-             flux_y(i, j) = v_face * (c_t - 0.5_dp * phi * (1.0_dp + v_face * dt / dy) * dc_loc)
+             flux_y(i, j) = v_face * (c_t - 0.5_dp * phi * (1.0_dp - min(1.0_dp, abs(v_face) * dt / dy)) * dc_loc)
           end if
        end do
     end do

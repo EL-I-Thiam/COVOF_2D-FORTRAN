@@ -176,7 +176,7 @@ def verify_dense_cylinder(csv_path="output_free_fall_dense_cylinder/free_fall_de
     # (b) Position Yc(t)
     ax1 = axes[0, 1]
     ax1.plot(t, m['yc_num'], 'b-', linewidth=2.0, label=f'{label} (50x100)')
-    ax1.plot(t, m['yc_exact'], 'r--', linewidth=2.0, label=r'Solution analytique $Y_c = Y0 - \frac{1}{2}gt^2$')
+    ax1.plot(t, m['yc_exact'], 'r--', linewidth=2.0, label=r'Solution analytique $Y_c = Y_0 - \frac{1}{2}gt^2$')
     ax1.set_xlabel('Temps [s]', fontsize=11, fontweight='bold')
     ax1.set_ylabel('Position $Y_c$ [m]', fontsize=11, fontweight='bold')
     ax1.set_title('(b) Trajectoire du centre de masse', fontsize=12, fontweight='bold')
@@ -236,5 +236,5 @@ def verify_dense_cylinder(csv_path="output_free_fall_dense_cylinder/free_fall_de
 
 if __name__ == "__main__":
     csv_file = sys.argv[1] if len(sys.argv) > 1 else "output_free_fall_dense_cylinder/free_fall_dense_cylinder_history.csv"
-    lbl = sys.argv[2] if len(sys.argv) > 2 else "COVOF 2D Fortran"
+    lbl = sys.argv[2] if len(sys.argv) > 2 else "COVOF 2D C++"
     verify_dense_cylinder(csv_path=csv_file, label=lbl)

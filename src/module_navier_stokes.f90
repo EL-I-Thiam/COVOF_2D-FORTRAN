@@ -395,10 +395,11 @@ contains
     ! Appel de sous-programme modulaire
     call this%unpack_vector(mesh, cfg, x, tf, .true.)
 
-    ! Précalcul de la divergence sur chaque cellule locale + halo
-    do j = 0, mesh%ny_local + 1
+    ! Précalcul de la divergence sur chaque cellule locale + halo (dans les bornes allouées 0:nx+1, 0:ny+1)
+    div_cell = 0.0_dp
+    do j = 0, mesh%ny_local
       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
-      do i = 0, mesh%nx_local + 1
+      do i = 0, mesh%nx_local
         ! Affectation et calcul numérique
         div_cell(i, j) = (tf%u(i + 1, j) - tf%u(i, j)) / dx + &
                          (tf%v(i, j + 1) - tf%v(i, j)) / dy

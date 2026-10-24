@@ -63,7 +63,7 @@
   },
   "solver": {
     "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1.0e-5,
+    "tol": 1e-05,
     "max_iter": 300,
     "r_al": 100.0,
     "uzawa_iter": 1,

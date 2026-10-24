@@ -14,7 +14,7 @@
     "gy": -9.81,
     "fluid1": {
       "rho": 1.1768,
-      "mu": 1.85e-3
+      "mu": 0.00185
     },
     "fluid2": {
       "rho": 1800.0,
@@ -22,16 +22,28 @@
     }
   },
   "time": {
-    "dt": 5.0e-04,
-    "t_final": 0.50,
+    "dt": 0.0005,
+    "t_final": 0.5,
     "cfl_max": 0.5,
     "adaptive_dt": false
   },
   "boundary_conditions": {
-    "left":   { "type": "FREE_SLIP", "u": 0.0, "v": 0.0 },
-    "right":  { "type": "FREE_SLIP", "u": 0.0, "v": 0.0 },
-    "bottom": { "type": "FREE_SLIP", "u": 0.0, "v": 0.0 },
-    "top":    {
+    "left": {
+      "type": "FREE_SLIP",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "right": {
+      "type": "FREE_SLIP",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "bottom": {
+      "type": "FREE_SLIP",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "top": {
       "type": "DIRICHLET",
       "profile": "JET_INLET",
       "jet_width": 0.08,
@@ -47,7 +59,7 @@
   },
   "solver": {
     "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1.0e-6,
+    "tol": 1e-06,
     "max_iter": 500,
     "r_al": 10000.0,
     "uzawa_iter": 1,
@@ -55,8 +67,10 @@
     "precond_type": "JACOBI"
   },
   "vof": {
-    "reconstruction": "PLIC",
-    "advection": "CIAM"
+    "reconstruction_method": "PLIC",
+    "advection_method": "VOF_TVD",
+    "tvd_limiter": "SUPERBEE",
+    "cfl_vof": 0.5
   },
   "output": {
     "output_dir": "output_viscous_jet_case1",

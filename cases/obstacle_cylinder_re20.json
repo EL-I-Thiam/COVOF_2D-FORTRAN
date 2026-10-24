@@ -31,21 +31,31 @@
     "adaptive_dt": false
   },
   "boundary_conditions": {
-    "left":   { "type": "DIRICHLET", "u": 1.0, "v": 0.0 },
-    "right":  { "type": "NEUMANN" },
-    "bottom": { "type": "FREE_SLIP" },
-    "top":    { "type": "FREE_SLIP" }
+    "left": {
+      "type": "DIRICHLET",
+      "u": 1.0,
+      "v": 0.0
+    },
+    "right": {
+      "type": "NEUMANN"
+    },
+    "bottom": {
+      "type": "FREE_SLIP"
+    },
+    "top": {
+      "type": "FREE_SLIP"
+    }
   },
   "solver": {
     "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1e-6,
+    "tol": 1e-06,
     "max_iter": 400,
     "r_al": 100.0,
     "uzawa_iter": 1,
     "use_precond": true,
     "precond_type": "JACOBI"
   },
-  "steady_state_tol": 1e-4,
+  "steady_state_tol": 0.0001,
   "output": {
     "output_dir": "output_cylinder_re20",
     "case_name": "cylinder_re20",

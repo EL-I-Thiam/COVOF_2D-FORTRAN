@@ -25,17 +25,33 @@
     "adaptive_dt": false
   },
   "boundary_conditions": {
-    "left":   { "type": "PERIODIC", "u": 0.0, "v": 0.0 },
-    "right":  { "type": "PERIODIC", "u": 0.0, "v": 0.0 },
-    "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
-    "top":    { "type": "DIRICHLET", "u": 0.0, "v": 0.0 }
+    "left": {
+      "type": "PERIODIC",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "right": {
+      "type": "PERIODIC",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "bottom": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "top": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    }
   },
   "initial_condition": {
     "type": "SINGLE_PHASE"
   },
   "solver": {
     "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1.0e-7,
+    "tol": 1e-07,
     "max_iter": 500,
     "r_al": 0.0,
     "uzawa_iter": 1,
@@ -49,5 +65,6 @@
     "vtk_interval": 20,
     "log_interval": 10,
     "write_csv_history": true
-  }
+  },
+  "steady_state_tol": 0.0
 }

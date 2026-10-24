@@ -1,6 +1,6 @@
 {
   "mode": "NAVIER_STOKES",
-  "steady_state_tol": 1.0e-7,
+  "steady_state_tol": 1e-07,
   "mesh": {
     "nx": 60,
     "ny": 30,
@@ -26,17 +26,33 @@
     "adaptive_dt": false
   },
   "boundary_conditions": {
-    "left":   { "type": "PERIODIC", "u": 0.0, "v": 0.0 },
-    "right":  { "type": "PERIODIC", "u": 0.0, "v": 0.0 },
-    "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
-    "top":    { "type": "DIRICHLET", "u": 0.0, "v": 0.0 }
+    "left": {
+      "type": "PERIODIC",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "right": {
+      "type": "PERIODIC",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "bottom": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "top": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    }
   },
   "initial_condition": {
     "type": "SINGLE_PHASE"
   },
   "solver": {
     "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1.0e-7,
+    "tol": 1e-07,
     "max_iter": 500,
     "r_al": 100.0,
     "uzawa_iter": 1,

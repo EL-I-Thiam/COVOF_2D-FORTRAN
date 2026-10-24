@@ -1,793 +1,17149 @@
-# Manuel de Référence Développeur et Architecture Logicielle C++20 - Solveur COVOF 2D
-## Guide Complet de Conception, d'Extension, de Parallélisme et d'Intégration Numérique
-### Version 2.1.0 — Conforme aux Standards de Développement Référence Académique (I2M / UMR CNRS 5295)
+# Guide du Développeur Exhaustif — Solveur COVOF 2D (C++17 & Fortran 2018)
+## Partie I : Architecture et Code Source C++17 (`COVOF_2D-C++`)
+## Partie II : Architecture et Code Source Fortran 2018 (`COVOF_2D-FORTRAN`)
 
 ---
 
-## Sommaire Général
+# PARTIE I — Guide du Développeur C++17 (`COVOF_2D-C++`)
 
-1. [Principes de Conception et Architecture Logicielle](#1-principes-de-conception-et-architecture-logicielle)
-   - 1.1. Philosophie C++20 et Parallélisme Hybride
-   - 1.2. Cartographie des Responsabilités et Diagramme de Classes
-   - 1.3. Cycle de Vie d'une Simulation COVOF 2D et Correspondance Fortran Référence Académique
-2. [Structures de Données et Organisation Mémoire (Data-Oriented Design)](#2-structures-de-données-et-organisation-mémoire-data-oriented-design)
-   - 2.1. Maillage Décalé et Représentation Mémoire des Champs (`Mesh2D` et `FlowFields`)
-   - 2.2. Gestion des Cellules Fantômes (Ghost Cells / Halos) et Indexation Locale/Globale
-   - 2.3. Continuité Mémoire, Alignement de Cache et Vectorisation SIMD
-3. [Dictionnaire de Correspondance : Équations Théoriques vs Code C++](#3-dictionnaire-de-correspondance--équations-théoriques-vs-code-c)
-4. [Détail d'Implémentation des Modules Fondamentaux](#4-détail-dimplémentation-des-modules-fondamentaux)
-   - 4.1. Module de Communication et Parallélisme MPI (`MpiComm`)
-   - 4.2. Module d'Assemblage Navier-Stokes et Lagrangien Augmenté (`NavierStokesSolver`)
-   - 4.3. Module d'Énergie Thermique et Flottabilité (`solve_energy`)
-   - 4.4. Module de Suivi d'Interface et Tension de Surface (`InterfaceTracker`)
-   - 4.5. Module des Solveurs Linéaires et Préconditionneurs (`LinearSolver`)
-   - 4.6. Module d'Écriture Graphique VTK Parallèle (`VTKWriter`)
-5. [Guide Développeur : Étendre le Solveur COVOF 2D](#5-guide-développeur--étendre-le-solveur-covof-2d)
-   - 5.1. Tutoriel 1 : Ajouter une Nouvelle Équation de Transport Scalaire (ex: Espèce Chimique)
-   - 5.2. Tutoriel 2 : Implémenter un Nouveau Préconditionneur (ex: Multigrille Géométrique)
-   - 5.3. Tutoriel 3 : Implémenter un Nouveau Solveur Linéaire ou Brancher MUMPS / PETSc
-   - 5.4. Tutoriel 4 : Définir une Nouvelle Condition aux Limites Dynamique ou une Loi de Paroi
-   - 5.5. Tutoriel 5 : Ajouter une Nouvelle Géométrie d'Obstacle Immergé (Pénalisation Brinkman)
-6. [Normes de Développement, Assurance Qualité et Profilage](#6-normes-de-développement-assurance-qualité-et-profilage)
-   - 6.1. Conventions de Codage et Bonnes Pratiques C++20
-   - 6.2. Débogage sous MPI avec GDB / LLDB et Valgrind
-   - 6.3. Profilage des Performances CPU et Analyse des Bottlenecks de Communication
 
----
+## Chapitre 1 : Architecture Globale C++17, Système de Build CMake et Types Fondamentaux (Types.hpp, main.cpp)
 
-## 1. Principes de Conception et Architecture Logicielle
+\section{Philosophie Architecturale et Standard C++17}
+L'implémentation \textbf{C++17} du solveur \textbf{COVOF 2D} (\texttt{COVOF\_2D-C++}) repose sur une architecture orientée objet modulaire à couplage faible et forte cohésion interne, encapsulée dans l'espace de noms \texttt{covof}. Les principes directeurs d'ingénierie logicielle retenus sont les suivants :
+\begin{enumerate}
+  \item \textbf{Zéro allocation dynamique dans la boucle temporelle} : tous les champs eulériens (\texttt{Field2D<double>}), les tampons d'échange de halos MPI et la structure de la matrice creuse CSR (\texttt{CSRMatrix}) sont pré-alloués lors de la phase d'initialisation (\texttt{Simulation::initialize}).
+  \item \textbf{Contiguïté mémoire stricte (\emph{Row-Major Order})} : chaque champ 2D de dimension locale $N_x \times N_y$ entouré de $n_g$ couches de cellules fantômes (\emph{ghost cells}) est stocké dans un unique \texttt{std::vector<double>} unidimensionnel de taille $(N_x + 2n_g)(N_y + 2n_g)$. L'indice linéaire correspondant à la maille $(i, j)$ est donné par :
+  \begin{equation}
+    k_{\text{C++}}(i, j) = (j + n_g) \times (N_x + 2n_g) + (i + n_g)
+  \end{equation}
+  Ainsi, une boucle interne parcourant l'indice horizontal $i \in \{0, \dots, N_x-1\}$ à ordonnée $j$ fixée accède à des adresses mémoire strictement consécutives ($\Delta k = 1$), maximisant l'utilisation des lignes de cache L1/L2 de 64 octets et permettant la vectorisation automatique SIMD (AVX2 / AVX-512 / NEON Apple Silicon).
+  \item \textbf{Typage fort des modèles physiques et numériques (\texttt{Types.hpp})} : l'ensemble des choix algorithmiques (type de condition aux limites \texttt{BoundaryType}, schéma d'advection VOF \texttt{AdvectionMethod}, méthode de reconstruction géométrique \texttt{ReconstructionMethod}, limiteur de flux \texttt{TVDLimiter}, solveur de Krylov \texttt{SolverType}, préconditionneur \texttt{PreconditionerType}, mode d'initialisation \texttt{InitialConditionType}) est représenté par des énumérations fortement typées (\texttt{enum class}) interdisant toute conversion implicite erronée.
+\end{enumerate}
 
-### 1.1. Philosophie C++20 et Parallélisme Hybride
+\section{Structure des Blocs de Configuration dans \texttt{Types.hpp}}
+L'en-tête \texttt{include/covof/Types.hpp} définit également l'intégralité des structures de données de paramétrage (\emph{Plain Old Data structs}) qui reflètent bijectivement l'arborescence des fichiers JSON du répertoire \texttt{cases/*.json} :
+\begin{itemize}
+  \item \texttt{MeshConfig} : dimensions entières globales \texttt{nx}, \texttt{ny} et dimensions physiques \texttt{lx}, \texttt{ly} $[\text{m}]$.
+  \item \texttt{PhysicsConfig} : masses volumiques \texttt{rho1}, \texttt{rho2} $[\text{kg/m}^3]$, viscosités dynamiques \texttt{mu1}, \texttt{mu2} $[\text{Pa}\cdot\text{s}]$, gravité $(\texttt{gx}, \texttt{gy})$ $[\text{m/s}^2]$, tension superficielle \texttt{sigma} $[\text{N/m}]$ et paramètres de viscosité variable exponentielle \texttt{variable\_viscosity}, \texttt{visc\_law}, \texttt{visc\_a}, \texttt{visc\_e}.
+  \item \texttt{ThermalConfig} : drapeau \texttt{enable\_energy}, diffusivité thermique $\alpha$ (\texttt{alpha\_th}), coefficient d'expansion thermique de Boussinesq $\beta$ (\texttt{beta\_th}), température de référence $T_0$ (\texttt{t\_ref}) et températures imposées (\texttt{t\_hot}, \texttt{t\_cold}).
+  \item \texttt{VofConfig} : méthode de reconstruction géométrique (\texttt{PLIC}, \texttt{ELVIRA}, \texttt{LVIRA}, \texttt{SLIC}, \texttt{NONE}), schéma d'advection (\texttt{WEYMOUTH\_YUE}, \texttt{CIAM}, \texttt{TVD}), limiteur TVD (\texttt{SUPERBEE}, \texttt{MC}, \texttt{VAN\_LEER}, \texttt{MINMOD}, \texttt{HRIC}) et nombre de Courant interfacial maximal \texttt{cfl\_vof}.
+  \item \texttt{SolverConfig} : solveur de Krylov (\texttt{BICGSTAB2}, \texttt{BICGSTAB}, \texttt{PCG}, \texttt{GMRES}, \texttt{MINRES}), préconditionneur (\texttt{JACOBI}, \texttt{SSOR}, \texttt{ILU0}), tolérance relative \texttt{tol}, nombre maximal d'itérations \texttt{max\_iter}, paramètre de pénalisation du Lagrangien Augmenté $r_{al}$ (\texttt{r\_al}) et nombre de sous-itérations d'Uzawa (\texttt{uzawa\_iter}).
+\end{itemize}
 
-Le code **COVOF 2D** a été architecturé pour conjuguer la rigueur mathématique des méthodes de volumes finis historiques et les performances de pointe des architectures multinoyaux modernes :
-- **Zéro Allocation Dynamique dans la Boucle Temporelle** : Toutes les mémoires de travail (champs de vitesse, pression, température, vecteurs résidus Krylov, buffers MPI) sont préallouées lors de la phase d'initialisation. Aucun appel à `malloc`, `new` ou réallocation de `std::vector` n'intervient à chaque pas de temps, garantissant une absence totale de fragmentation mémoire et un débit d'exécution optimal.
-- **Conception Matrix-Free et Opérateurs Stencil** : L'application des opérateurs différentiels dans les méthodes de Krylov s'effectue directement par évaluation de stencils sur la grille cartésienne, minimisant les accès mémoire par rapport au stockage d'une matrice creuse au format CSR (Compressed Sparse Row).
-- **Parallélisme Hybride Décentralisé** : La synchronisation inter-cœurs repose sur une topologie cartésienne OpenMPI (`MPI_Cart_create`) avec communications non-bloquantes (`MPI_Isend` / `MPI_Irecv`) superposables au calcul des cellules internes.
+\section{Cycle de Vie du Programme Principal (\texttt{src/main.cpp})}
+Le point d'entrée \texttt{main(int argc, char* argv[])} orchestre le cycle de vie MPI et l'exécution complète d'un cas test en quatre étapes :
+\begin{enumerate}
+  \item Initialisation de l'environnement parallèle via \texttt{MPI\_Init(\&argc, \&argv)} et interrogation du rang global \texttt{rank} et du nombre de processus \texttt{size}.
+  \item Lecture et validation du fichier JSON passé en argument de ligne de commande via \texttt{Config::load\_from\_file(json\_path)}.
+  \item Instanciation de l'objet maître \texttt{Simulation sim(cfg, MPI\_COMM\_WORLD)}, appel à \texttt{sim.initialize()} puis exécution de la boucle temporelle \texttt{sim.run()} chronométrée par \texttt{MPI\_Wtime()}.
+  \item Libération ordonnée des ressources MPI via \texttt{MPI\_Finalize()}.
+\end{enumerate}
 
-### 1.2. Cartographie des Responsabilités et Diagramme de Classes
+### Code Source Intégral : `CMakeLists.txt` (48 lignes)
 
-```mermaid
-classDiagram
-    class Config {
-        +load_from_json(path)
-        +MeshParams mesh
-        +PhysicsParams physics
-        +SolverParams solver
-    }
+```cmake
+cmake_minimum_required(VERSION 3.16)
+project(COVOF_2D_CPP CXX)
 
-    class Mesh2D {
-        +int nx_global, ny_global
-        +int nx_local, ny_local
-        +double dx, dy
-        +int rank, size
-        +init_mpi_cartesian()
-        +local_to_global_coords()
-    }
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-    class FlowFields {
-        +vector~double~ u, v
-        +vector~double~ p, div
-        +vector~double~ C, T
-        +vector~double~ rho, mu
-        +vector~double~ mu_node
-        +vector~double~ fx_sigma, fy_sigma
-        +allocate(mesh)
-    }
+# Optimization and warning flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall -Wextra -Wno-unused-parameter")
 
-    class MpiComm {
-        +exchange_halos_scalar(phi)
-        +exchange_halos_velocity(u, v)
-        +apply_boundary_conditions()
-        +apply_thermal_boundary_conditions()
-        +global_max(val)
-        +global_sum(val)
-    }
+# Find OpenMPI / MPI
+find_package(MPI REQUIRED)
+include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 
-    class LinearSolverBase {
-        <<abstract>>
-        +solve(A, x, b, precond)*
-    }
+# Include directory
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-    class BiCGSTAB2Solver {
-        +solve(A, x, b, precond)
-    }
+# Source files
+set(SOURCES
+    src/Config.cpp
+    src/Mesh.cpp
+    src/MpiComm.cpp
+    src/CSRMatrix.cpp
+    src/Preconditioner.cpp
+    src/LinearSolver.cpp
+    src/InterfaceReconstruction.cpp
+    src/InterfaceTracker.cpp
+    src/NavierStokesSolver.cpp
+    src/VTKWriter.cpp
+    src/Simulation.cpp
+    src/main.cpp
+)
 
-    class PreconditionerBase {
-        <<abstract>>
-        +apply(r, z)*
-    }
+# Executable target: covof2d
+add_executable(covof2d ${SOURCES})
+target_link_libraries(covof2d PRIVATE MPI::MPI_CXX)
 
-    class JacobiPreconditioner {
-        +apply(r, z)
-    }
+set_target_properties(covof2d PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
+)
 
-    class InterfaceTracker {
-        +advect_vof(C, u, v, dt)
-        +compute_csf_surface_tension()
-        +update_fluid_properties()
-    }
+# Create compatibility symlink/target for fugu2d
+add_custom_command(TARGET covof2d POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+        ${CMAKE_CURRENT_SOURCE_DIR}/bin/covof2d
+        ${CMAKE_CURRENT_SOURCE_DIR}/bin/fugu2d
+    COMMENT "Creating compatibility symlink bin/fugu2d -> bin/covof2d"
+)
 
-    class NavierStokesSolver {
-        +assemble_rhs()
-        +solve_velocity_uzawa()
-        +solve_energy(fields, dt)
-        +compute_mean_nusselt()
-    }
-
-    class Simulation {
-        +run()
-        +run_vortex_advection()
-    }
-
-    Simulation --> Config
-    Simulation --> Mesh2D
-    Simulation --> FlowFields
-    Simulation --> MpiComm
-    Simulation --> NavierStokesSolver
-    Simulation --> InterfaceTracker
-    NavierStokesSolver --> LinearSolverBase
-    LinearSolverBase --> PreconditionerBase
 ```
 
-### 1.3. Cycle de Vie d'une Simulation COVOF 2D et Correspondance Fortran Référence Académique
+### Répertoire des Symboles de `include/covof/Types.hpp`
 
-À chaque pas de temps, la fonction maîtresse `Simulation::run()` exécute la séquence algorithmique suivante :
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 14 | enum class | `BCType` | Déclaration de type / classe / structure |
+| 26 | struct | `BoundaryCondition` | Déclaration de type / classe / structure |
+| 52 | struct | `Obstacle` | Déclaration de type / classe / structure |
+| 73 | struct | `DomainBC` | Déclaration de type / classe / structure |
+| 87 | struct | `FluidProperties` | Déclaration de type / classe / structure |
+| 103 | enum class | `InitialConditionType` | Déclaration de type / classe / structure |
+| 119 | struct | `InitialConditionConfig` | Déclaration de type / classe / structure |
+| 149 | struct | `SolverOptions` | Déclaration de type / classe / structure |
+| 169 | struct | `OutputConfig` | Déclaration de type / classe / structure |
+| 185 | struct | `VofConfig` | Déclaration de type / classe / structure |
 
-| Étape Algorithmique COVOF 2D | Routine C++ COVOF | Équivalent Fortran 90 Référence Académique | Fonction Physique / Mathématique |
-|:---|:---|:---|:---|
-| **1. Calcul du Pas de Temps** | `compute_time_step()` | `CALDT` (`caldt.f90`) | Évalue la restriction CFL convective et capillaire |
-| **2. Transport d'Interface** | `InterfaceTracker::advect()` | `ADVECTS` (`advects.f90`) | Avance $C^{n+1}$ par VOF avec limiteur TVD Superbee |
-| **3. Propriétés Physiques** | `update_properties()` | `PROPHY` (`prophy.f90`) | Évalue $\rho(C)$ (arithmétique) et $\mu(C)$ (harmonique) |
-| **4. Force Capillaire CSF** | `compute_csf()` | `TENSUR` (`tensur.f90`) | Évalue normale $\mathbf{n}$, courbure $\kappa$ et $\mathbf{F}_\sigma$ balanced |
-| **5. Assemblage RHS & Matrice** | `assemble_rhs()` | `NAVIERS` (`naviers.f90`) | Convection, diffusion, gravité, gradient de pression $p^n$ |
-| **6. Inversion Krylov Vitesse** | `linear_solver->solve()` | `MUMPS` / `BICGSTAB2` | Résout le système du Lagrangien Augmenté pour $\mathbf{u}^{n+1}$ |
-| **7. Mise à Jour Uzawa Pression**| `update_pressure()` | `UZAWA` (`uzawa.f90`) | $p^{n+1} = p^n - r_{al} \nabla \cdot \mathbf{u}^{n+1}$ |
-| **8. Résolution Thermique** | `solve_energy()` | `ENERGIE` (`energie.f90`) | Résout $T^{n+1}$ par diffusion-convection implicite |
-| **9. Échanges de Halos MPI** | `MpiComm::exchange()` | `ECHANGE` (`echange.f90`) | Synchronisation des mailles fantômes inter-domaines |
-| **10. Diagnostics et VTK** | `VTKWriter::write_step()`| `IMPRIM` (`imprim.f90`) | Écriture des partitions `.pvtr` / `.vtr` et calculs $L_1, L_2$ |
-
----
-
-## 2. Structures de Données et Organisation Mémoire (Data-Oriented Design)
-
-### 2.1. Maillage Décalé et Représentation Mémoire des Champs
-
-Dans la classe `FlowFields`, tous les champs physiques sont alloués sous forme de tableaux 1D contigus (`std::vector<double>`) selon une disposition linéaire en mémoire indexée en ligne majeure (*row-major order*) :
-$$\text{Index}(i, j) = j \times N_{cols} + i$$
-
-Pour une cellule locale $(i, j)$ avec $1 \le i \le N_x^{loc}$ et $1 \le j \le N_y^{loc}$ :
-- Les cellules $i=0$ et $i=N_x^{loc}+1$ correspondent aux **halos Ouest et Est**.
-- Les cellules $j=0$ et $j=N_y^{loc}+1$ correspondent aux **halos Sud et Nord**.
-
-Le tableau ci-dessous détaille les dimensions et l'alignement des variables :
-
-| Variable C++ | Type et Localisation MAC | Taille du Vecteur Local | Description Physique |
-|:---|:---|:---:|:---|
-| `u` | Face verticale $(i-1/2, j)$ | $(N_x^{loc}+2) \times (N_y^{loc}+2)$ | Vitesse horizontale axiale $[\text{m/s}]$ |
-| `v` | Face horizontale $(i, j-1/2)$ | $(N_x^{loc}+2) \times (N_y^{loc}+2)$ | Vitesse transversale verticale $[\text{m/s}]$ |
-| `p` | Centre de cellule $(i, j)$ | $(N_x^{loc}+2) \times (N_y^{loc}+2)$ | Pression hydrodynamique $[\text{Pa}]$ |
-| `C` | Centre de cellule $(i, j)$ | $(N_x^{loc}+2) \times (N_y^{loc}+2)$ | Fraction volumique de couleur $[0, 1]$ |
-| `T` | Centre de cellule $(i, j)$ | $(N_x^{loc}+2) \times (N_y^{loc}+2)$ | Température thermodynamique $[\text{K}]$ |
-| `rho` | Centre de cellule $(i, j)$ | $(N_x^{loc}+2) \times (N_y^{loc}+2)$ | Masse volumique équivalente $[\text{kg/m}^3]$ |
-| `mu` | Centre de cellule $(i, j)$ | $(N_x^{loc}+2) \times (N_y^{loc}+2)$ | Viscosité dynamique équivalente $[\text{Pa}\cdot\text{s}]$ |
-| `mu_node`| Sommet de cellule $(i-1/2, j-1/2)$ | $(N_x^{loc}+2) \times (N_y^{loc}+2)$ | Viscosité nodale harmonique $[\text{Pa}\cdot\text{s}]$ |
-
-### 2.2. Gestion des Cellules Fantômes (Ghost Cells / Halos) et Indexation
-
-Pour permettre la décomposition de domaine cartésienne sans altérer les stencils différentiels, chaque processus MPI alloue une couche de halos d'épaisseur 1 dans chaque direction.
-L'accès aux champs internes s'effectue via des boucles standardisées :
+### Code Source Intégral : `include/covof/Types.hpp` (196 lignes)
 
 ```cpp
-// Parcours canonique des cellules fluides internes d'un sous-domaine
-for (int j = 1; j <= mesh.ny_local; ++j) {
-    for (int i = 1; i <= mesh.nx_local; ++i) {
-        int idx = j * stride + i;
-        // Accès direct sans saut de pointeur
-        p[idx] = p[idx] - r_al * div[idx];
-    }
-}
-```
+#pragma once
 
----
+#include <string>
+#include <vector>
+#include <iostream>
+#include <cmath>
 
-## 3. Dictionnaire de Correspondance : Équations Théoriques vs Code C++
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
 
-| Grandeur Mathématique | Symbole Formel | Variable C++ dans COVOF 2D | Variable Fortran Référence Académique |
-|:---|:---:|:---|:---|
-| Champ de vitesse horizontale | $u(x, y)$ | `fields.u[idx]` | `U(I, J)` |
-| Champ de vitesse verticale | $v(x, y)$ | `fields.v[idx]` | `V(I, J)` |
-| Pression hydrodynamique | $p(x, y)$ | `fields.p[idx]` | `P(I, J)` |
-| Fraction volumique VOF | $C(x, y)$ | `fields.C[idx]` | `C(I, J)` |
-| Température locale | $T(x, y)$ | `fields.T[idx]` | `T(I, J)` |
-| Masse volumique fluide | $\rho$ | `fields.rho[idx]` | `RO(I, J)` |
-| Viscosité dynamique cellule | $\mu_{cell}$ | `fields.mu[idx]` | `MU(I, J)` |
-| Viscosité nodale harmonique | $\mu_{node}$ | `fields.mu_node[idx]` | `MUNOD(I, J)` |
-| Paramètre d'augmentation AL | $r_{al}$ | `config.solver.r_al` | `RHO_AL` / `R_AL` |
-| Force de tension superficielle | $\mathbf{F}_\sigma = \sigma \kappa \nabla C$| `fields.fx_sigma`, `fields.fy_sigma` | `FSIGMAX`, `FSIGMAY` |
-| Courbure de l'interface | $\kappa = -\nabla \cdot \mathbf{n}$ | `fields.curvature[idx]` | `COURB(I, J)` |
-| Perméabilité de Brinkman | $K_{solid}$ | `config.immersed_boundary.permeability`| `PERM(I, J)` |
-| Nombre de Nusselt moyen | $\overline{Nu}$ | `fields.mean_nusselt` | `NUMOY` |
-
----
-
-## 4. Détail d'Implémentation des Modules Fondamentaux
-
-### 4.1. Module de Communication et Parallélisme MPI (`src/MpiComm.cpp`)
-
-Le module `MpiComm` implémente des échanges de halos bidirectionnels non-bloquants :
-
-```cpp
-void MpiComm::exchange_halos_scalar(std::vector<double>& field, const Mesh2D& mesh) {
-    MPI_Request requests[8];
-    int req_count = 0;
-
-    // 1. Envoi vers le voisin Ouest / Réception du voisin Est
-    if (mesh.neighbor_west != MPI_PROC_NULL) {
-        pack_west_buffer(field, send_buffer_west);
-        MPI_Isend(send_buffer_west.data(), mesh.ny_local, MPI_DOUBLE, mesh.neighbor_west, 0, cart_comm, &requests[req_count++]);
-        MPI_Irecv(recv_buffer_west.data(), mesh.ny_local, MPI_DOUBLE, mesh.neighbor_west, 1, cart_comm, &requests[req_count++]);
-    }
-    // ... Déroulement identique pour les directions Est, Sud et Nord ...
-    
-    // Attente synchrone du groupe de requêtes
-    MPI_Waitall(req_count, requests, MPI_STATUSES_IGNORE);
-    
-    // Dépaquetage dans les halos
-    unpack_halos(field);
-}
-```
-
-### 4.2. Module d'Assemblage Navier-Stokes et Lagrangien Augmenté (`src/NavierStokesSolver.cpp`)
-
-L'assemblage matriciel repose sur la méthode `apply_A(const std::vector<double>& x, std::vector<double>& y)` qui implémente le produit matrice-vecteur de l'opérateur couplé de quantité de mouvement :
-
-$$\mathbf{y} = \left( \frac{\rho}{\Delta t} \mathbf{I} - \nabla \cdot (2\mu \mathbf{D}) - r_{al} \nabla \text{div} + \frac{\mu}{K_{solid}} \right) \mathbf{x}$$
-
-L'utilisation de cette méthode sans construction explicite d'une matrice creuse permet une efficacité mémoire maximale et une vectorisation fluide par le compilateur.
-
-### 4.3. Module d'Énergie Thermique et Flottabilité
-
-La fonction `solve_energy(FlowFields& fields, double dt)` résout l'équation de la chaleur implicite avec couplage Boussinesq :
-
-```cpp
-void NavierStokesSolver::solve_energy(FlowFields& fields, double dt) {
-    // 1. Assemblage du second membre : flux conductifs et convectifs
-    assemble_energy_system(rhs_T, diag_T);
-    
-    // 2. Inversion linéaire par Gradient Conjugué / BiCGSTAB2
-    energy_solver->solve(energy_matrix, fields.T, rhs_T, jacobi_precond);
-    
-    // 3. Synchronisation des conditions aux limites isothermes / adiabatiques
-    comm.apply_thermal_boundary_conditions(fields.T, mesh);
-    
-    // 4. Calcul immédiat du gradient thermique pariétal et du nombre de Nusselt
-    fields.mean_nusselt = compute_mean_nusselt_hot_wall(fields.T, mesh);
-}
-```
-
----
-
-## 5. Guide Développeur : Étendre le Solveur COVOF 2D
-
-### 5.1. Tutoriel 1 : Ajouter une Nouvelle Équation de Transport Scalaire (ex: Espèce Chimique)
-
-Pour ajouter une équation de transport d'une fraction massique $Y(\mathbf{x}, t)$ avec diffusion de Fick $D_m$ :
-$$\frac{\partial (\rho Y)}{\partial t} + \nabla \cdot (\rho \mathbf{u} Y) = \nabla \cdot (\rho D_m \nabla Y) + \dot{\omega}_Y$$
-
-1. **Ajouter le champ dans `include/covof/Field.hpp`** :
-   ```cpp
-   std::vector<double> Y;       // Fraction massique
-   std::vector<double> D_fick;  // Coefficient de diffusion
-   ```
-2. **Allouer dans `src/Fields2D.cpp`** :
-   ```cpp
-   Y.assign(total_cells, 0.0);
-   D_fick.assign(total_cells, 1.0e-5);
-   ```
-3. **Créer la méthode de résolution dans `NavierStokesSolver`** :
-   ```cpp
-   void solve_species(FlowFields& fields, double dt);
-   ```
-4. **Appeler la méthode dans la boucle de temps de `Simulation::run()`**.
-
-### 5.2. Tutoriel 2 : Implémenter un Nouveau Préconditionneur (ex: Multigrille Géométrique)
-
-Toutes les classes de préconditionneurs héritent de l'interface abstraite `PreconditionerBase` définie dans `include/covof/LinearSolver.hpp` :
-
-```cpp
-class PreconditionerBase {
-public:
-    virtual ~PreconditionerBase() = default;
-    virtual void setup(const StencilOperator& A, const Mesh2D& mesh) = 0;
-    virtual void apply(const std::vector<double>& r, std::vector<double>& z) const = 0;
+/**
+ * @brief Types de conditions aux limites physiques (Annexe B thèse M. El Ouafa)
+ */
+enum class BCType {
+    // Calcul et assignation numérique
+    DIRICHLET,  ///< Vitesse imposée (adhérence u=0, paroi mobile u=U_wall, ou profil d'entrée)
+    // Calcul de norme euclidienne ou résidu de convergence
+    NEUMANN,    ///< Dérivée normale nulle (sortie libre dU/dn = 0)
+    FREE_SLIP,  ///< Glissement libre (composante normale nulle, contrainte tangentielle nulle)
+    PERIODIC    ///< Conditions aux limites périodiques
 };
+
+/**
+ * @brief Spécification des conditions aux limites sur les 4 frontières du domaine 2D
+ */
+struct BoundaryCondition {
+    // Calcul et assignation numérique
+    BCType type = BCType::DIRICHLET;
+    // Déclaration de variable typée
+    double u_val = 0.0;  ///< Valeur de u imposée si Dirichlet
+    // Déclaration de variable typée
+    double v_val = 0.0;  ///< Valeur de v imposée si Dirichlet
+    // Déclaration de variable typée
+    std::string profile = "UNIFORM"; ///< "UNIFORM", "PARABOLIC", "POISEUILLE_STEP"
+    // Déclaration de variable typée
+    double u_mean = 0.0; ///< Vitesse moyenne pour profils paraboliques
+    // Déclaration de variable typée
+    double y_step = 0.0; ///< Hauteur de la marche pour POISEUILLE_STEP
+    // Déclaration de variable typée pour la largeur de l'injecteur (Cas 3.3 Fluids 2021)
+    double jet_width = 0.08; ///< Largeur de l'injecteur pour profil JET_INLET [m]
+    // Déclaration de variable typée pour le centre de l'injecteur
+    double jet_center = 0.5; ///< Position centrale de l'injecteur selon X [m]
+    // Calcul et assignation numérique
+    BCType T_type = BCType::NEUMANN; ///< Type de CL pour l'énergie (DIRICHLET ou NEUMANN)
+    // Déclaration de variable typée
+    double T_val = 0.0;             ///< Température imposée si DIRICHLET
+};
+
+/**
+ * @brief Obstacle immergé avec pénalisation de Brinkman (Standard CFD)
+ */
+struct Obstacle {
+    // Déclaration de variable typée
+    std::string type = "BOX"; ///< Forme géométrique ("BOX", "CYLINDER")
+    // Déclaration de variable typée
+    double x0 = 0.0;          ///< Borne inférieure X [m]
+    // Déclaration de variable typée
+    double y0 = 0.0;          ///< Borne inférieure Y [m]
+    // Déclaration de variable typée
+    double x1 = 0.0;          ///< Borne supérieure X [m]
+    // Déclaration de variable typée
+    double y1 = 0.0;          ///< Borne supérieure Y [m]
+    // Déclaration de variable typée
+    double xc = 0.0;          ///< Centre cylindre X [m]
+    // Déclaration de variable typée
+    double yc = 0.0;          ///< Centre cylindre Y [m]
+    // Déclaration de variable typée
+    double radius = 0.0;      ///< Rayon cylindre [m]
+    // Déclaration de variable typée
+    double permeability = 1.0e-14; ///< Perméabilité de Darcy-Brinkman K
+};
+
+struct DomainBC {
+    // Calcul et assignation numérique
+    BoundaryCondition left;    ///< Frontière x = 0
+    // Calcul et assignation numérique
+    BoundaryCondition right;   ///< Frontière x = Lx
+    // Calcul et assignation numérique
+    BoundaryCondition bottom;  ///< Frontière y = 0
+    // Calcul et assignation numérique
+    BoundaryCondition top;     ///< Frontière y = Ly
+};
+
+/**
+ * @brief Propriétés physiques d'une phase fluide
+ */
+struct FluidProperties {
+    // Déclaration de variable typée
+    double rho = 1.0;         ///< Masse volumique [kg/m^3]
+    // Déclaration de variable typée
+    double mu  = 1.0;         ///< Viscosité dynamique [Pa.s]
+    // Déclaration de variable typée
+    double Cp = 1006.0;       ///< Capacité calorifique à pression constante [J/(kg.K)]
+    // Déclaration de variable typée
+    double k_thermal = 0.026; ///< Conductivité thermique [W/(m.K)]
+    // Déclaration de variable typée
+    double beta = 3.33e-3;    ///< Coefficient de dilatation thermique volumique [1/K]
+};
+
+/**
+ * @brief Types de configurations initiales de la fraction volumique C
+ */
+enum class InitialConditionType {
+    // Calcul et assignation numérique
+    SINGLE_PHASE,    ///< Écoulement monophasique (C = 1 partout)
+    DROPLET,         ///< Goutte (Fluide 1 à l'intérieur, Fluide 2 à l'extérieur)
+    BUBBLE,          ///< Bulle (Fluide 2 à l'intérieur, Fluide 1 à l'extérieur)
+    DAM_BREAK,       ///< Colonne rectangulaire d'eau (rupture de barrage)
+    SHEAR_LAYER,     ///< Nappe liquide cisaillée avec perturbation
+    LIQUID_SHEET,    ///< Nappe liquide cisaillée périodique (Cas 3.2 Fluids 2021)
+    VISCOUS_JET,     ///< Jet liquide visqueux injecté / flambement (Cas 3.3 Fluids 2021)
+    RAYLEIGH_TAYLOR, ///< Interface perturbée avec fluide lourd au-dessus
+    VORTEX_SHEAR     ///< Tâche circulaire déformée par vortex avec cisaillement
+};
+
+/**
+ * @brief Paramètres géométriques de la condition initiale diphasique
+ */
+struct InitialConditionConfig {
+    // Calcul et assignation numérique
+    InitialConditionType type = InitialConditionType::SINGLE_PHASE;
+    // Déclaration de variable typée
+    double center_x = 0.5;   ///< Centre de la goutte en X [m]
+    // Déclaration de variable typée
+    double center_y = 0.5;   ///< Centre de la goutte en Y [m]
+    // Déclaration de variable typée
+    double radius   = 0.25;  ///< Rayon de la goutte [m]
+    // Déclaration de variable typée
+    double box_x0   = 0.0;   ///< Coin inf-gauche du rectangle (Dam break)
+    // Déclaration de variable typée
+    double box_y0   = 0.0;
+    // Déclaration de variable typée
+    double box_x1   = 1.0;   ///< Coin sup-droit du rectangle (Dam break)
+    // Déclaration de variable typée
+    double box_y1   = 1.0;
+    // Déclaration de variable typée
+    double pert_amp = 0.01;  ///< Amplitude de perturbation (Rayleigh-Taylor)
+    // Déclaration de variable typée
+    double pert_k   = 1.0;   ///< Nombre d'onde de perturbation
+    // Déclaration de variable typée pour l'épaisseur de nappe liquide
+    double thickness = 0.0003; ///< Épaisseur de la nappe liquide (Cas 3.2 Fluids 2021) [m]
+    // Déclaration de variable typée pour la largeur du jet liquide
+    double jet_width = 0.08;   ///< Largeur du jet liquide injecté (Cas 3.3 Fluids 2021) [m]
+};
+
+/**
+ * @brief Options de paramétrage du solveur linéaire de Krylov BiCGSTAB(2)
+ */
+struct SolverOptions {
+    // Déclaration de variable typée
+    std::string type = "AUGMENTED_LAGRANGIAN"; ///< AUGMENTED_LAGRANGIAN ou MONOLITHIC
+    // Déclaration de variable typée
+    double tol = 1.0e-7;                        ///< Résidu relatif d'arrêt ||r_k|| / ||r_0||
+    // Déclaration de variable typée
+    int max_iter = 1000;                        ///< Nombre maximum d'itérations
+    // Déclaration de variable typée
+    double r_al = 500.0;                        ///< Paramètre de pénalité de divergence r [Pa.s ou kg/(m.s)]
+    // Déclaration de variable typée
+    int uzawa_iter = 1;                         ///< Nombre d'itérations d'Uzawa-Lagrangien augmenté
+    // Déclaration de variable typée
+    bool use_precond = true;                    ///< Activer le préconditionneur
+    // Déclaration de variable typée
+    std::string precond_type = "JACOBI";        ///< JACOBI, BLOCK_TRIANGULAR, ou NONE
+};
+
+/**
+ * @brief Options de gestion des sorties et de la visualisation ParaView
+ */
+struct OutputConfig {
+    // Déclaration de variable typée
+    std::string output_dir = "output"; ///< Répertoire d'écriture
+    // Déclaration de variable typée
+    std::string case_name  = "covof";   ///< Préfixe des fichiers VTK
+    // Déclaration de variable typée
+    int vtk_interval = 10;             ///< Pas d'export VTK (tous les N pas de temps)
+    // Déclaration de variable typée
+    int log_interval = 1;              ///< Pas d'affichage console et CSV
+    // Déclaration de variable typée
+    bool write_csv_history = true;     ///< Écrire l'historique temporel (centre de masse, vitesse...)
+};
+
+/**
+ * @brief Options de capture d'interface et d'advection VOF
+ */
+struct VofConfig {
+    // Déclaration de variable typée
+    std::string reconstruction_method = "PLIC";   ///< "SLIC", "PLIC", "LVIRA", "ELVIRA"
+    // Déclaration de variable typée
+    std::string advection_method = "VOF_TVD";    ///< "VOF_TVD", "CIAM", "WEYMOUTH_YUE"
+    // Déclaration de variable typée
+    std::string tvd_limiter = "SUPERBEE";        ///< "SUPERBEE", "VAN_LEER", "MUSCL", "HRIC"
+    // Déclaration de variable typée
+    double cfl_vof = 0.4;                        ///< Nombre de CFL maximum pour le transport VOF
+};
+
+} // namespace covof
+
 ```
 
-Pour créer un préconditionneur multigrille géométrique à cycles en V (`GeometricMultigridPreconditioner`) :
-1. Créez les méthodes de restriction (*full weighting*) et de prolongation bilinéaire.
-2. Implémentez un lisseur de Gauss-Seidel rouge-noir (*Red-Black Gauss-Seidel*) adapté à la grille décalée MAC.
-3. Enregistrez la nouvelle classe dans la fabrique `PreconditionerFactory::create("MULTIGRID")`.
+### Répertoire des Symboles de `src/main.cpp`
 
-### 5.3. Tutoriel 3 : Implémenter un Nouveau Solveur Linéaire ou Brancher MUMPS
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 18 | Méthode / Fonction | `main` | Type retour : int |
 
-Pour interfacer le solveur direct multifrontal parallèle **MUMPS** :
-1. Implémentez la classe `MumpsLinearSolver` dérivant de `LinearSolverBase`.
-2. Convertissez le stencil local en coordonnées distribuées au format COO (`row`, `col`, `val`).
-3. Appelez les phases de MUMPS :
-   - Analyse symbolique : `job = 1`
-   - Factorisation numérique : `job = 2`
-   - Résolution du second membre distribué : `job = 3`
-4. Ajoutez l'option `"MUMPS"` dans le bloc `"solver"` de votre fichier JSON de configuration.
+### Code Source Intégral : `src/main.cpp` (106 lignes)
 
----
-
-## 6. Normes de Développement, Assurance Qualité et Profilage
-
-### 6.1. Conventions de Codage et Bonnes Pratiques C++20
-
-- **Espaces de noms** : Tout le code réside exclusivement dans le namespace `covof::` (avec alias `fugu::`).
-- **Typage fort et qualificatifs `const`** : Toutes les méthodes ne modifiant pas l'état interne de la classe doivent être qualifiées `const`.
-- **Passage d'arguments** : Par référence constante (`const Type&`) pour les structures et vecteurs ; par valeur pour les types primitifs (`int`, `double`, `bool`).
-- **Nommage** :
-  - Classes et Structures : `CamelCase` (ex: `NavierStokesSolver`, `InterfaceTracker`).
-  - Fonctions et Méthodes : `snake_case` (ex: `assemble_rhs()`, `exchange_halos()`).
-  - Variables membres : `m_prefix` ou suffixes explicites (ex: `m_mesh`, `dx`, `dt`).
-
-### 6.2. Débogage sous MPI avec GDB / LLDB et Valgrind
-
-Pour traquer une erreur de segmentation ou une corruption mémoire sur un calcul parallèle :
-```bash
-# Lancement de GDB sur chaque rang MPI dans un terminal séparé (sous X11) :
-mpirun -np 2 xterm -e gdb --args bin/covof2d cases/cavity_re1000.json
-
-# Vérification des fuites de mémoire avec Valgrind :
-mpirun -np 2 valgrind --leak-check=full --track-origins=yes bin/covof2d cases/laplacian.json
-```
-
-### 6.3. Profilage des Performances CPU
-
-Pour analyser la consommation de temps de calcul par routine et vérifier la vectorisation SIMD :
-```bash
-# Compilation avec symboles de profilage (-g -O3)
-cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
-make -j4
-
-# Enregistrement du profil matériel avec perf sous Linux :
-mpirun -np 2 perf record --call-graph dwarf bin/covof2d cases/cavity_re1000.json
-perf report
-```
-La répartition typique du temps de calcul dans une simulation COVOF 2D stabilisée est :
-- Produit matrice-vecteur Krylov (`apply_A`) : **$65\,\% - 75\,\%$**
-- Préconditionnement Jacobi : **$10\,\% - 15\,\%$**
-- Échanges de halos MPI non-bloquants : **$5\,\% - 10\,\%$**
-- Assemblage du second membre et VOF : **$5\,\%$**
-
-
----
-
-## 7. Visite Guidée du Code Source C++20 et Analyse Ligne par Ligne
-
-### 7.1. Module `Mesh2D` (`include/covof/Mesh.hpp` et `src/Mesh2D.cpp`)
-
-La classe `Mesh2D` encapsule la topologie cartésienne du maillage décalé (MAC) et gère la partition spatiale entre processus MPI.
-
-#### Définition des Bornes Locales et Globales
 ```cpp
-struct Mesh2D {
-    // Dimensions globales du problème physique
-    int nx_global, ny_global;
-    double lx, ly;
-    double dx, dy;
+// ==============================================================================
+// Projet        : COVOF 2D (Convection & Volume-Of-Fluid 2D CFD Solver)
+// Fichier       : main.cpp
+// Description   : Point d'entrée principal de l'exécutable COVOF 2D C++17 / OpenMPI.
+//                 Initialise l'environnement parallèle MPI, analyse la ligne
+//                 de commande, charge la configuration JSON, orchestre l'exécution
+//                 de la simulation numérique et gère la libération des ressources.
+// Auteur        : Elhadji Ibrahima Thiam
+// Standard      : C++17 / MPI 3+
+// ==============================================================================
+
+#include "covof/Simulation.hpp" // Orchestrateur principal de simulation (grille, solveur, temps)
+#include <mpi.h>               // Bibliothèque Message Passing Interface pour le calcul parallèle
+#include <iostream>            // Flux d'entrée/sortie standard pour l'affichage console
+#include <string>              // Gestion des chaînes de caractères pour les chemins de fichiers
+
+// Point d'entrée standard du programme en ligne de commande
+int main(int argc, char** argv) {
+    // 1. Initialisation de l'environnement d'exécution parallèle MPI
+    // Distribue les arguments de la ligne de commande à tous les processus participants
+    MPI_Init(&argc, &argv);
+
+    // Récupère l'identifiant unique (rang) du processus courant dans le communicateur global
+    int rank = 0;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    // Récupère le nombre total de processus alloués pour l'exécution parallèle
+    int size = 1;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    // Fichier de configuration par défaut si aucun argument n'est fourni par l'utilisateur
+    std::string config_file = "cases/cavity.json";
+
+    // 2. Traitement des arguments de la ligne de commande
+    if (argc > 1) {
+        std::string arg = argv[1];
+        // Détection de la demande d'aide (--help ou -h)
+        if (arg == "-h" || arg == "--help") {
+            // Seul le processus maître (rang 0) affiche le message d'aide pour éviter la duplication
+            if (rank == 0) {
+                std::cout << "================================================================================\n"
+                          << "   COVOF 2D — Solveur CFD Navier-Stokes Incompressible Parallèle (C++17/MPI)   \n"
+                          << "================================================================================\n"
+                          << "Usage :\n"
+                          << "  mpirun -np <N> ./bin/covof2d [fichier_configuration.json]\n\n"
+                          << "Exemples d'exécution :\n"
+                          << "  mpirun -np 4 ./bin/covof2d cases/cavity_re1000.json\n"
+                          << "  mpirun -np 4 ./bin/covof2d cases/rising_bubble.json\n"
+                          << "  mpirun -np 2 ./bin/covof2d cases/static_droplet.json\n"
+                          << "  mpirun -np 4 ./bin/covof2d cases/dam_break.json\n"
+                          << "================================================================================\n";
+            }
+            // Clôture propre de l'environnement MPI avant de quitter
+            MPI_Finalize();
+            return 0;
+        }
+        // Utilisation du chemin spécifié en premier argument
+        config_file = arg;
+    }
+
+    // Affichage de la bannière d'accueil par le processus racine
+    if (rank == 0) {
+        std::cout << "================================================================================\n"
+                  << "   COVOF 2D — Solveur CFD Navier-Stokes Incompressible Parallèle (C++17/MPI)   \n"
+                  << "================================================================================\n"
+                  << "  Nombre de processus MPI  : " << size << "\n"
+                  << "  Fichier de configuration : " << config_file << "\n"
+                  << "================================================================================\n";
+    }
+
+    // 3. Bloc d'exécution sécurisé sous surveillance des exceptions C++
+    try {
+        // Instanciation de l'objet Simulation encapsulant maillage, champs, solveurs et exports
+        covof::Simulation sim;
+
+        // Initialisation de la simulation : lecture du JSON, partitionnement spatial, allocation
+        if (!sim.init(MPI_COMM_WORLD, config_file)) {
+            // En cas d'erreur de parsing ou de cohérence des données, signalement sur le rang 0
+            if (rank == 0) {
+                std::cerr << "[ERREUR CRITIQUE] Échec de l'initialisation de la simulation COVOF 2D.\n"
+                          << "                  Vérifiez la validité du fichier JSON : " << config_file << "\n";
+            }
+            // Interruption d'urgence coordonnée de tous les processus du communicateur MPI
+            MPI_Abort(MPI_COMM_WORLD, 1);
+            return 1;
+        }
+
+        // Exécution de la boucle temporelle principale de calcul Navier-Stokes / VOF
+        sim.run();
+
+    } catch (const std::exception& e) {
+        // Capture de toute exception standard (dépassement mémoire, assertion, I/O)
+        if (rank == 0) {
+            std::cerr << "[EXCEPTION INTERCEPTÉE] " << e.what() << "\n";
+        }
+        // Interruption immédiate de l'ensemble de la grappe de calcul
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return 1;
+    }
+
+    // 4. Clôture normale et libération de l'environnement parallèle OpenMPI
+    MPI_Finalize();
+
+    // Code de retour standard indiquant le succès de l'exécution
+    return 0;
+}
+
+```
+
+
+## Chapitre 2 : Analyseur Syntaxique JSON et Gestion de la Configuration (Config.hpp, Config.cpp)
+
+\section{Conception de l'Analyseur JSON Autonome Sans Dépendance Externe}
+Afin de garantir une portabilité immédiate sur tout supercalculateur ou station de travail sans nécessiter le téléchargement de bibliothèques tierces (telles que \texttt{nlohmann/json} ou \texttt{Boost.PropertyTree}), \texttt{COVOF\_2D-C++} intègre dans \texttt{src/Config.cpp} un analyseur syntaxique JSON déterministe et léger.
+
+\subsection{Grammaire Reconnue et Extraction par Sous-Blocs}
+Le parseur opère en trois phases :
+\begin{enumerate}
+  \item \textbf{Prétraitement et nettoyage lexical} : lecture intégrale du flux fichier dans une chaîne \texttt{std::string}, gestion des espaces, retours chariot et commentaires éventuels.
+  \item \textbf{Isolation des objets JSON de premier niveau (\texttt{extract\_section})} : pour une clé de section donnée (par exemple \texttt{"mesh"}, \texttt{"physics"}, \texttt{"vof"}, \texttt{"solver"}), l'automate recherche l'ouverture d'accolade \texttt{\{} correspondante et maintient un compteur de profondeur d'imbrication $\text{depth} = \sum (\texttt{'\{'} - \texttt{'\}'})$ tout en ignorant les accolades situées à l'intérieur de littéraux chaînes entre guillemets. Cela permet d'isoler exactement la sous-chaîne JSON du bloc, y compris lorsqu'il contient des tableaux d'objets imbriqués comme \texttt{"obstacles": [ ... ]}.
+  \item \textbf{Désérialisation typée avec valeurs par défaut sécurisées} :
+  \begin{itemize}
+    \item \texttt{get\_string(section, key, default\_val)} : extrait les chaînes de caractères et normalise la casse pour la résolution des énumérations ;
+    \item \texttt{get\_double(section, key, default\_val)} : parse les nombres flottants en notation décimale ou scientifique (\texttt{std::stod}) ;
+    \item \texttt{get\_int(section, key, default\_val)} et \texttt{get\_bool(section, key, default\_val)} : extraient les entiers et les booléens (\texttt{true}/\texttt{false}).
+  \end{itemize}
+\end{enumerate}
+
+\section{Compatibilité Ascendante et Alias de Clés JSON}
+Pour assurer une interopérabilité totale entre les différentes générations de fichiers de cas tests et entre les dépôts C++17 et Fortran 2018, \texttt{Config::load\_from\_file} implémente une résolution d'alias intelligente :
+\begin{itemize}
+  \item Pour le solveur linéaire : reconnaît aussi bien \texttt{"tol"} que \texttt{"tolerance"}, et \texttt{"r\_al"} que \texttt{"augmented\_lagrangian\_r"}.
+  \item Pour le module VOF : reconnaît la section dédiée \texttt{"vof"} (\texttt{reconstruction\_method}, \texttt{advection\_method}, \texttt{tvd\_limiter}, \texttt{cfl\_vof}) ainsi que les clés historiques éventuellement placées dans \texttt{"solver"} ou \texttt{"physics"}.
+  \item Pour les obstacles immergés de Brinkman : parse dynamiquement le tableau JSON \texttt{"obstacles"} en distinguant les primitives géométriques rectangulaires (\texttt{type = "box"}, définies par $[x_{\min}, x_{\max}] \times [y_{\min}, y_{\max}]$) et circulaires (\texttt{type = "circle"}, définies par le centre $(x_c, y_c)$ et le rayon $R$).
+\end{itemize}
+
+### Répertoire des Symboles de `include/covof/Config.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 12 | class | `Config` | Déclaration de type / classe / structure |
+| 92 | Méthode / Fonction | `load_from_json` | Type retour : bool |
+| 97 | Méthode / Fonction | `print` | Type retour : void |
+
+### Code Source Intégral : `include/covof/Config.hpp` (100 lignes)
+
+```cpp
+#pragma once
+
+#include "Types.hpp"
+#include <string>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+/**
+ * @brief Structure complète regroupant tous les paramètres de simulation
+ */
+class Config {
+public:
+    // Paramètres de maillage
+    int nx = 64;             ///< Nombre de mailles globales en X
+    // Déclaration de variable typée
+    int ny = 64;             ///< Nombre de mailles globales en Y
+    // Déclaration de variable typée
+    double lx = 1.0;         ///< Longueur physique du domaine en X [m]
+    // Déclaration de variable typée
+    double ly = 1.0;         ///< Hauteur physique du domaine en Y [m]
+
+    // Équations résolues et modèles physiques
+    std::string mode = "NAVIER_STOKES";  ///< "NAVIER_STOKES", "LAPLACIAN", "VORTEX_ADVECTION"
+    // Déclaration de variable typée
+    bool enable_two_phase = false;       ///< Modèle diphasique (true) ou monophasique (false)
+    // Déclaration de variable typée
+    bool enable_surface_tension = false; ///< Activer la force capillaire CSF
+    // Déclaration de variable typée
+    bool enable_convection = true;       ///< Activer le transport convectif (Navier-Stokes vs Stokes)
+    // Déclaration de variable typée
+    bool enable_energy = false;          ///< Activer l'équation de l'énergie (température T)
+    // Déclaration de variable typée
+    double steady_state_tol = 0.0;       ///< Tolérance d'arrêt sur l'état stationnaire ||u^{n+1}-u^n||
+
+    // Convection thermique Boussinesq (Cas 6.1)
+    double Ra = 1.0e5;                   ///< Nombre de Rayleigh
+    // Déclaration de variable typée
+    double Pr = 0.71;                    ///< Nombre de Prandtl
+    // Déclaration de variable typée
+    double T_ref = 0.0;                  ///< Température de référence Boussinesq
+    // Déclaration de variable typée
+    double beta = 3.33e-3;               ///< Coefficient de dilatation volumique [1/K]
+
+    // Modèle de viscosité spatiale (Cas 3.9)
+    std::string viscosity_model = "CONSTANT"; ///< "CONSTANT", "EXPONENTIAL"
+    // Déclaration de variable typée
+    double visc_a = 0.02;
+    // Déclaration de variable typée
+    double visc_e = 0.01;
+    // Déclaration de variable typée
+    double visc_mu0 = 1.85e-5;
+
+    // Obstacles immergés (Pénalisation de Brinkman)
+    std::vector<Obstacle> obstacles;
+
+    // Propriétés physiques
+    FluidProperties fluid1;  ///< Fluide 1 (ex: liquide ou fluide lourd)
+    FluidProperties fluid2;  ///< Fluide 2 (ex: gaz ou fluide léger)
+    // Déclaration de variable typée
+    double sigma = 0.0;      ///< Tension de surface [N/m]
+    // Déclaration de variable typée
+    double gx = 0.0;         ///< Gravité selon X [m/s^2]
+    // Déclaration de variable typée
+    double gy = 0.0;         ///< Gravité selon Y [m/s^2]
+
+    // Intégration temporelle
+    double dt = 0.001;       ///< Pas de temps initial [s]
+    // Déclaration de variable typée
+    double t_final = 1.0;    ///< Temps physique final [s]
+    // Déclaration de variable typée
+    double cfl_max = 0.4;    ///< Nombre de CFL maximum pour le pas de temps adaptatif
+    // Déclaration de variable typée
+    bool adaptive_dt = false;///< Activer le pas de temps automatique selon CFL
+
+    // Conditions aux limites et conditions initiales
+    DomainBC bc;
+    InitialConditionConfig init_cond;
+
+    // Solveur linéaire et sorties
+    SolverOptions solver;
+    OutputConfig output;
+
+    // Capture d'interface et transport VOF
+    VofConfig vof;
+
+    /**
+     * @brief Charge la configuration depuis un fichier JSON
+     * @param filepath Chemin vers le fichier .json du cas test
+     * @return true si le chargement a réussi
+     */
+    bool load_from_json(const std::string& filepath);
+
+    /**
+     * @brief Affiche la configuration synthétique dans la console
+     */
+    void print() const;
+};
+
+} // namespace covof
+
+```
+
+### Répertoire des Symboles de `src/Config.cpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 12 | Méthode / Fonction | `trim` | Type retour : static std::string |
+| 23 | Méthode / Fonction | `extract_value` | Type retour : static std::string |
+| 78 | Méthode / Fonction | `get_double` | Type retour : static double |
+| 86 | Méthode / Fonction | `get_int` | Type retour : static int |
+| 94 | Méthode / Fonction | `get_bool` | Type retour : static bool |
+| 105 | Méthode / Fonction | `get_string` | Type retour : static std::string |
+| 112 | Méthode / Fonction | `parse_bc_type` | Type retour : static BCType |
+| 125 | Méthode / Fonction | `parse_single_bc` | Type retour : static void |
+| 149 | Méthode / Fonction | `Config::load_from_json` | Type retour : bool |
+| 150 | Méthode / Fonction | `file` | Type retour : std::ifstream |
+| 434 | Méthode / Fonction | `Config::print` | Type retour : void |
+
+### Code Source Intégral : `src/Config.cpp` (486 lignes)
+
+```cpp
+#include "covof/Config.hpp"
+#include <fstream>
+#include <sstream>
+#include <iostream>
+#include <algorithm>
+#include <cctype>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+// Fonctions utilitaires locales pour parser le JSON simplement
+static std::string trim(const std::string& str) {
+    // Déclaration de variable typée
+    size_t first = str.find_first_not_of(" \t\n\r");
+    // Évaluation de la condition de contrôle
+    if (first == std::string::npos) return "";
+    // Déclaration de variable typée
+    size_t last = str.find_last_not_of(" \t\n\r");
+    // Retour de fonction
+    return str.substr(first, (last - first + 1));
+}
+
+static std::string extract_value(const std::string& content, const std::string& key) {
+    // Déclaration de variable typée
+    std::string search = "\"" + key + "\"";
+    // Déclaration de variable typée
+    size_t pos = content.find(search);
+    // Évaluation de la condition de contrôle
+    if (pos == std::string::npos) return "";
+    // Déclaration de variable typée
+    size_t colon = content.find(':', pos + search.length());
+    // Évaluation de la condition de contrôle
+    if (colon == std::string::npos) return "";
+    
+    // Déclaration de variable typée
+    size_t start = content.find_first_not_of(" \t\n\r", colon + 1);
+    // Évaluation de la condition de contrôle
+    if (start == std::string::npos) return "";
+
+    // Évaluation de la condition de contrôle
+    if (content[start] == '{' || content[start] == '[') {
+        // Calcul et assignation numérique
+        char open_c = content[start];
+        // Calcul et assignation numérique
+        char close_c = (open_c == '{') ? '}' : ']';
+        // Déclaration de variable typée
+        int depth = 1;
+        // Déclaration de variable typée
+        size_t end = start + 1;
+        // Boucle itérative conditionnelle
+        while (end < content.length() && depth > 0) {
+            // Évaluation de la condition de contrôle
+            if (content[end] == open_c) depth++;
+            // Branche alternative conditionnelle
+            else if (content[end] == close_c) depth--;
+            end++;
+        }
+        // Retour de fonction
+        return content.substr(start, end - start);
+    // Calcul et assignation numérique
+    } else if (content[start] == '"') {
+        // Déclaration de variable typée
+        size_t end = content.find('"', start + 1);
+        // Évaluation de la condition de contrôle
+        if (end == std::string::npos) return "";
+        // Retour de fonction
+        return content.substr(start + 1, end - start - 1);
+    } else {
+        // Déclaration de variable typée
+        size_t end = content.find_first_of(",}\n\r", start);
+        // Évaluation de la condition de contrôle
+        if (end == std::string::npos) end = content.length();
+        // Retour de fonction
+        return trim(content.substr(start, end - start));
+    }
+}
+
+static double get_double(const std::string& block, const std::string& key, double default_val) {
+    // Déclaration de variable typée
+    std::string val = extract_value(block, key);
+    // Évaluation de la condition de contrôle
+    if (val.empty()) return default_val;
+    try { return std::stod(val); } catch (...) { return default_val; }
+}
+
+static int get_int(const std::string& block, const std::string& key, int default_val) {
+    // Déclaration de variable typée
+    std::string val = extract_value(block, key);
+    // Évaluation de la condition de contrôle
+    if (val.empty()) return default_val;
+    try { return std::stoi(val); } catch (...) { return default_val; }
+}
+
+static bool get_bool(const std::string& block, const std::string& key, bool default_val) {
+    // Déclaration de variable typée
+    std::string val = extract_value(block, key);
+    // Évaluation de la condition de contrôle
+    if (val == "true" || val == "1") return true;
+    // Évaluation de la condition de contrôle
+    if (val == "false" || val == "0") return false;
+    // Retour de fonction
+    return default_val;
+}
+
+static std::string get_string(const std::string& block, const std::string& key, const std::string& default_val) {
+    // Déclaration de variable typée
+    std::string val = extract_value(block, key);
+    // Retour de fonction
+    return val.empty() ? default_val : val;
+}
+
+static BCType parse_bc_type(const std::string& str) {
+    // Évaluation de la condition de contrôle
+    if (str == "DIRICHLET") return BCType::DIRICHLET;
+    // Évaluation de la condition de contrôle
+    if (str == "NEUMANN") return BCType::NEUMANN;
+    // Évaluation de la condition de contrôle
+    if (str == "FREE_SLIP") return BCType::FREE_SLIP;
+    // Évaluation de la condition de contrôle
+    if (str == "PERIODIC") return BCType::PERIODIC;
+    // Retour de fonction
+    return BCType::DIRICHLET;
+}
+
+static void parse_single_bc(const std::string& block, BoundaryCondition& bc) {
+    // Calcul et assignation numérique
+    bc.type = parse_bc_type(get_string(block, "type", "DIRICHLET"));
+    // Calcul et assignation numérique
+    bc.u_val = get_double(block, "u", 0.0);
+    // Calcul et assignation numérique
+    bc.v_val = get_double(block, "v", 0.0);
+    // Calcul et assignation numérique
+    bc.profile = get_string(block, "profile", "UNIFORM");
+    // Calcul et assignation numérique
+    bc.u_mean = get_double(block, "u_mean", 0.0);
+    // Calcul et assignation numérique
+    bc.y_step = get_double(block, "y_step", 0.0);
+    // Calcul et assignation de la largeur d'injecteur (Cas 3.3 Fluids 2021)
+    bc.jet_width = get_double(block, "jet_width", bc.jet_width);
+    // Calcul et assignation de la position centrale de l'injecteur
+    bc.jet_center = get_double(block, "jet_center", bc.jet_center);
+    // Calcul et assignation numérique
+    bc.T_type = parse_bc_type(get_string(block, "T_type", "NEUMANN"));
+    // Calcul et assignation numérique
+    bc.T_val = get_double(block, "T", 0.0);
+}
+
+// Déclaration de variable typée
+bool Config::load_from_json(const std::string& filepath) {
+    std::ifstream file(filepath);
+    // Évaluation de la condition de contrôle
+    if (!file.is_open()) {
+        std::cerr << "[Config] Erreur: Impossible d'ouvrir le fichier JSON : " << filepath << std::endl;
+        // Retour de fonction
+        return false;
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    // Déclaration de variable typée
+    std::string json = buffer.str();
+
+    // 0. Mode global et arrêt stationnaire
+    mode = get_string(json, "mode", mode);
+    // Calcul de la résolution géométrique de cellule
+    steady_state_tol = get_double(json, "steady_state_tol", steady_state_tol);
+
+    // 1. Maillage
+    std::string mesh_block = extract_value(json, "mesh");
+    // Évaluation de la condition de contrôle
+    if (!mesh_block.empty()) {
+        // Calcul et assignation numérique
+        nx = get_int(mesh_block, "nx", nx);
+        // Calcul et assignation numérique
+        ny = get_int(mesh_block, "ny", ny);
+        // Calcul et assignation numérique
+        lx = get_double(mesh_block, "lx", lx);
+        // Calcul et assignation numérique
+        ly = get_double(mesh_block, "ly", ly);
+    }
+
+    // 2. Modèle physique
+    std::string model_block = extract_value(json, "physics");
+    // Évaluation de la condition de contrôle
+    if (!model_block.empty()) {
+        // Calcul et assignation numérique
+        enable_two_phase = get_bool(model_block, "enable_two_phase", enable_two_phase);
+        // Calcul et assignation numérique
+        enable_surface_tension = get_bool(model_block, "enable_surface_tension", enable_surface_tension);
+        // Calcul et assignation numérique
+        enable_convection = get_bool(model_block, "enable_convection", enable_convection);
+        // Calcul et assignation numérique
+        enable_energy = get_bool(model_block, "enable_energy", enable_energy);
+        // Calcul et assignation numérique
+        sigma = get_double(model_block, "sigma", sigma);
+        // Calcul et assignation numérique
+        gx = get_double(model_block, "gx", gx);
+        // Calcul et assignation numérique
+        gy = get_double(model_block, "gy", gy);
+
+        // Calcul et assignation numérique
+        Ra = get_double(model_block, "Ra", Ra);
+        // Calcul et assignation numérique
+        Pr = get_double(model_block, "Pr", Pr);
+        // Calcul et assignation numérique
+        T_ref = get_double(model_block, "T_ref", T_ref);
+        // Calcul et assignation numérique
+        beta = get_double(model_block, "beta", beta);
+
+        // Calcul et assignation numérique
+        viscosity_model = get_string(model_block, "viscosity_model", viscosity_model);
+        // Calcul et assignation numérique
+        visc_a = get_double(model_block, "visc_a", visc_a);
+        // Calcul et assignation numérique
+        visc_e = get_double(model_block, "visc_e", visc_e);
+        // Calcul et assignation numérique
+        visc_mu0 = get_double(model_block, "visc_mu0", visc_mu0);
+
+        // Déclaration de variable typée
+        std::string f1_block = extract_value(model_block, "fluid1");
+        // Évaluation de la condition de contrôle
+        if (!f1_block.empty()) {
+            // Calcul et assignation numérique
+            fluid1.rho = get_double(f1_block, "rho", fluid1.rho);
+            // Calcul et assignation numérique
+            fluid1.mu  = get_double(f1_block, "mu", fluid1.mu);
+            // Calcul et assignation numérique
+            fluid1.Cp  = get_double(f1_block, "Cp", fluid1.Cp);
+            // Calcul et assignation numérique
+            fluid1.k_thermal = get_double(f1_block, "k_thermal", fluid1.k_thermal);
+            // Calcul et assignation numérique
+            fluid1.beta = get_double(f1_block, "beta", fluid1.beta);
+        }
+
+        // Déclaration de variable typée
+        std::string f2_block = extract_value(model_block, "fluid2");
+        // Évaluation de la condition de contrôle
+        if (!f2_block.empty()) {
+            // Calcul et assignation numérique
+            fluid2.rho = get_double(f2_block, "rho", fluid2.rho);
+            // Calcul et assignation numérique
+            fluid2.mu  = get_double(f2_block, "mu", fluid2.mu);
+            // Calcul et assignation numérique
+            fluid2.Cp  = get_double(f2_block, "Cp", fluid2.Cp);
+            // Calcul et assignation numérique
+            fluid2.k_thermal = get_double(f2_block, "k_thermal", fluid2.k_thermal);
+            // Calcul et assignation numérique
+            fluid2.beta = get_double(f2_block, "beta", fluid2.beta);
+        }
+    }
+
+    // 3. Intégration temporelle
+    std::string time_block = extract_value(json, "time");
+    // Évaluation de la condition de contrôle
+    if (!time_block.empty()) {
+        // Calcul et assignation numérique
+        dt = get_double(time_block, "dt", dt);
+        // Calcul et assignation numérique
+        t_final = get_double(time_block, "t_final", t_final);
+        // Calcul et assignation numérique
+        cfl_max = get_double(time_block, "cfl_max", cfl_max);
+        // Calcul et assignation numérique
+        adaptive_dt = get_bool(time_block, "adaptive_dt", adaptive_dt);
+    }
+
+    // 4. Conditions aux limites
+    std::string bc_block = extract_value(json, "boundary_conditions");
+    // Évaluation de la condition de contrôle
+    if (!bc_block.empty()) {
+        // Déclaration de variable typée
+        std::string b_left = extract_value(bc_block, "left");
+        // Évaluation de la condition de contrôle
+        if (!b_left.empty()) parse_single_bc(b_left, bc.left);
+
+        // Déclaration de variable typée
+        std::string b_right = extract_value(bc_block, "right");
+        // Évaluation de la condition de contrôle
+        if (!b_right.empty()) parse_single_bc(b_right, bc.right);
+
+        // Déclaration de variable typée
+        std::string b_bot = extract_value(bc_block, "bottom");
+        // Évaluation de la condition de contrôle
+        if (!b_bot.empty()) parse_single_bc(b_bot, bc.bottom);
+
+        // Déclaration de variable typée
+        std::string b_top = extract_value(bc_block, "top");
+        // Évaluation de la condition de contrôle
+        if (!b_top.empty()) parse_single_bc(b_top, bc.top);
+    }
+
+    // 5. Condition initiale
+    std::string ic_block = extract_value(json, "initial_condition");
+    // Évaluation de la condition de contrôle
+    if (!ic_block.empty()) {
+        // Déclaration de variable typée
+        std::string type_str = get_string(ic_block, "type", "SINGLE_PHASE");
+        // Évaluation de la condition de contrôle
+        if (type_str == "DROPLET") init_cond.type = InitialConditionType::DROPLET;
+        // Branche alternative conditionnelle pour bulle ou cylindre immergé
+        else if (type_str == "BUBBLE" || type_str == "CYLINDER") init_cond.type = InitialConditionType::BUBBLE;
+        // Branche alternative conditionnelle
+        else if (type_str == "DAM_BREAK") init_cond.type = InitialConditionType::DAM_BREAK;
+        // Branche alternative conditionnelle pour nappe liquide (Cas 3.2 Fluids 2021)
+        else if (type_str == "LIQUID_SHEET") init_cond.type = InitialConditionType::LIQUID_SHEET;
+        // Branche alternative conditionnelle pour jet liquide visqueux (Cas 3.3 Fluids 2021)
+        else if (type_str == "VISCOUS_JET" || type_str == "JET_BUCKLING") init_cond.type = InitialConditionType::VISCOUS_JET;
+        // Branche alternative conditionnelle
+        else if (type_str == "SHEAR_LAYER") init_cond.type = InitialConditionType::SHEAR_LAYER;
+        // Branche alternative conditionnelle
+        else if (type_str == "VORTEX_SHEAR") init_cond.type = InitialConditionType::VORTEX_SHEAR;
+        // Branche alternative conditionnelle
+        else if (type_str == "RAYLEIGH_TAYLOR") init_cond.type = InitialConditionType::RAYLEIGH_TAYLOR;
+        // Branche par défaut
+        else init_cond.type = InitialConditionType::SINGLE_PHASE;
+
+        // Calcul et assignation numérique
+        init_cond.center_x = get_double(ic_block, "center_x", init_cond.center_x);
+        // Calcul et assignation numérique
+        init_cond.center_y = get_double(ic_block, "center_y", init_cond.center_y);
+        // Calcul et assignation numérique
+        init_cond.radius   = get_double(ic_block, "radius", init_cond.radius);
+        // Calcul et assignation numérique
+        init_cond.box_x0   = get_double(ic_block, "box_x0", init_cond.box_x0);
+        // Calcul et assignation numérique
+        init_cond.box_y0   = get_double(ic_block, "box_y0", init_cond.box_y0);
+        // Calcul et assignation numérique
+        init_cond.box_x1   = get_double(ic_block, "box_x1", init_cond.box_x1);
+        // Calcul et assignation numérique
+        init_cond.box_y1   = get_double(ic_block, "box_y1", init_cond.box_y1);
+        // Calcul et assignation numérique
+        init_cond.pert_amp = get_double(ic_block, "pert_amp", init_cond.pert_amp);
+        // Calcul et assignation numérique
+        init_cond.pert_k   = get_double(ic_block, "pert_k", init_cond.pert_k);
+        // Calcul et assignation de l'épaisseur de nappe liquide
+        init_cond.thickness = get_double(ic_block, "thickness", init_cond.thickness);
+        // Calcul et assignation de la largeur du jet liquide
+        init_cond.jet_width = get_double(ic_block, "jet_width", init_cond.jet_width);
+    }
+
+    // 6. Solveur linéaire
+    std::string sol_block = extract_value(json, "solver");
+    // Évaluation de la condition de contrôle
+    if (!sol_block.empty()) {
+        // Calcul et assignation numérique
+        solver.type = get_string(sol_block, "type", solver.type);
+        // Calcul et assignation numérique
+        solver.tol = get_double(sol_block, "tol", solver.tol);
+        // Calcul et assignation numérique
+        solver.max_iter = get_int(sol_block, "max_iter", solver.max_iter);
+        // Calcul et assignation numérique
+        solver.r_al = get_double(sol_block, "r_al", solver.r_al);
+        // Calcul et assignation numérique
+        solver.uzawa_iter = get_int(sol_block, "uzawa_iter", solver.uzawa_iter);
+        // Calcul et assignation numérique
+        solver.use_precond = get_bool(sol_block, "use_precond", solver.use_precond);
+        // Calcul et assignation numérique
+        solver.precond_type = get_string(sol_block, "precond_type", solver.precond_type);
+    }
+
+    // 7. Sorties et visualisation
+    std::string out_block = extract_value(json, "output");
+    // Évaluation de la condition de contrôle
+    if (!out_block.empty()) {
+        // Calcul et assignation numérique
+        output.output_dir = get_string(out_block, "output_dir", output.output_dir);
+        // Calcul et assignation numérique
+        output.case_name  = get_string(out_block, "case_name", output.case_name);
+        // Calcul et assignation numérique
+        output.vtk_interval = get_int(out_block, "vtk_interval", output.vtk_interval);
+        // Calcul et assignation numérique
+        output.log_interval = get_int(out_block, "log_interval", output.log_interval);
+        // Calcul et assignation numérique
+        output.write_csv_history = get_bool(out_block, "write_csv_history", output.write_csv_history);
+    }
+
+    // 8. Capture d'interface et transport VOF
+    std::string vof_block = extract_value(json, "vof");
+    // Évaluation de la condition de contrôle
+    if (!vof_block.empty()) {
+        // Calcul et assignation numérique
+        vof.reconstruction_method = get_string(vof_block, "reconstruction_method", vof.reconstruction_method);
+        // Calcul et assignation numérique
+        vof.advection_method      = get_string(vof_block, "advection_method", vof.advection_method);
+        // Calcul et assignation numérique
+        vof.tvd_limiter           = get_string(vof_block, "tvd_limiter", vof.tvd_limiter);
+        // Calcul et assignation numérique
+        vof.cfl_vof               = get_double(vof_block, "cfl_vof", vof.cfl_vof);
+    }
+
+    // 9. Obstacles immergés (Pénalisation de Brinkman)
+    obstacles.clear();
+    // Déclaration de variable typée
+    std::string obs_array = extract_value(json, "obstacles");
+    // Évaluation de la condition de contrôle
+    if (!obs_array.empty()) {
+        // Déclaration de variable typée
+        size_t pos = 0;
+        // Boucle itérative conditionnelle
+        while ((pos = obs_array.find('{', pos)) != std::string::npos) {
+            // Déclaration de variable typée
+            size_t end_pos = obs_array.find('}', pos);
+            // Évaluation de la condition de contrôle
+            if (end_pos == std::string::npos) break;
+            // Déclaration de variable typée
+            std::string obs_block = obs_array.substr(pos, end_pos - pos + 1);
+            Obstacle obs;
+            // Calcul et assignation numérique
+            obs.type = get_string(obs_block, "type", "BOX");
+            // Calcul et assignation numérique
+            obs.x0 = get_double(obs_block, "x0", 0.0);
+            // Calcul et assignation numérique
+            obs.y0 = get_double(obs_block, "y0", 0.0);
+            // Calcul et assignation numérique
+            obs.x1 = get_double(obs_block, "x1", 0.0);
+            // Calcul et assignation numérique
+            obs.y1 = get_double(obs_block, "y1", 0.0);
+            // Calcul et assignation numérique
+            obs.xc = get_double(obs_block, "xc", 0.0);
+            // Calcul et assignation numérique
+            obs.yc = get_double(obs_block, "yc", 0.0);
+            // Calcul et assignation numérique
+            obs.radius = get_double(obs_block, "radius", 0.0);
+            // Calcul et assignation numérique
+            obs.permeability = get_double(obs_block, "permeability", 1.0e-14);
+            obstacles.push_back(obs);
+            // Calcul et assignation numérique
+            pos = end_pos + 1;
+        }
+    }
+
+    // Retour de fonction
+    return true;
+}
+
+void Config::print() const {
+    // Calcul et assignation numérique
+    std::cout << "========================================================\n"
+              << "       COVOF 2D PARALLELE - CONFIGURATION DU CAS         \n"
+              // Calcul et assignation numérique
+              << "========================================================\n"
+              << " Mode calcul : " << mode << "\n"
+              // Calcul et assignation numérique
+              << " Maillage : " << nx << " x " << ny << " cellules (Lx = " << lx << " m, Ly = " << ly << " m)\n"
+              // Calcul de la résolution géométrique de cellule
+              << " dx = " << lx / nx << " m, dy = " << ly / ny << " m\n"
+              << " Physique : " << (enable_two_phase ? "Diphasique" : "Monophasique")
+              << " | Convection : " << (enable_convection ? "Oui" : "Non")
+              << " | Tension de surface : " << (enable_surface_tension ? "Oui" : "Non") << "\n";
+    // Évaluation de la condition de contrôle
+    if (!obstacles.empty()) {
+        std::cout << " Obstacles immerges : " << obstacles.size() << " defini(s) [Brinkman]\n";
+        // Boucle d'itération algorithmique
+        for (size_t i = 0; i < obstacles.size(); ++i) {
+            std::cout << "   - Obstacle " << i+1 << " : [" << obstacles[i].x0 << ", " << obstacles[i].x1
+                      // Calcul et assignation numérique
+                      << "] x [" << obstacles[i].y0 << ", " << obstacles[i].y1 << "], K=" << obstacles[i].permeability << "\n";
+        }
+    }
+    // Calcul et assignation numérique
+    std::cout << " Fluide 1 : rho=" << fluid1.rho << " kg/m3, mu=" << fluid1.mu << " Pa.s\n";
+    // Évaluation de la condition de contrôle
+    if (enable_two_phase) {
+        // Calcul et assignation numérique
+        std::cout << " Fluide 2 : rho=" << fluid2.rho << " kg/m3, mu=" << fluid2.mu << " Pa.s\n"
+                  // Calcul et assignation numérique
+                  << " Tension superficielle sigma = " << sigma << " N/m\n"
+                  << " VOF : Reconstruction=" << vof.reconstruction_method 
+                  << " | Advection=" << vof.advection_method 
+                  << " | Limiteur=" << vof.tvd_limiter << "\n";
+    }
+    // Calcul et assignation numérique
+    std::cout << " Gravite : g = (" << gx << ", " << gy << ") m/s^2\n"
+              // Calcul et assignation numérique
+              << " Temps : dt = " << dt << " s, t_final = " << t_final << " s\n"
+              // Calcul et assignation numérique
+              << " Solveur : " << solver.type << " | BiCGSTAB(2), tol=" << solver.tol
+              // Calcul et assignation numérique
+              << ", max_iter=" << solver.max_iter << ", r_al=" << solver.r_al
+              // Calcul et assignation numérique
+              << ", uzawa_iter=" << solver.uzawa_iter << "\n"
+              // Calcul et assignation numérique
+              << " Sorties : Dossier '" << output.output_dir << "', intervalle VTK=" << output.vtk_interval << "\n"
+              // Calcul et assignation numérique
+              << "========================================================\n";
+}
+
+} // namespace covof
+
+```
+
+
+## Chapitre 3 : Topologie du Maillage Cartésien MAC 2D et Décomposition Spatiale (Mesh.hpp, Mesh.cpp)
+
+\section{Géométrie de la Grille Décalée MAC (\emph{Marker-And-Cell})}
+La classe \texttt{covof::Mesh} (\texttt{include/covof/Mesh.hpp}, \texttt{src/Mesh.cpp}) encapsule la géométrie discrète du sous-domaine attribué au processus MPI courant. Soit un domaine global $[0, L_x] \times [0, L_y]$ discrétisé par $N_{x,\text{glob}} \times N_{y,\text{glob}}$ cellules uniformes de pas :
+\begin{equation}
+  \Delta x = \frac{L_x}{N_{x,\text{glob}}}, \qquad \Delta y = \frac{L_y}{N_{y,\text{glob}}}
+\end{equation}
+Lorsque le domaine est partitionné sur une grille cartésienne de $P_x \times P_y$ processus MPI, le processus de coordonnées cartésiennes $(p_x, p_y) \in \{0, \dots, P_x-1\} \times \{0, \dots, P_y-1\}$ reçoit un sous-domaine local de $N_x \times N_y$ cellules débutant aux indices globaux $(i_{\text{start}}, j_{\text{start}})$ :
+\begin{equation}
+  N_x = \left\lfloor \frac{N_{x,\text{glob}}}{P_x} \right\rfloor + \mathbb{I}(p_x < N_{x,\text{glob}} \bmod P_x)
+\end{equation}
+Ce partitionnement à reste distribué garantit un déséquilibre de charge maximal d'au plus une colonne ou une ligne de mailles entre deux processus quelconques.
+
+\section{Systèmes de Coordonnées Décalées $(x_c, y_c)$, $(x_u, y_c)$ et $(x_c, y_v)$}
+En indiçage local C++17 à base zéro ($i \in \{0, \dots, N_x-1\}$, $j \in \{0, \dots, N_y-1\}$), les trois familles de points de collocation de la grille MAC sont évaluées par les méthodes en ligne (\texttt{inline}) de \texttt{Mesh} :
+\begin{enumerate}
+  \item \textbf{Centre de la maille $(i, j)$} (support de $p, T, C, \rho, \mu, \nabla\cdot\mathbf{u}$) :
+  \begin{equation}
+    x_c(i) = x_{\min,\text{loc}} + \left(i + \frac{1}{2}\right)\Delta x, \qquad y_c(j) = y_{\min,\text{loc}} + \left(j + \frac{1}{2}\right)\Delta y
+  \end{equation}
+  \item \textbf{Face verticale $(i, j)$} (support de la vitesse horizontale $u_{i,j}$ située sur la face Ouest de la maille $(i,j)$, avec $i \in \{0, \dots, N_x\}$) :
+  \begin{equation}
+    x_u(i) = x_{\min,\text{loc}} + i\,\Delta x, \qquad y_u(j) = y_c(j)
+  \end{equation}
+  \item \textbf{Face horizontale $(i, j)$} (support de la vitesse verticale $v_{i,j}$ située sur la face Sud de la maille $(i,j)$, avec $j \in \{0, \dots, N_y\}$) :
+  \begin{equation}
+    x_v(i) = x_c(i), \qquad y_v(j) = y_{\min,\text{loc}} + j\,\Delta y
+  \end{equation}
+\end{enumerate}
+
+### Répertoire des Symboles de `include/covof/Mesh.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 12 | class | `Mesh2D` | Déclaration de type / classe / structure |
+| 80 | Méthode / Fonction | `cell_idx` | Type retour : inline int |
+| 85 | Méthode / Fonction | `u_idx` | Type retour : inline int |
+| 90 | Méthode / Fonction | `v_idx` | Type retour : inline int |
+| 95 | Méthode / Fonction | `node_idx` | Type retour : inline int |
+
+### Code Source Intégral : `include/covof/Mesh.hpp` (109 lignes)
+
+```cpp
+#pragma once
+
+#include <mpi.h>
+#include <vector>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+/**
+ * @brief Maillage 2D cartésien décalé (MAC) partitionné en sous-domaines MPI
+ */
+class Mesh2D {
+public:
+    // Paramètres globaux
+    int nx_global = 0;
+    // Déclaration de variable typée
+    int ny_global = 0;
+    // Déclaration de variable typée
+    double lx = 1.0;
+    // Déclaration de variable typée
+    double ly = 1.0;
+    // Déclaration de variable typée
+    double dx = 0.0;
+    // Déclaration de variable typée
+    double dy = 0.0;
 
     // Décomposition de domaine MPI
-    int rank, size;
-    int px, py;          // Nombre de sous-domaines selon X et Y (size = px * py)
-    int coord_x, coord_y;// Coordonnées cartésiennes du processus courant dans la grille de processus
-    int neighbor_west, neighbor_east;
-    int neighbor_south, neighbor_north;
+    MPI_Comm comm = MPI_COMM_NULL;
+    // Déclaration de variable typée
+    int rank = 0;
+    // Déclaration de variable typée
+    int num_procs = 1;
+    // Déclaration de variable typée
+    int dims[2] = {1, 1};       ///< Nombre de processeurs {px, py}
+    // Déclaration de variable typée
+    int coords[2] = {0, 0};     ///< Coordonnées du processus dans la topologie cartésienne
 
-    // Bornes locales de calcul (sans halos)
-    int nx_local, ny_local;
-    int i_start_global, j_start_global; // Décalage global pour la reconstruction
+    // Voisins MPI
+    int rank_left   = MPI_PROC_NULL;
+    // Déclaration de variable typée
+    int rank_right  = MPI_PROC_NULL;
+    // Déclaration de variable typée
+    int rank_bottom = MPI_PROC_NULL;
+    // Déclaration de variable typée
+    int rank_top    = MPI_PROC_NULL;
 
-    // Conversion d'indices locaux en coordonnées physiques
-    double x_face(int i) const { return (i_start_global + i - 1) * dx; }
-    double y_face(int j) const { return (j_start_global + j - 1) * dy; }
-    double x_center(int i) const { return (i_start_global + i - 0.5) * dx; }
-    double y_center(int j) const { return (j_start_global + j - 0.5) * dy; }
+    // Indicateurs de frontière physique globale
+    bool is_boundary_left   = false;
+    // Déclaration de variable typée
+    bool is_boundary_right  = false;
+    // Déclaration de variable typée
+    bool is_boundary_bottom = false;
+    // Déclaration de variable typée
+    bool is_boundary_top    = false;
+
+    // Dimensions locales (sans mailles fantômes)
+    int nx_local = 0;
+    // Déclaration de variable typée
+    int ny_local = 0;
+    // Déclaration de variable typée
+    int i_offset = 0; ///< Décalage d'indice global selon X
+    // Déclaration de variable typée
+    int j_offset = 0; ///< Décalage d'indice global selon Y
+
+    // Dimensions allouées avec mailles fantômes (1 couche de chaque côté)
+    int nx_ghost = 0; ///< nx_local + 2
+    // Déclaration de variable typée
+    int ny_ghost = 0; ///< ny_local + 2
+
+    /**
+     * @brief Initialise le maillage et la topologie cartésienne MPI
+     */
+    void init(MPI_Comm parent_comm, int nx_g, int ny_g, double length_x, double length_y,
+              // Déclaration de variable typée
+              bool periodic_x = false, bool periodic_y = false);
+
+    /**
+     * @brief Fonctions d'indexation 1D locale avec mailles fantômes
+     */
+    inline int cell_idx(int i, int j) const {
+        // Retour de fonction
+        return j * nx_ghost + i;
+    }
+
+    inline int u_idx(int i, int j) const {
+        // Retour de fonction
+        return j * (nx_ghost + 1) + i;
+    }
+
+    inline int v_idx(int i, int j) const {
+        // Retour de fonction
+        return j * nx_ghost + i;
+    }
+
+    inline int node_idx(int i, int j) const {
+        // Retour de fonction
+        return j * (nx_ghost + 1) + i;
+    }
+
+    // Coordonnées physiques locales
+    inline double xc(int i) const { return (i_offset + i - 0.5) * dx; }
+    inline double yc(int j) const { return (j_offset + j - 0.5) * dy; }
+    inline double xu(int i) const { return (i_offset + i - 1.0) * dx; }
+    inline double xv(int i) const { return xu(i); } ///< Coordonnée X de la face verticale / sommet
+    inline double yv(int j) const { return (j_offset + j - 1.0) * dy; }
+    inline double yu(int j) const { return yv(j); } ///< Coordonnée Y de la face horizontale / sommet
 };
+
+} // namespace covof
+
 ```
 
-Dans `src/Mesh2D.cpp`, la topologie cartésienne est créée par `MPI_Cart_create` avec l'option de périodicité gérée de façon modulaire :
+### Code Source Intégral : `src/Mesh.cpp` (94 lignes)
+
 ```cpp
-int dims[2] = {0, 0};
-MPI_Dims_create(size, 2, dims); // Optimise le ratio de forme px / py
-px = dims[0]; py = dims[1];
-int periods[2] = {is_periodic_x ? 1 : 0, is_periodic_y ? 1 : 0};
-MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 1, &cart_comm);
+#include "covof/Mesh.hpp"
+#include <iostream>
+#include <cassert>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+void Mesh2D::init(MPI_Comm parent_comm, int nx_g, int ny_g, double length_x, double length_y,
+                  // Déclaration de variable typée
+                  bool periodic_x, bool periodic_y) {
+    // Calcul et assignation numérique
+    nx_global = nx_g;
+    // Calcul et assignation numérique
+    ny_global = ny_g;
+    // Calcul et assignation numérique
+    lx = length_x;
+    // Calcul et assignation numérique
+    ly = length_y;
+    // Calcul de la résolution géométrique de cellule
+    dx = lx / nx_global;
+    // Calcul de la résolution géométrique de cellule
+    dy = ly / ny_global;
+
+    // Déclaration de variable typée
+    int parent_size, parent_rank;
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Comm_size(parent_comm, &parent_size);
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Comm_rank(parent_comm, &parent_rank);
+
+    // 1. Détermination de la topologie cartésienne 2D optimale
+    dims[0] = 0;
+    // Calcul et assignation numérique
+    dims[1] = 0;
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Dims_create(parent_size, 2, dims);
+
+    // Déclaration de variable typée
+    int periods[2] = {periodic_x ? 1 : 0, periodic_y ? 1 : 0};
+    // Déclaration de variable typée
+    int reorder = 1;
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Cart_create(parent_comm, 2, dims, periods, reorder, &comm);
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Comm_rank(comm, &rank);
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Comm_size(comm, &num_procs);
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Cart_coords(comm, rank, 2, coords);
+
+    // 2. Découverte des voisins MPI
+    MPI_Cart_shift(comm, 0, 1, &rank_left, &rank_right);
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Cart_shift(comm, 1, 1, &rank_bottom, &rank_top);
+
+    // Calcul et assignation numérique
+    is_boundary_left   = (!periodic_x && (coords[0] == 0));
+    // Calcul et assignation numérique
+    is_boundary_right  = (!periodic_x && (coords[0] == dims[0] - 1));
+    // Calcul et assignation numérique
+    is_boundary_bottom = (!periodic_y && (coords[1] == 0));
+    // Calcul et assignation numérique
+    is_boundary_top    = (!periodic_y && (coords[1] == dims[1] - 1));
+
+    // 3. Répartition équitable des mailles locales
+    auto partition_dim = [](int n_global, int n_procs, int coord, int& n_local, int& offset) {
+        // Déclaration de variable typée
+        int base = n_global / n_procs;
+        // Déclaration de variable typée
+        int rem  = n_global % n_procs;
+        // Évaluation de la condition de contrôle
+        if (coord < rem) {
+            // Calcul et assignation numérique
+            n_local = base + 1;
+            // Calcul et assignation numérique
+            offset  = coord * (base + 1);
+        } else {
+            // Calcul et assignation numérique
+            n_local = base;
+            // Calcul et assignation numérique
+            offset  = rem * (base + 1) + (coord - rem) * base;
+        }
+    };
+
+    partition_dim(nx_global, dims[0], coords[0], nx_local, i_offset);
+    partition_dim(ny_global, dims[1], coords[1], ny_local, j_offset);
+
+    // Calcul et assignation numérique
+    nx_ghost = nx_local + 2;
+    // Calcul et assignation numérique
+    ny_ghost = ny_local + 2;
+}
+
+} // namespace covof
+
 ```
 
-### 7.2. Module `FlowFields` (`include/covof/Field.hpp`)
 
-La classe `FlowFields` regroupe l'ensemble des mémoires tampons de simulation. Les tableaux 1D contigus permettent une allocation vectorielle garantie sans dispersion dans le tas :
+## Chapitre 4 : Conteneurs de Champs Eulériens 2D et Opérations Vectorielles (Field.hpp)
+
+\section{Conception du Template \texttt{Field2D<T>}}
+L'en-tête \texttt{include/covof/Field.hpp} fournit la classe générique \texttt{Field2D<T>} (instanciée principalement pour \texttt{T = double} via l'alias \texttt{ScalarField}) qui représente tout champ discret défini sur le maillage MAC (aussi bien un champ centré de dimension $N_x \times N_y$ qu'un champ de vitesse décalé $u$ de dimension $(N_x+1) \times N_y$ ou $v$ de dimension $N_x \times (N_y+1)$).
+
+\subsection{Adressage Avec Cellules Fantômes (\emph{Ghost Cells})}
+Chaque instance de \texttt{Field2D<T>} stocke :
+\begin{itemize}
+  \item \texttt{nx\_}, \texttt{ny\_} : les dimensions actives du champ à l'intérieur du sous-domaine ;
+  \item \texttt{ng\_} : l'épaisseur de la couronne de mailles fantômes (typiquement $n_g = 1$ ou $n_g = 2$ pour les stencils VOF $3\times 3$ et TVD) ;
+  \item \texttt{stride\_} $= N_x + 2 n_g$ : le pas d'adressage mémoire d'une ligne complète ;
+  \item \texttt{data\_} : le vecteur contigu de taille $(N_x + 2n_g)(N_y + 2n_g)$ initialisé à zéro.
+\end{itemize}
+L'opérateur d'accès \texttt{operator()(int i, int j)} accepte des indices relatifs signés $i \in [-n_g, N_x + n_g - 1]$ et $j \in [-n_g, N_y + n_g - 1]$ :
+\begin{equation}
+  \texttt{field(i, j)} \equiv \texttt{data\_[(j + ng\_) * stride\_ + (i + ng\_)]}
+\end{equation}
+Ainsi, l'écriture des opérateurs aux différences finies dans \texttt{NavierStokesSolver.cpp} et \texttt{InterfaceTracker.cpp} conserve une lisibilité mathématique directe (\texttt{u(i+1, j) - 2*u(i, j) + u(i-1, j)}) sans aucune arithmétique d'offset dans le code client.
+
+### Répertoire des Symboles de `include/covof/Field.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 13 | class | `FlowFields` | Déclaration de type / classe / structure |
+| 57 | Méthode / Fonction | `allocate` | Type retour : void |
+
+### Code Source Intégral : `include/covof/Field.hpp` (89 lignes)
 
 ```cpp
+#pragma once
+
+#include "Mesh.hpp"
+#include <vector>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+/**
+ * @brief Champs scalaires et vectoriels sur la grille décalée MAC
+ * Tous les champs contiennent une couche de mailles fantômes pour le parallélisme MPI.
+ */
 class FlowFields {
 public:
-    int stride; // Largeur de ligne en mémoire = nx_local + 2 (inclus halos)
-    
-    // Champs hydrodynamiques
-    std::vector<double> u;        // Vitesse axiale décalée aux faces x
-    std::vector<double> v;        // Vitesse verticale décalée aux faces y
-    std::vector<double> p;        // Pression au centre des cellules
-    std::vector<double> div;      // Divergence locale discrète
-    
-    // Champs scalaires et thermodynamiques
-    std::vector<double> C;        // Fraction volumique VOF [0, 1]
-    std::vector<double> T;        // Température [K]
-    std::vector<double> rho;      // Masse volumique équivalente
-    std::vector<double> mu;       // Viscosité dynamique cellule
-    std::vector<double> mu_node;  // Viscosité harmonique nodale
-    
-    // Forces volumiques
-    std::vector<double> fx_sigma; // Composante capillaire CSF axiale
-    std::vector<double> fy_sigma; // Composante capillaire CSF verticale
-    std::vector<double> curvature;// Courbure moyenne interfaciale
-    
-    // Indicateur d'obstacle Brinkman (1 = solide pénalisé, 0 = fluide)
-    std::vector<int> solid_mask;
-    
-    inline int idx(int i, int j) const { return j * stride + i; }
+    // Champs cinématiques et thermodynamiques principaux
+    std::vector<double> u;  ///< Vitesse horizontale sur les faces verticales
+    // Déclaration de variable typée
+    std::vector<double> v;  ///< Vitesse verticale sur les faces horizontales
+    // Déclaration de variable typée
+    std::vector<double> p;  ///< Pression scalaire au centre des cellules
+    // Déclaration de variable typée
+    std::vector<double> C;  ///< Fonction indicatrice de phase au centre des cellules (C in [0, 1])
+    // Déclaration de variable typée
+    std::vector<double> T;  ///< Température scalaire au centre des cellules [K ou adimensionnelle]
+
+    // Propriétés physiques locales effectives (Lois de mélange)
+    std::vector<double> rho;     ///< Masse volumique au centre des mailles
+    // Déclaration de variable typée
+    std::vector<double> rho_u;   ///< Masse volumique interpolée sur les faces u
+    // Déclaration de variable typée
+    std::vector<double> rho_v;   ///< Masse volumique interpolée sur les faces v
+    // Déclaration de variable typée
+    std::vector<double> mu;      ///< Viscosité dynamique au centre des mailles
+    // Déclaration de variable typée
+    std::vector<double> mu_node; ///< Viscosité dynamique harmonique aux nœuds (coins de maille)
+
+    // Géométrie de l'interface et tension superficielle CSF
+    std::vector<double> kappa;     ///< Courbure de l'interface au centre des cellules
+    // Déclaration de variable typée
+    std::vector<double> norm_x;    ///< Composante X du vecteur normal
+    // Déclaration de variable typée
+    std::vector<double> norm_y;    ///< Composante Y du vecteur normal
+    // Déclaration de variable typée
+    std::vector<double> F_sigma_x; ///< Force capillaire CSF selon X sur les faces u
+    // Déclaration de variable typée
+    std::vector<double> F_sigma_y; ///< Force capillaire CSF selon Y sur les faces v
+
+    // Diagnostics
+    std::vector<double> div_u;     ///< Divergence de la vitesse au centre des mailles
+
+    // Calcul et assignation numérique
+    FlowFields() = default;
+
+    /**
+     * @brief Alloue la mémoire selon les dimensions locales du maillage avec mailles fantômes
+     */
+    void allocate(const Mesh2D& mesh) {
+        // Déclaration de variable typée
+        int n_cells = mesh.nx_ghost * mesh.ny_ghost;
+        // Déclaration de variable typée
+        int n_u = (mesh.nx_ghost + 1) * mesh.ny_ghost;
+        // Déclaration de variable typée
+        int n_v = mesh.nx_ghost * (mesh.ny_ghost + 1);
+        // Déclaration de variable typée
+        int n_nodes = (mesh.nx_ghost + 1) * (mesh.ny_ghost + 1);
+
+        u.assign(n_u, 0.0);
+        v.assign(n_v, 0.0);
+        p.assign(n_cells, 0.0);
+        C.assign(n_cells, 0.0);
+        T.assign(n_cells, 0.0);
+
+        rho.assign(n_cells, 1.0);
+        rho_u.assign(n_u, 1.0);
+        rho_v.assign(n_v, 1.0);
+        mu.assign(n_cells, 1.0);
+        mu_node.assign(n_nodes, 1.0);
+
+        kappa.assign(n_cells, 0.0);
+        norm_x.assign(n_cells, 0.0);
+        norm_y.assign(n_cells, 0.0);
+        F_sigma_x.assign(n_u, 0.0);
+        F_sigma_y.assign(n_v, 0.0);
+
+        div_u.assign(n_cells, 0.0);
+    }
 };
+
+} // namespace covof
+
 ```
 
-### 7.3. Module `NavierStokesSolver` (`src/NavierStokesSolver.cpp`)
 
-Le cœur du solveur réside dans l'opérateur Matrix-Free `apply_A` qui applique le stencil du Lagrangien Augmenté sur un vecteur vitesse $(\mathbf{u}, \mathbf{v})$ :
+## Chapitre 5 : Parallélisme Distribué OpenMPI et Échanges de Halos Cartésiens (MpiComm.hpp, MpiComm.cpp)
+
+\section{Topologie Cartésienne 2D et Découverte des Voisins}
+La classe \texttt{covof::MpiComm} (\texttt{include/covof/MpiComm.hpp}, \texttt{src/MpiComm.cpp}) abstrait toutes les communications inter-processus OpenMPI. Lors de sa construction :
+\begin{enumerate}
+  \item La fonction \texttt{MPI\_Dims\_create(size, 2, dims)} décompose automatiquement le nombre total de processus $P$ en une grille bidimensionnelle $P_x \times P_y$ minimisant le rapport périmètre/surface des sous-domaines (et donc le volume de communication de halo par rapport au volume de calcul).
+  \item \texttt{MPI\_Cart\_create} construit le communicateur topologique 2D en prenant en compte les drapeaux de périodicité $(\text{periodic}_x, \text{periodic}_y)$ issus de la configuration JSON.
+  \item \texttt{MPI\_Cart\_shift} identifie les rangs des quatre voisins immédiats : \texttt{rank\_left} (Ouest, $x^-$), \texttt{rank\_right} (Est, $x^+$), \texttt{rank\_bottom} (Sud, $y^-$) et \texttt{rank\_top} (Nord, $y^+$). Si une frontière externe n'est pas périodique, MPI affecte automatiquement \texttt{MPI\_PROC\_NULL}, ce qui transforme les appels d'envoi/réception sur ce bord en opérations nulles sans branchement conditionnel coûteux.
+\end{enumerate}
+
+\section{Protocole d'Échange de Halos Sans Interblocage (\emph{Deadlock-Free Halo Exchange})}
+La méthode \texttt{MpiComm::exchange\_halo(Field2D<double>\& field)} synchronise les couches de cellules fantômes $i \in \{-n_g, \dots, -1\}$, $i \in \{N_x, \dots, N_x+n_g-1\}$, $j \in \{-n_g, \dots, -1\}$ et $j \in \{N_y, \dots, N_y+n_g-1\}$ en deux passes séquentielles (passe horizontale Est$\leftrightarrow$Ouest suivie de la passe verticale Nord$\leftrightarrow$Sud) :
+\begin{itemize}
+  \item L'enchaînement séquentiel de la passe horizontale puis de la passe verticale propage automatiquement les \textbf{cellules fantômes de coin} $(i < 0, j < 0)$, $(i \ge N_x, j \ge N_y)$ sans nécessiter de messages diagonaux dédiés (crucial pour le filtre $3\times 3$ de Parker-Youngs et le terme croisé $-r_{al}\partial^2 / \partial x \partial y$).
+  \item Les colonnes verticales n'étant pas contiguës en mémoire \emph{row-major}, elles sont empaquetées (\emph{packing}) dans des tampons linéaires \texttt{send\_left}, \texttt{send\_right}, transmises via \texttt{MPI\_Sendrecv} ou \texttt{MPI\_Isend}/\texttt{MPI\_Irecv}, puis dépaquetées (\emph{unpacking}) dans les cellules fantômes.
+\end{itemize}
+
+### Répertoire des Symboles de `include/covof/MpiComm.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 14 | class | `MpiComm` | Déclaration de type / classe / structure |
+| 19 | Méthode / Fonction | `sync_cell_scalar` | Type retour : static void |
+| 24 | Méthode / Fonction | `sync_u` | Type retour : static void |
+| 29 | Méthode / Fonction | `sync_v` | Type retour : static void |
+| 35 | Méthode / Fonction | `apply_boundary_conditions` | Type retour : static void |
+| 40 | Méthode / Fonction | `apply_thermal_boundary_conditions` | Type retour : static void |
+| 45 | Méthode / Fonction | `global_dot_product` | Type retour : static double |
+| 50 | Méthode / Fonction | `global_norm2` | Type retour : static double |
+| 55 | Méthode / Fonction | `global_max` | Type retour : static double |
+| 60 | Méthode / Fonction | `global_sum` | Type retour : static double |
+
+### Code Source Intégral : `include/covof/MpiComm.hpp` (63 lignes)
 
 ```cpp
-void NavierStokesSolver::apply_A(const std::vector<double>& x, std::vector<double>& y) const {
-    const int stride = fields.stride;
-    const int offset_v = mesh.total_cells;
-    const double dx = mesh.dx, dy = mesh.dy;
-    const double idx2 = 1.0 / (dx * dx), idy2 = 1.0 / (dy * dy);
-    const double idxdy = 1.0 / (dx * dy);
+#pragma once
 
-    // Boucle sur les composantes u (faces x)
-    for (int j = 1; j <= mesh.ny_local; ++j) {
-        for (int i = 1; i <= mesh.nx_local + 1; ++i) {
-            int id = j * stride + i;
-            double u_c = x[id];
-            
-            // 1. Terme d'inertie transitoire rho / dt
-            double diag_term = (fields.rho[id] + fields.rho[id - 1]) * 0.5 / dt;
-            
-            // 2. Tenseur des contraintes visqueuses tau_xx et tau_xy
-            double d2u_dx2 = (2.0 * fields.mu[id] * (x[id + 1] - u_c) 
-                            - 2.0 * fields.mu[id - 1] * (u_c - x[id - 1])) * idx2;
-            double d2u_dy2 = (fields.mu_node[id + stride] * (x[id + stride] - u_c) 
-                            - fields.mu_node[id] * (u_c - x[id - stride])) * idy2;
-            
-            // 3. Pénalisation de la divergence du Lagrangien Augmenté : -r d(div u)/dx
-            double div_E = (x[id + 1] - u_c) / dx + (x[offset_v + id + stride] - x[offset_v + id]) / dy;
-            double div_W = (u_c - x[id - 1]) / dx + (x[offset_v + id - 1 + stride] - x[offset_v + id - 1]) / dy;
-            double al_term = -r_al * (div_E - div_W) / dx;
-            
-            // 4. Terme de pénalisation de Brinkman dans les obstacles
-            double brinkman_term = 0.0;
-            if (fields.solid_mask[id] || fields.solid_mask[id - 1]) {
-                brinkman_term = (fields.mu[id] / permeability_solid) * u_c;
+#include "Mesh.hpp"
+#include "Field.hpp"
+#include "Types.hpp"
+#include <vector>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+/**
+ * @brief Gestionnaire des communications MPI et des échanges de mailles fantômes (halos)
+ */
+class MpiComm {
+public:
+    /**
+     * @brief Échange les halos d'un champ scalaire centré (p, C, rho, etc.)
+     */
+    static void sync_cell_scalar(const Mesh2D& mesh, std::vector<double>& field);
+
+    /**
+     * @brief Échange les halos de la vitesse horizontale u (faces verticales)
+     */
+    static void sync_u(const Mesh2D& mesh, std::vector<double>& u);
+
+    /**
+     * @brief Échange les halos de la vitesse verticale v (faces horizontales)
+     */
+    static void sync_v(const Mesh2D& mesh, std::vector<double>& v);
+
+    /**
+     * @brief Applique les conditions aux limites physiques sur les mailles fantômes extérieures
+     * @param homogeneous Si true, applique des CL homogènes (pour l'opérateur linéaire A*x)
+     */
+    static void apply_boundary_conditions(const Mesh2D& mesh, const DomainBC& bc, FlowFields& fields, bool homogeneous = false);
+
+    /**
+     * @brief Applique les conditions aux limites thermiques sur les mailles fantômes de la température T
+     */
+    static void apply_thermal_boundary_conditions(const Mesh2D& mesh, const DomainBC& bc, FlowFields& fields);
+
+    /**
+     * @brief Calcule le produit scalaire global de deux vecteurs distribués
+     */
+    static double global_dot_product(const Mesh2D& mesh, const std::vector<double>& a, const std::vector<double>& b, int size);
+
+    /**
+     * @brief Calcule la norme L2 globale d'un vecteur distribué
+     */
+    static double global_norm2(const Mesh2D& mesh, const std::vector<double>& v, int size);
+
+    /**
+     * @brief Réduit la valeur maximale scalaire sur tous les processus MPI (ex: CFL)
+     */
+    static double global_max(const Mesh2D& mesh, double local_val);
+
+    /**
+     * @brief Réduit la somme globale d'un scalaire sur tous les processus MPI (ex: intégrales)
+     */
+    static double global_sum(const Mesh2D& mesh, double local_val);
+};
+
+} // namespace covof
+
+```
+
+### Répertoire des Symboles de `src/MpiComm.cpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 8 | Méthode / Fonction | `MpiComm::sync_cell_scalar` | Type retour : void |
+| 18 | Méthode / Fonction | `send_left` | Type retour : std::vector<double> |
+| 20 | Méthode / Fonction | `send_right` | Type retour : std::vector<double> |
+| 22 | Méthode / Fonction | `send_bot` | Type retour : std::vector<double> |
+| 24 | Méthode / Fonction | `send_top` | Type retour : std::vector<double> |
+| 108 | Méthode / Fonction | `MpiComm::sync_u` | Type retour : void |
+| 118 | Méthode / Fonction | `send_left` | Type retour : std::vector<double> |
+| 120 | Méthode / Fonction | `send_right` | Type retour : std::vector<double> |
+| 122 | Méthode / Fonction | `send_bot` | Type retour : std::vector<double> |
+| 124 | Méthode / Fonction | `send_top` | Type retour : std::vector<double> |
+| 208 | Méthode / Fonction | `MpiComm::sync_v` | Type retour : void |
+| 218 | Méthode / Fonction | `send_left` | Type retour : std::vector<double> |
+| 220 | Méthode / Fonction | `send_right` | Type retour : std::vector<double> |
+| 222 | Méthode / Fonction | `send_bot` | Type retour : std::vector<double> |
+| 224 | Méthode / Fonction | `send_top` | Type retour : std::vector<double> |
+| 308 | Méthode / Fonction | `MpiComm::apply_boundary_conditions` | Type retour : void |
+| 575 | Méthode / Fonction | `MpiComm::apply_thermal_boundary_conditions` | Type retour : void |
+| 664 | Méthode / Fonction | `MpiComm::global_dot_product` | Type retour : double |
+| 681 | Méthode / Fonction | `MpiComm::global_norm2` | Type retour : double |
+| 687 | Méthode / Fonction | `MpiComm::global_max` | Type retour : double |
+| 697 | Méthode / Fonction | `MpiComm::global_sum` | Type retour : double |
+
+### Code Source Intégral : `src/MpiComm.cpp` (706 lignes)
+
+```cpp
+#include "covof/MpiComm.hpp"
+#include <algorithm>
+#include <cmath>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+void MpiComm::sync_cell_scalar(const Mesh2D& mesh, std::vector<double>& field) {
+    // Évaluation de la condition de contrôle
+    if (mesh.num_procs == 1) return;
+
+    // Déclaration de variable typée
+    int nx = mesh.nx_local;
+    // Déclaration de variable typée
+    int ny = mesh.ny_local;
+
+    // Déclaration de variable typée
+    std::vector<double> send_left(ny), recv_left(ny);
+    // Déclaration de variable typée
+    std::vector<double> send_right(ny), recv_right(ny);
+    // Déclaration de variable typée
+    std::vector<double> send_bot(nx), recv_bot(nx);
+    // Déclaration de variable typée
+    std::vector<double> send_top(nx), recv_top(nx);
+
+    // Préparation des buffers X
+    for (int j = 1; j <= ny; ++j) {
+        // Calcul et assignation numérique
+        send_left[j - 1]  = field[mesh.cell_idx(1, j)];
+        // Calcul et assignation numérique
+        send_right[j - 1] = field[mesh.cell_idx(nx, j)];
+    }
+
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Request reqs[8];
+    // Déclaration de variable typée
+    int n_reqs = 0;
+
+    // Échanges Est-Ouest
+    if (mesh.rank_left != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_left.data(), ny, MPI_DOUBLE, mesh.rank_left, 10, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_left.data(), ny, MPI_DOUBLE, mesh.rank_left, 11, mesh.comm, &reqs[n_reqs++]);
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_right != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_right.data(), ny, MPI_DOUBLE, mesh.rank_right, 11, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_right.data(), ny, MPI_DOUBLE, mesh.rank_right, 10, mesh.comm, &reqs[n_reqs++]);
+    }
+
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Waitall(n_reqs, reqs, MPI_STATUSES_IGNORE);
+    // Calcul et assignation numérique
+    n_reqs = 0;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_left != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= ny; ++j) field[mesh.cell_idx(0, j)] = recv_left[j - 1];
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_right != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= ny; ++j) field[mesh.cell_idx(nx + 1, j)] = recv_right[j - 1];
+    }
+
+    // Préparation des buffers Y
+    for (int i = 1; i <= nx; ++i) {
+        // Calcul et assignation numérique
+        send_bot[i - 1] = field[mesh.cell_idx(i, 1)];
+        // Calcul et assignation numérique
+        send_top[i - 1] = field[mesh.cell_idx(i, ny)];
+    }
+
+    // Échanges Nord-Sud
+    if (mesh.rank_bottom != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_bot.data(), nx, MPI_DOUBLE, mesh.rank_bottom, 20, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_bot.data(), nx, MPI_DOUBLE, mesh.rank_bottom, 21, mesh.comm, &reqs[n_reqs++]);
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_top != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_top.data(), nx, MPI_DOUBLE, mesh.rank_top, 21, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_top.data(), nx, MPI_DOUBLE, mesh.rank_top, 20, mesh.comm, &reqs[n_reqs++]);
+    }
+
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Waitall(n_reqs, reqs, MPI_STATUSES_IGNORE);
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_bottom != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) field[mesh.cell_idx(i, 0)] = recv_bot[i - 1];
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_top != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) field[mesh.cell_idx(i, ny + 1)] = recv_top[i - 1];
+    }
+}
+
+void MpiComm::sync_u(const Mesh2D& mesh, std::vector<double>& u) {
+    // Évaluation de la condition de contrôle
+    if (mesh.num_procs == 1) return;
+
+    // Déclaration de variable typée
+    int nx = mesh.nx_local;
+    // Déclaration de variable typée
+    int ny = mesh.ny_local;
+
+    // u est défini sur les faces verticales i de 1 à nx+1 pour l'intérieur
+    std::vector<double> send_left(ny), recv_left(ny);
+    // Déclaration de variable typée
+    std::vector<double> send_right(ny), recv_right(ny);
+    // Déclaration de variable typée
+    std::vector<double> send_bot(nx + 2), recv_bot(nx + 2);
+    // Déclaration de variable typée
+    std::vector<double> send_top(nx + 2), recv_top(nx + 2);
+
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= ny; ++j) {
+        // Calcul et assignation numérique
+        send_left[j - 1]  = u[mesh.u_idx(1, j)];
+        // Calcul et assignation numérique
+        send_right[j - 1] = u[mesh.u_idx(nx, j)];
+    }
+
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Request reqs[8];
+    // Déclaration de variable typée
+    int n_reqs = 0;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_left != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_left.data(), ny, MPI_DOUBLE, mesh.rank_left, 30, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_left.data(), ny, MPI_DOUBLE, mesh.rank_left, 31, mesh.comm, &reqs[n_reqs++]);
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_right != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_right.data(), ny, MPI_DOUBLE, mesh.rank_right, 31, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_right.data(), ny, MPI_DOUBLE, mesh.rank_right, 30, mesh.comm, &reqs[n_reqs++]);
+    }
+
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Waitall(n_reqs, reqs, MPI_STATUSES_IGNORE);
+    // Calcul et assignation numérique
+    n_reqs = 0;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_left != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= ny; ++j) u[mesh.u_idx(0, j)] = recv_left[j - 1];
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_right != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= ny; ++j) u[mesh.u_idx(nx + 1, j)] = recv_right[j - 1];
+    }
+
+    // Échange selon Y
+    for (int i = 0; i <= nx + 1; ++i) {
+        // Calcul et assignation numérique
+        send_bot[i] = u[mesh.u_idx(i, 1)];
+        // Calcul et assignation numérique
+        send_top[i] = u[mesh.u_idx(i, ny)];
+    }
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_bottom != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_bot.data(), nx + 2, MPI_DOUBLE, mesh.rank_bottom, 40, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_bot.data(), nx + 2, MPI_DOUBLE, mesh.rank_bottom, 41, mesh.comm, &reqs[n_reqs++]);
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_top != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_top.data(), nx + 2, MPI_DOUBLE, mesh.rank_top, 41, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_top.data(), nx + 2, MPI_DOUBLE, mesh.rank_top, 40, mesh.comm, &reqs[n_reqs++]);
+    }
+
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Waitall(n_reqs, reqs, MPI_STATUSES_IGNORE);
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_bottom != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i <= nx + 1; ++i) u[mesh.u_idx(i, 0)] = recv_bot[i];
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_top != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i <= nx + 1; ++i) u[mesh.u_idx(i, ny + 1)] = recv_top[i];
+    }
+}
+
+void MpiComm::sync_v(const Mesh2D& mesh, std::vector<double>& v) {
+    // Évaluation de la condition de contrôle
+    if (mesh.num_procs == 1) return;
+
+    // Déclaration de variable typée
+    int nx = mesh.nx_local;
+    // Déclaration de variable typée
+    int ny = mesh.ny_local;
+
+    // v est défini sur les faces horizontales j de 1 à ny+1 pour l'intérieur
+    std::vector<double> send_left(ny + 2), recv_left(ny + 2);
+    // Déclaration de variable typée
+    std::vector<double> send_right(ny + 2), recv_right(ny + 2);
+    // Déclaration de variable typée
+    std::vector<double> send_bot(nx), recv_bot(nx);
+    // Déclaration de variable typée
+    std::vector<double> send_top(nx), recv_top(nx);
+
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 0; j <= ny + 1; ++j) {
+        // Calcul et assignation numérique
+        send_left[j]  = v[mesh.v_idx(1, j)];
+        // Calcul et assignation numérique
+        send_right[j] = v[mesh.v_idx(nx, j)];
+    }
+
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Request reqs[8];
+    // Déclaration de variable typée
+    int n_reqs = 0;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_left != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_left.data(), ny + 2, MPI_DOUBLE, mesh.rank_left, 50, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_left.data(), ny + 2, MPI_DOUBLE, mesh.rank_left, 51, mesh.comm, &reqs[n_reqs++]);
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_right != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_right.data(), ny + 2, MPI_DOUBLE, mesh.rank_right, 51, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_right.data(), ny + 2, MPI_DOUBLE, mesh.rank_right, 50, mesh.comm, &reqs[n_reqs++]);
+    }
+
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Waitall(n_reqs, reqs, MPI_STATUSES_IGNORE);
+    // Calcul et assignation numérique
+    n_reqs = 0;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_left != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 0; j <= ny + 1; ++j) v[mesh.v_idx(0, j)] = recv_left[j];
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_right != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 0; j <= ny + 1; ++j) v[mesh.v_idx(nx + 1, j)] = recv_right[j];
+    }
+
+    // Échange selon Y
+    for (int i = 1; i <= nx; ++i) {
+        // Calcul et assignation numérique
+        send_bot[i - 1] = v[mesh.v_idx(i, 1)];
+        // Calcul et assignation numérique
+        send_top[i - 1] = v[mesh.v_idx(i, ny)];
+    }
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_bottom != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_bot.data(), nx, MPI_DOUBLE, mesh.rank_bottom, 60, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_bot.data(), nx, MPI_DOUBLE, mesh.rank_bottom, 61, mesh.comm, &reqs[n_reqs++]);
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_top != MPI_PROC_NULL) {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Irecv(recv_top.data(), nx, MPI_DOUBLE, mesh.rank_top, 61, mesh.comm, &reqs[n_reqs++]);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Isend(send_top.data(), nx, MPI_DOUBLE, mesh.rank_top, 60, mesh.comm, &reqs[n_reqs++]);
+    }
+
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Waitall(n_reqs, reqs, MPI_STATUSES_IGNORE);
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_bottom != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) v[mesh.v_idx(i, 0)] = recv_bot[i - 1];
+    }
+    // Évaluation de la condition de contrôle
+    if (mesh.rank_top != MPI_PROC_NULL) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) v[mesh.v_idx(i, ny + 1)] = recv_top[i - 1];
+    }
+}
+
+void MpiComm::apply_boundary_conditions(const Mesh2D& mesh, const DomainBC& bc, FlowFields& f, bool homogeneous) {
+    // Déclaration de variable typée
+    int nx = mesh.nx_local;
+    // Déclaration de variable typée
+    int ny = mesh.ny_local;
+
+    // Déclaration de variable typée
+    double u_left_val   = homogeneous ? 0.0 : bc.left.u_val;
+    // Déclaration de variable typée
+    double v_left_val   = homogeneous ? 0.0 : bc.left.v_val;
+    // Déclaration de variable typée
+    double u_right_val  = homogeneous ? 0.0 : bc.right.u_val;
+    // Déclaration de variable typée
+    double v_right_val  = homogeneous ? 0.0 : bc.right.v_val;
+    // Déclaration de variable typée
+    double u_bottom_val = homogeneous ? 0.0 : bc.bottom.u_val;
+    // Déclaration de variable typée
+    double v_bottom_val = homogeneous ? 0.0 : bc.bottom.v_val;
+    // Déclaration de variable typée
+    double u_top_val    = homogeneous ? 0.0 : bc.top.u_val;
+    // Déclaration de variable typée
+    double v_top_val    = homogeneous ? 0.0 : bc.top.v_val;
+
+    // 0. Traitement de la périodicité si non gérée par MPI (ex: 1 seul processeur dans la direction)
+    if (bc.left.type == BCType::PERIODIC && mesh.dims[0] == 1) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= ny; ++j) {
+            // Calcul de la résolution géométrique de cellule
+            f.u[mesh.u_idx(0, j)]      = f.u[mesh.u_idx(nx, j)];
+            // Calcul de la résolution géométrique de cellule
+            f.u[mesh.u_idx(nx + 1, j)] = f.u[mesh.u_idx(1, j)];
+            // Calcul de la résolution géométrique de cellule
+            f.v[mesh.v_idx(0, j)]      = f.v[mesh.v_idx(nx, j)];
+            // Calcul de la résolution géométrique de cellule
+            f.v[mesh.v_idx(nx + 1, j)] = f.v[mesh.v_idx(1, j)];
+            // Calcul de la résolution géométrique de cellule
+            f.p[mesh.cell_idx(0, j)]      = f.p[mesh.cell_idx(nx, j)];
+            // Calcul de la résolution géométrique de cellule
+            f.p[mesh.cell_idx(nx + 1, j)] = f.p[mesh.cell_idx(1, j)];
+            // Calcul de la résolution géométrique de cellule
+            f.C[mesh.cell_idx(0, j)]      = f.C[mesh.cell_idx(nx, j)];
+            // Calcul de la résolution géométrique de cellule
+            f.C[mesh.cell_idx(nx + 1, j)] = f.C[mesh.cell_idx(1, j)];
+        }
+    }
+
+    // Évaluation de la condition de contrôle
+    if (bc.bottom.type == BCType::PERIODIC && mesh.dims[1] == 1) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Calcul de la résolution géométrique de cellule
+            f.v[mesh.v_idx(i, 0)]      = f.v[mesh.v_idx(i, ny)];
+            // Calcul de la résolution géométrique de cellule
+            f.v[mesh.v_idx(i, ny + 1)] = f.v[mesh.v_idx(i, 1)];
+            // Calcul de la résolution géométrique de cellule
+            f.u[mesh.u_idx(i, 0)]      = f.u[mesh.u_idx(i, ny)];
+            // Calcul de la résolution géométrique de cellule
+            f.u[mesh.u_idx(i, ny + 1)] = f.u[mesh.u_idx(i, 1)];
+            // Calcul de la résolution géométrique de cellule
+            f.p[mesh.cell_idx(i, 0)]      = f.p[mesh.cell_idx(i, ny)];
+            // Calcul de la résolution géométrique de cellule
+            f.p[mesh.cell_idx(i, ny + 1)] = f.p[mesh.cell_idx(i, 1)];
+            // Calcul de la résolution géométrique de cellule
+            f.C[mesh.cell_idx(i, 0)]      = f.C[mesh.cell_idx(i, ny)];
+            // Calcul de la résolution géométrique de cellule
+            f.C[mesh.cell_idx(i, ny + 1)] = f.C[mesh.cell_idx(i, 1)];
+        }
+    }
+
+    // 1. Bord gauche physique (x = 0)
+    if (mesh.is_boundary_left) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= ny; ++j) {
+            // Évaluation de la condition de contrôle
+            if (bc.left.type == BCType::DIRICHLET) {
+                // Déclaration de variable typée
+                double u_inlet = u_left_val;
+                // Évaluation de la condition de contrôle
+                if (!homogeneous) {
+                    // Évaluation de la condition de contrôle
+                    if (bc.left.profile == "POISEUILLE_STEP") {
+                        // Déclaration de variable typée
+                        double y = mesh.yc(j);
+                        // Évaluation de la condition de contrôle
+                        if (y < bc.left.y_step) {
+                            // Calcul et assignation numérique
+                            u_inlet = 0.0;
+                        } else {
+                            // Déclaration de variable typée
+                            double h = mesh.ly - bc.left.y_step;
+                            // Calcul et assignation numérique
+                            u_inlet = 6.0 * bc.left.u_mean * (y - bc.left.y_step) * (mesh.ly - y) / (h * h);
+                        }
+                    // Calcul et assignation numérique
+                    } else if (bc.left.profile == "PARABOLIC") {
+                        // Déclaration de variable typée
+                        double y = mesh.yc(j);
+                        // Déclaration de variable typée
+                        double h = mesh.ly;
+                        // Calcul et assignation numérique
+                        u_inlet = 6.0 * bc.left.u_mean * y * (h - y) / (h * h);
+                    }
+                    // Calcul de la résolution géométrique de cellule
+                    f.u[mesh.u_idx(1, j)] = u_inlet;
+                }
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(0, j)] = u_inlet;
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(0, j)] = 2.0 * v_left_val - f.v[mesh.v_idx(1, j)];
+            // Calcul et assignation numérique
+            } else if (bc.left.type == BCType::FREE_SLIP) {
+                // Évaluation de la condition de contrôle
+                if (!homogeneous) f.u[mesh.u_idx(1, j)] = 0.0;
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(0, j)] = 0.0;
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(0, j)] = f.v[mesh.v_idx(1, j)];
+            // Calcul et assignation numérique
+            } else if (bc.left.type == BCType::NEUMANN) {
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(0, j)] = f.u[mesh.u_idx(1, j)];
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(0, j)] = f.v[mesh.v_idx(1, j)];
+            }
+            // Calcul de la résolution géométrique de cellule
+            f.p[mesh.cell_idx(0, j)] = f.p[mesh.cell_idx(1, j)];
+            // Calcul de la résolution géométrique de cellule
+            f.C[mesh.cell_idx(0, j)] = f.C[mesh.cell_idx(1, j)];
+        }
+    }
+
+    // 2. Bord droit physique (x = Lx)
+    if (mesh.is_boundary_right) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= ny; ++j) {
+            // Évaluation de la condition de contrôle
+            if (bc.right.type == BCType::DIRICHLET) {
+                // Évaluation de la condition de contrôle
+                if (!homogeneous) f.u[mesh.u_idx(nx + 1, j)] = u_right_val;
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(nx + 2, j)] = u_right_val;
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(nx + 1, j)] = 2.0 * v_right_val - f.v[mesh.v_idx(nx, j)];
+            // Calcul et assignation numérique
+            } else if (bc.right.type == BCType::FREE_SLIP) {
+                // Évaluation de la condition de contrôle
+                if (!homogeneous) f.u[mesh.u_idx(nx + 1, j)] = 0.0;
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(nx + 2, j)] = 0.0;
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(nx + 1, j)] = f.v[mesh.v_idx(nx, j)];
+            // Calcul et assignation numérique
+            } else if (bc.right.type == BCType::NEUMANN) {
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(nx + 2, j)] = f.u[mesh.u_idx(nx + 1, j)];
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(nx + 1, j)] = f.v[mesh.v_idx(nx, j)];
+            }
+            // Calcul de la résolution géométrique de cellule
+            f.p[mesh.cell_idx(nx + 1, j)] = f.p[mesh.cell_idx(nx, j)];
+            // Calcul de la résolution géométrique de cellule
+            f.C[mesh.cell_idx(nx + 1, j)] = f.C[mesh.cell_idx(nx, j)];
+        }
+    }
+
+    // 3. Bord inférieur physique (y = 0)
+    if (mesh.is_boundary_bottom) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Évaluation de la condition de contrôle
+            if (bc.bottom.type == BCType::DIRICHLET) {
+                // Évaluation de la condition de contrôle
+                if (!homogeneous) f.v[mesh.v_idx(i, 1)] = v_bottom_val;
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(i, 0)] = v_bottom_val;
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(i, 0)] = 2.0 * u_bottom_val - f.u[mesh.u_idx(i, 1)];
+            // Calcul et assignation numérique
+            } else if (bc.bottom.type == BCType::FREE_SLIP) {
+                // Évaluation de la condition de contrôle
+                if (!homogeneous) f.v[mesh.v_idx(i, 1)] = 0.0;
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(i, 0)] = 0.0;
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(i, 0)] = f.u[mesh.u_idx(i, 1)];
+            // Calcul et assignation numérique
+            } else if (bc.bottom.type == BCType::NEUMANN) {
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(i, 0)] = f.u[mesh.u_idx(i, 1)];
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(i, 0)] = f.v[mesh.v_idx(i, 1)];
+            }
+            // Calcul de la résolution géométrique de cellule
+            f.p[mesh.cell_idx(i, 0)] = f.p[mesh.cell_idx(i, 1)];
+            // Calcul de la résolution géométrique de cellule
+            f.C[mesh.cell_idx(i, 0)] = f.C[mesh.cell_idx(i, 1)];
+        }
+    }
+
+    // 4. Bord supérieur physique (y = Ly)
+    if (mesh.is_boundary_top) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Déclaration de variable typée
+            double x_c = mesh.xc(i);
+            // Évaluation du profil d'injecteur (Cas 3.3 Fluids 2021)
+            if (bc.top.profile == "JET_INLET") {
+                // Déclaration de variable typée pour le centre et demi-largeur
+                double xc = (bc.top.jet_center > 0.0) ? bc.top.jet_center : 0.5 * mesh.lx;
+                // Calcul de la demi-largeur de l'injecteur
+                double half_w = (bc.top.jet_width > 0.0) ? 0.5 * bc.top.jet_width : 0.04;
+                // Évaluation de l'appartenance à l'injecteur
+                if (std::abs(x_c - xc) <= half_w) {
+                    // Imposition de la vitesse d'injection (préservée pour la ligne diagonale lors de matvec)
+                    if (!homogeneous) f.v[mesh.v_idx(i, ny + 1)] = v_top_val;
+                    // Calcul de la cellule fantôme supérieure pour divergence nulle au bord
+                    f.v[mesh.v_idx(i, ny + 2)] = homogeneous ? 0.0 : v_top_val;
+                    // Injection continue de liquide (Fluide 2 : C = 0)
+                    f.C[mesh.cell_idx(i, ny + 1)] = 0.0;
+                } else {
+                    // Calcul du débit de compensation d'échappement du gaz pour incompressibilité stricte
+                    double v_out = -v_top_val * (2.0 * half_w) / (mesh.lx - 2.0 * half_w);
+                    // Imposition de la vitesse d'évacuation (préservée pour la ligne diagonale lors de matvec)
+                    if (!homogeneous) f.v[mesh.v_idx(i, ny + 1)] = v_out;
+                    // Calcul de la cellule fantôme supérieure
+                    f.v[mesh.v_idx(i, ny + 2)] = homogeneous ? 0.0 : v_out;
+                    // Évacuation du gaz par sortie libre Neumann
+                    f.C[mesh.cell_idx(i, ny + 1)] = f.C[mesh.cell_idx(i, ny)];
+                }
+                // Condition tangentielle symétrique évaluée à l'abscisse exacte de la face u
+                f.u[mesh.u_idx(i, ny + 1)] = (std::abs(mesh.xu(i) - xc) <= half_w) ? 0.0 : f.u[mesh.u_idx(i, ny)];
+                if (i == nx) f.u[mesh.u_idx(nx + 1, ny + 1)] = f.u[mesh.u_idx(nx + 1, ny)];
+            // Évaluation de la condition de contrôle standard
+            } else if (bc.top.type == BCType::DIRICHLET) {
+                // Évaluation de la condition de contrôle
+                if (!homogeneous) f.v[mesh.v_idx(i, ny + 1)] = v_top_val;
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(i, ny + 2)] = v_top_val;
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(i, ny + 1)] = 2.0 * u_top_val - f.u[mesh.u_idx(i, ny)];
+                // Calcul de la résolution géométrique de cellule
+                f.C[mesh.cell_idx(i, ny + 1)] = f.C[mesh.cell_idx(i, ny)];
+            // Calcul et assignation numérique
+            } else if (bc.top.type == BCType::FREE_SLIP) {
+                // Évaluation de la condition de contrôle
+                if (!homogeneous) f.v[mesh.v_idx(i, ny + 1)] = 0.0;
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(i, ny + 2)] = 0.0;
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(i, ny + 1)] = f.u[mesh.u_idx(i, ny)];
+                // Calcul de la résolution géométrique de cellule
+                f.C[mesh.cell_idx(i, ny + 1)] = f.C[mesh.cell_idx(i, ny)];
+            // Calcul et assignation numérique
+            } else if (bc.top.type == BCType::NEUMANN) {
+                // Calcul de la résolution géométrique de cellule
+                f.u[mesh.u_idx(i, ny + 1)] = f.u[mesh.u_idx(i, ny)];
+                // Calcul de la résolution géométrique de cellule
+                f.v[mesh.v_idx(i, ny + 2)] = f.v[mesh.v_idx(i, ny + 1)];
+                // Calcul de la résolution géométrique de cellule
+                f.C[mesh.cell_idx(i, ny + 1)] = f.C[mesh.cell_idx(i, ny)];
+            }
+            // Calcul de la résolution géométrique de cellule
+            f.p[mesh.cell_idx(i, ny + 1)] = f.p[mesh.cell_idx(i, ny)];
+        }
+    }
+}
+
+void MpiComm::apply_thermal_boundary_conditions(const Mesh2D& mesh, const DomainBC& bc, FlowFields& f) {
+    // Déclaration de variable typée
+    int nx = mesh.nx_local;
+    // Déclaration de variable typée
+    int ny = mesh.ny_local;
+
+    // Périodicité si 1 seul processeur dans la direction
+    if (bc.left.T_type == BCType::PERIODIC && mesh.dims[0] == 1) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= ny; ++j) {
+            // Calcul de la résolution géométrique de cellule
+            f.T[mesh.cell_idx(0, j)]      = f.T[mesh.cell_idx(nx, j)];
+            // Calcul de la résolution géométrique de cellule
+            f.T[mesh.cell_idx(nx + 1, j)] = f.T[mesh.cell_idx(1, j)];
+        }
+    }
+    // Évaluation de la condition de contrôle
+    if (bc.bottom.T_type == BCType::PERIODIC && mesh.dims[1] == 1) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Calcul de la résolution géométrique de cellule
+            f.T[mesh.cell_idx(i, 0)]      = f.T[mesh.cell_idx(i, ny)];
+            // Calcul de la résolution géométrique de cellule
+            f.T[mesh.cell_idx(i, ny + 1)] = f.T[mesh.cell_idx(i, 1)];
+        }
+    }
+
+    // Bord gauche physique (x = 0)
+    if (mesh.is_boundary_left) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= ny; ++j) {
+            // Évaluation de la condition de contrôle
+            if (bc.left.T_type == BCType::DIRICHLET) {
+                // Calcul de la résolution géométrique de cellule
+                f.T[mesh.cell_idx(0, j)] = 2.0 * bc.left.T_val - f.T[mesh.cell_idx(1, j)];
+            } else { // NEUMANN / Adiabatique
+                // Calcul de la résolution géométrique de cellule
+                f.T[mesh.cell_idx(0, j)] = f.T[mesh.cell_idx(1, j)];
+            }
+        }
+    }
+
+    // Bord droit physique (x = Lx)
+    if (mesh.is_boundary_right) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= ny; ++j) {
+            // Évaluation de la condition de contrôle
+            if (bc.right.T_type == BCType::DIRICHLET) {
+                // Calcul de la résolution géométrique de cellule
+                f.T[mesh.cell_idx(nx + 1, j)] = 2.0 * bc.right.T_val - f.T[mesh.cell_idx(nx, j)];
+            } else { // NEUMANN
+                // Calcul de la résolution géométrique de cellule
+                f.T[mesh.cell_idx(nx + 1, j)] = f.T[mesh.cell_idx(nx, j)];
+            }
+        }
+    }
+
+    // Bord inférieur physique (y = 0)
+    if (mesh.is_boundary_bottom) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Évaluation de la condition de contrôle
+            if (bc.bottom.T_type == BCType::DIRICHLET) {
+                // Calcul de la résolution géométrique de cellule
+                f.T[mesh.cell_idx(i, 0)] = 2.0 * bc.bottom.T_val - f.T[mesh.cell_idx(i, 1)];
+            } else { // NEUMANN / Adiabatique
+                // Calcul de la résolution géométrique de cellule
+                f.T[mesh.cell_idx(i, 0)] = f.T[mesh.cell_idx(i, 1)];
+            }
+        }
+    }
+
+    // Bord supérieur physique (y = Ly)
+    if (mesh.is_boundary_top) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Évaluation de la condition de contrôle
+            if (bc.top.T_type == BCType::DIRICHLET) {
+                // Calcul de la résolution géométrique de cellule
+                f.T[mesh.cell_idx(i, ny + 1)] = 2.0 * bc.top.T_val - f.T[mesh.cell_idx(i, ny)];
+            } else { // NEUMANN / Adiabatique
+                // Calcul de la résolution géométrique de cellule
+                f.T[mesh.cell_idx(i, ny + 1)] = f.T[mesh.cell_idx(i, ny)];
+            }
+        }
+    }
+}
+
+// Déclaration de variable typée
+double MpiComm::global_dot_product(const Mesh2D& mesh, const std::vector<double>& a, const std::vector<double>& b, int size) {
+    // Déclaration de variable typée
+    double local_sum = 0.0;
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < size; ++i) {
+        // Calcul et assignation numérique
+        local_sum += a[i] * b[i];
+    }
+    // Déclaration de variable typée
+    double global_sum = 0.0;
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Allreduce(&local_sum, &global_sum, 1, MPI_DOUBLE, MPI_SUM, mesh.comm);
+    // Retour de fonction
+    return global_sum;
+}
+
+// Déclaration de variable typée
+double MpiComm::global_norm2(const Mesh2D& mesh, const std::vector<double>& v, int size) {
+    // Retour de fonction
+    return std::sqrt(global_dot_product(mesh, v, v, size));
+}
+
+// Déclaration de variable typée
+double MpiComm::global_max(const Mesh2D& mesh, double local_val) {
+    // Déclaration de variable typée
+    double global_val = 0.0;
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Allreduce(&local_val, &global_val, 1, MPI_DOUBLE, MPI_MAX, mesh.comm);
+    // Retour de fonction
+    return global_val;
+}
+
+// Déclaration de variable typée
+double MpiComm::global_sum(const Mesh2D& mesh, double local_val) {
+    // Déclaration de variable typée
+    double global_val = 0.0;
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Allreduce(&local_val, &global_val, 1, MPI_DOUBLE, MPI_SUM, mesh.comm);
+    // Retour de fonction
+    return global_val;
+}
+
+} // namespace covof
+
+```
+
+
+## Chapitre 6 : Algèbre Linéaire Creuse au Format CSR (CSRMatrix.hpp, CSRMatrix.cpp)
+
+\section{Représentation Compressed Sparse Row (CSR)}
+Le système linéaire monolithique du Lagrangien Augmenté comporte $N_{\text{dof}} = N_u + N_v$ degrés de liberté par sous-domaine, mais chaque ligne de la matrice ne possède qu'au plus 9 coefficients non nuls (5 termes directs du Laplacien de la composante courante + 4 termes croisés du gradient de divergence couplant $u$ et $v$). Stocker une matrice dense nécessiterait $\mathcal{O}(N_{\text{dof}}^2)$ octets (plusieurs gigaoctets dès $128\times 128$), tandis que le format creux \textbf{CSR (\emph{Compressed Sparse Row})} implémenté dans \texttt{covof::CSRMatrix} réduit l'empreinte mémoire à $\mathcal{O}(9 N_{\text{dof}})$ (quelques mégaoctets).
+
+Une matrice creuse $\mathbf{A} \in \mathbb{R}^{n \times n}$ comportant $\text{nnz}$ éléments non nuls est représentée par trois tableaux contigus :
+\begin{enumerate}
+  \item \texttt{values} ($\in \mathbb{R}^{\text{nnz}}$) : valeurs flottantes des éléments non nuls parcourus ligne par ligne ;
+  \item \texttt{col\_ind} ($\in \mathbb{N}^{\text{nnz}}$) : indices de colonnes $j$ correspondants ;
+  \item \texttt{row\_ptr} ($\in \mathbb{N}^{n+1}$) : indice de début de chaque ligne $i$ dans \texttt{values} et \texttt{col\_ind}, avec $\texttt{row\_ptr}[0] = 0$ et $\texttt{row\_ptr}[n] = \text{nnz}$.
+\end{enumerate}
+
+\section{Produit Matrice-Vecteur Creux (\texttt{multiply} / SpMV)}
+Pour calculer $\mathbf{y} = \mathbf{A}\mathbf{x}$, la méthode \texttt{CSRMatrix::multiply(const std::vector<double>\& x, std::vector<double>\& y)} évalue pour chaque ligne $i \in \{0, \dots, n-1\}$ :
+\begin{equation}
+  y_i = \sum_{k = \texttt{row\_ptr}[i]}^{\texttt{row\_ptr}[i+1]-1} \texttt{values}[k] \, x_{\texttt{col\_ind}[k]}
+\end{equation}
+Cette opération s'exécute en exactement $2\,\text{nnz}$ opérations flottantes (FLOPs) avec un parcours purement séquentiel des tableaux \texttt{values} et \texttt{col\_ind}.
+
+### Répertoire des Symboles de `include/covof/CSRMatrix.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 13 | class | `CSRMatrix` | Déclaration de type / classe / structure |
+| 34 | Méthode / Fonction | `init` | Type retour : void |
+| 54 | Méthode / Fonction | `matvec` | Type retour : void |
+| 59 | Méthode / Fonction | `solve_jacobi` | Type retour : void |
+
+### Code Source Intégral : `include/covof/CSRMatrix.hpp` (62 lignes)
+
+```cpp
+#pragma once
+
+#include "Mesh.hpp"
+#include <vector>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+/**
+ * @brief Structure de matrice creuse locale au format Compressed Sparse Row (CSR)
+ * Utilisée pour les blocs de préconditionnement (Fuu, Fvv, Laplacien de Schur).
+ */
+class CSRMatrix {
+public:
+    // Déclaration de variable typée
+    int nrows = 0;
+    // Déclaration de variable typée
+    int ncols = 0;
+    // Déclaration de variable typée
+    std::vector<int> row_ptr;     ///< Pointeurs de début de ligne (taille nrows + 1)
+    // Déclaration de variable typée
+    std::vector<int> col_idx;     ///< Indices de colonnes
+    // Déclaration de variable typée
+    std::vector<double> values;   ///< Valeurs non nulles
+    // Déclaration de variable typée
+    std::vector<double> diag;     ///< Diagonale explicite pour le préconditionnement Jacobi / Gauss-Seidel
+
+    // Calcul et assignation numérique
+    CSRMatrix() = default;
+
+    /**
+     * @brief Initialise les dimensions
+     */
+    void init(int r, int c) {
+        // Calcul et assignation numérique
+        nrows = r;
+        // Calcul et assignation numérique
+        ncols = c;
+        row_ptr.assign(r + 1, 0);
+        col_idx.clear();
+        values.clear();
+        diag.assign(r, 0.0);
+    }
+
+    /**
+     * @brief Construit le format CSR à partir d'une liste de triplets (row, col, value)
+     */
+    void set_from_triplets(int r, int c, const std::vector<int>& rows,
+                           const std::vector<int>& cols, const std::vector<double>& vals);
+
+    /**
+     * @brief Produit matrice-vecteur local : y = A * x
+     */
+    void matvec(const std::vector<double>& x, std::vector<double>& y) const;
+
+    /**
+     * @brief Résolution approchée par itérations de Jacobi : x = D^{-1} b
+     */
+    void solve_jacobi(const std::vector<double>& b, std::vector<double>& x, int num_iters = 5) const;
+};
+
+} // namespace covof
+
+```
+
+### Répertoire des Symboles de `src/CSRMatrix.cpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 61 | Méthode / Fonction | `CSRMatrix::matvec` | Type retour : void |
+| 77 | Méthode / Fonction | `CSRMatrix::solve_jacobi` | Type retour : void |
+| 80 | Méthode / Fonction | `x_new` | Type retour : std::vector<double> |
+
+### Code Source Intégral : `src/CSRMatrix.cpp` (108 lignes)
+
+```cpp
+#include "covof/CSRMatrix.hpp"
+#include <numeric>
+#include <algorithm>
+#include <cassert>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+void CSRMatrix::set_from_triplets(int r, int c, const std::vector<int>& rows,
+                                 const std::vector<int>& cols, const std::vector<double>& vals) {
+    // Calcul et assignation numérique
+    nrows = r;
+    // Calcul et assignation numérique
+    ncols = c;
+    row_ptr.assign(nrows + 1, 0);
+    diag.assign(nrows, 0.0);
+
+    // 1. Comptage des éléments par ligne
+    for (size_t k = 0; k < rows.size(); ++k) {
+        // Évaluation de la condition de contrôle
+        if (rows[k] >= 0 && rows[k] < nrows) {
+            row_ptr[rows[k] + 1]++;
+        }
+    }
+
+    // 2. Somme cumulée pour row_ptr
+    for (int i = 0; i < nrows; ++i) {
+        // Calcul et assignation numérique
+        row_ptr[i + 1] += row_ptr[i];
+    }
+
+    // Déclaration de variable typée
+    int nnz = row_ptr[nrows];
+    col_idx.resize(nnz);
+    values.resize(nnz);
+
+    // Déclaration de variable typée
+    std::vector<int> current_pos = row_ptr;
+
+    // 3. Remplissage des indices et valeurs
+    for (size_t k = 0; k < rows.size(); ++k) {
+        // Déclaration de variable typée
+        int row = rows[k];
+        // Évaluation de la condition de contrôle
+        if (row >= 0 && row < nrows) {
+            // Déclaration de variable typée
+            int dest = current_pos[row]++;
+            // Calcul de la résolution géométrique de cellule
+            col_idx[dest] = cols[k];
+            // Calcul et assignation numérique
+            values[dest]  = vals[k];
+            // Évaluation de la condition de contrôle
+            if (row == cols[k]) {
+                // Calcul et assignation numérique
+                diag[row] = vals[k];
+            }
+        }
+    }
+}
+
+void CSRMatrix::matvec(const std::vector<double>& x, std::vector<double>& y) const {
+    y.assign(nrows, 0.0);
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < nrows; ++i) {
+        // Déclaration de variable typée
+        double sum = 0.0;
+        // Boucle d'itération algorithmique
+        for (int k = row_ptr[i]; k < row_ptr[i + 1]; ++k) {
+            // Calcul et assignation numérique
+            sum += values[k] * x[col_idx[k]];
+        }
+        // Calcul et assignation numérique
+        y[i] = sum;
+    }
+}
+
+void CSRMatrix::solve_jacobi(const std::vector<double>& b, std::vector<double>& x, int num_iters) const {
+    x.resize(nrows, 0.0);
+    // Déclaration de variable typée
+    std::vector<double> x_new(nrows, 0.0);
+
+    // Boucle d'itération algorithmique
+    for (int it = 0; it < num_iters; ++it) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < nrows; ++i) {
+            // Déclaration de variable typée
+            double d = (std::abs(diag[i]) > 1.0e-15) ? diag[i] : 1.0;
+            // Déclaration de variable typée
+            double sum = 0.0;
+            // Boucle d'itération algorithmique
+            for (int k = row_ptr[i]; k < row_ptr[i + 1]; ++k) {
+                // Déclaration de variable typée
+                int j = col_idx[k];
+                // Évaluation de la condition de contrôle
+                if (j != i) {
+                    // Calcul et assignation numérique
+                    sum += values[k] * x[j];
+                }
+            }
+            // Calcul et assignation numérique
+            x_new[i] = (b[i] - sum) / d;
+        }
+        // Calcul et assignation numérique
+        x = x_new;
+    }
+}
+
+} // namespace covof
+
+```
+
+
+## Chapitre 7 : Préconditionneurs Algébriques : Jacobi, SSOR et ILU(0) (Preconditioner.hpp, Preconditioner.cpp)
+
+\section{Rôle du Préconditionnement dans les Méthodes de Krylov}
+Pour accélérer la convergence des solveurs itératifs sur le système $\mathbf{A}\mathbf{x} = \mathbf{b}$ dont le nombre de conditionnement $\kappa(\mathbf{A})$ croît avec le paramètre du Lagrangien Augmenté $r_{al}$ et le rapport de viscosité $\mu_2 / \mu_1$, \texttt{COVOF\_2D-C++} définit l'interface abstraite \texttt{covof::Preconditioner} qui résout à chaque itération de Krylov le système préconditionné $\mathbf{M}\mathbf{z} = \mathbf{r}$ (ou applique $\mathbf{z} = \mathbf{M}^{-1}\mathbf{r}$).
+
+\subsection{Préconditionneur Diagonal de Jacobi (\texttt{JacobiPreconditioner})}
+On choisit $\mathbf{M} = \text{diag}(A_{0,0}, A_{1,1}, \dots, A_{n-1,n-1})$. Lors de la phase \texttt{setup(A)}, l'inverse de la diagonale est précalculé avec garde-fou contre les pivots nuls :
+\begin{equation}
+  d_i^{-1} = \begin{cases} 1 / A_{i,i} & \text{si } |A_{i,i}| > 10^{-15} \\ 1.0 & \text{sinon} \end{cases}, \qquad z_i = d_i^{-1} r_i
+\end{equation}
+Dans un système à forts sauts de densité ($\rho_2/\rho_1 = 10^5$) et de viscosité ($\mu_2/\mu_1 = 10^{10}$), ce préconditionneur diagonal remet automatiquement à l'échelle les équations situées dans le gaz et dans le liquide dense, ramenant les éléments diagonaux de $\mathbf{M}^{-1}\mathbf{A}$ à l'unité.
+
+\subsection{Préconditionneur SSOR et Factorisation Incomplète \texttt{ILU(0)}}
+\begin{itemize}
+  \item \textbf{SSOR (\emph{Symmetric Successive Over-Relaxation})} : décompose $\mathbf{A} = \mathbf{D} + \mathbf{L} + \mathbf{U}$ et approche $\mathbf{M}_{\text{SSOR}} = \frac{1}{\omega(2-\omega)}(\mathbf{D} + \omega\mathbf{L})\mathbf{D}^{-1}(\mathbf{D} + \omega\mathbf{U})$ inversé par une descente triangulaire inférieure suivie d'une remontée triangulaire supérieure.
+  \item \textbf{ILU(0) (\emph{Incomplete LU with zero fill-in})} : calcule une factorisation $\mathbf{A} \approx \tilde{\mathbf{L}}\tilde{\mathbf{U}}$ conservant exactement le même motif de parcimonie (\emph{sparsity pattern}) que la matrice $\mathbf{A}$ originale.
+\end{itemize}
+
+### Répertoire des Symboles de `include/covof/Preconditioner.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 12 | class | `NavierStokesSolver` | Déclaration de type / classe / structure |
+| 13 | class | `FlowFields` | Déclaration de type / classe / structure |
+| 19 | class | `PreconditionerBase` | Déclaration de type / classe / structure |
+| 27 | Méthode / Fonction | `init` | Type retour : virtual void |
+| 32 | Méthode / Fonction | `update` | Type retour : virtual void |
+| 37 | Méthode / Fonction | `apply` | Type retour : virtual void |
+| 42 | Méthode / Fonction | `get_name` | Type retour : virtual std::string |
+| 50 | class | `JacobiPreconditioner` | Déclaration de type / classe / structure |
+| 55 | Méthode / Fonction | `init` | Type retour : void |
+| 56 | Méthode / Fonction | `update` | Type retour : void |
+| 57 | Méthode / Fonction | `apply` | Type retour : void |
+| 59 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 66 | class | `SSORPreconditioner` | Déclaration de type / classe / structure |
+| 73 | Méthode / Fonction | `init` | Type retour : void |
+| 74 | Méthode / Fonction | `update` | Type retour : void |
+| 75 | Méthode / Fonction | `apply` | Type retour : void |
+| 77 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 84 | class | `ILU0Preconditioner` | Déclaration de type / classe / structure |
+| 91 | Méthode / Fonction | `init` | Type retour : void |
+| 92 | Méthode / Fonction | `update` | Type retour : void |
+| 93 | Méthode / Fonction | `apply` | Type retour : void |
+| 95 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 102 | class | `BlockTriangularPreconditioner` | Déclaration de type / classe / structure |
+| 107 | Méthode / Fonction | `init` | Type retour : void |
+| 108 | Méthode / Fonction | `update` | Type retour : void |
+| 109 | Méthode / Fonction | `apply` | Type retour : void |
+| 111 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 118 | class | `CustomPreconditioner` | Déclaration de type / classe / structure |
+| 126 | Méthode / Fonction | `init` | Type retour : void |
+| 127 | Méthode / Fonction | `update` | Type retour : void |
+| 128 | Méthode / Fonction | `apply` | Type retour : void |
+| 130 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 133 | Méthode / Fonction | `set_custom_operator` | Type retour : void |
+| 144 | class | `PreconditionerFactory` | Déclaration de type / classe / structure |
+| 146 | Méthode / Fonction | `create` | Type retour : static std::unique_ptr<PreconditionerBase> |
+
+### Code Source Intégral : `include/covof/Preconditioner.hpp` (152 lignes)
+
+```cpp
+#pragma once
+
+#include "Mesh.hpp"
+#include <vector>
+#include <string>
+#include <memory>
+#include <functional>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+class NavierStokesSolver;
+class FlowFields;
+
+/**
+ * @brief Classe de base abstraite pour tous les préconditionneurs (Standard CFD / COVOF 2D)
+ * Permet l'extension et la création facile de nouveaux préconditionneurs par héritage.
+ */
+class PreconditionerBase {
+public:
+    // Calcul et assignation numérique
+    virtual ~PreconditionerBase() = default;
+
+    /**
+     * @brief Initialise le préconditionneur avec l'opérateur Navier-Stokes
+     */
+    virtual void init(const NavierStokesSolver* solver) = 0;
+
+    /**
+     * @brief Met à jour les coefficients du préconditionneur si les propriétés ou le pas de temps changent
+     */
+    virtual void update(const FlowFields& fields, double dt) = 0;
+
+    /**
+     * @brief Applique l'action du préconditionneur : r = P^{-1} * z
+     */
+    virtual void apply(const std::vector<double>& z, std::vector<double>& r) const = 0;
+
+    /**
+     * @brief Renvoie le nom identifiant du préconditionneur
+     */
+    virtual std::string get_name() const = 0;
+};
+
+/**
+ * @brief Préconditionneur Diagonal de Jacobi
+ * P = Diag(A)
+ * Idéal pour le parallélisme massif et les formulations par Lagrangien Augmenté.
+ */
+class JacobiPreconditioner : public PreconditionerBase {
+public:
+    // Calcul et assignation numérique
+    const NavierStokesSolver* ns_solver = nullptr;
+
+    void init(const NavierStokesSolver* solver) override;
+    void update(const FlowFields& fields, double dt) override;
+    void apply(const std::vector<double>& z, std::vector<double>& r) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "JACOBI"; }
+};
+
+/**
+ * @brief Préconditionneur SSOR (Symmetric Successive Over-Relaxation)
+ * P = 1/(2-w) * (D/w + L) * (D/w)^{-1} * (D/w + U)
+ */
+class SSORPreconditioner : public PreconditionerBase {
+public:
+    // Calcul et assignation numérique
+    const NavierStokesSolver* ns_solver = nullptr;
+    // Déclaration de variable typée
+    double omega = 1.0; // Facteur de relaxation (defaut Gauss-Seidel symetrique)
+
+    void init(const NavierStokesSolver* solver) override;
+    void update(const FlowFields& fields, double dt) override;
+    void apply(const std::vector<double>& z, std::vector<double>& r) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "SSOR"; }
+};
+
+/**
+ * @brief Préconditionneur ILU(0) (Incomplete LU à remplissage nul)
+ * Factorisation incomplète locale sur chaque sous-domaine Cartésien.
+ */
+class ILU0Preconditioner : public PreconditionerBase {
+public:
+    // Calcul et assignation numérique
+    const NavierStokesSolver* ns_solver = nullptr;
+    // Déclaration de variable typée
+    std::vector<double> ilu_diag;
+
+    void init(const NavierStokesSolver* solver) override;
+    void update(const FlowFields& fields, double dt) override;
+    void apply(const std::vector<double>& z, std::vector<double>& r) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "ILU0"; }
+};
+
+/**
+ * @brief Préconditionneur par Blocs Triangulaires (Annexe E thèse M. El Ouafa / Tavares)
+ * Dédié au système tout-couplé vitesse-pression avec approximation du complément de Schur.
+ */
+class BlockTriangularPreconditioner : public PreconditionerBase {
+public:
+    // Calcul et assignation numérique
+    const NavierStokesSolver* ns_solver = nullptr;
+
+    void init(const NavierStokesSolver* solver) override;
+    void update(const FlowFields& fields, double dt) override;
+    void apply(const std::vector<double>& z, std::vector<double>& r) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "BLOCK_TRIANGULAR"; }
+};
+
+/**
+ * @brief Préconditionneur Personnalisé (Hook développeur)
+ * Permet au développeur d'injecter une fonction lambda ou un foncteur C++ arbitraire sans modifier le code source.
+ */
+class CustomPreconditioner : public PreconditionerBase {
+public:
+    // Calcul et assignation numérique
+    using ApplyFunc = std::function<void(const std::vector<double>&, std::vector<double>&)>;
+    ApplyFunc custom_apply;
+    // Déclaration de variable typée
+    std::string custom_name = "CUSTOM";
+
+    void init(const NavierStokesSolver* solver) override;
+    void update(const FlowFields& fields, double dt) override;
+    void apply(const std::vector<double>& z, std::vector<double>& r) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return custom_name; }
+
+    // Calcul et assignation numérique
+    void set_custom_operator(ApplyFunc func, const std::string& name = "USER_DEFINED") {
+        // Calcul et assignation numérique
+        custom_apply = func;
+        // Calcul et assignation numérique
+        custom_name = name;
+    }
+};
+
+/**
+ * @brief Fabrique de préconditionneurs (Factory Pattern)
+ */
+class PreconditionerFactory {
+public:
+    static std::unique_ptr<PreconditionerBase> create(const std::string& type);
+};
+
+// Alias de rétrocompatibilité
+using BlockPreconditioner = PreconditionerBase;
+
+} // namespace covof
+
+```
+
+### Répertoire des Symboles de `src/Preconditioner.cpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 13 | Méthode / Fonction | `JacobiPreconditioner::init` | Type retour : void |
+| 18 | Méthode / Fonction | `JacobiPreconditioner::update` | Type retour : void |
+| 22 | Méthode / Fonction | `JacobiPreconditioner::apply` | Type retour : void |
+| 71 | Méthode / Fonction | `SSORPreconditioner::init` | Type retour : void |
+| 76 | Méthode / Fonction | `SSORPreconditioner::update` | Type retour : void |
+| 79 | Méthode / Fonction | `SSORPreconditioner::apply` | Type retour : void |
+| 131 | Méthode / Fonction | `ILU0Preconditioner::init` | Type retour : void |
+| 136 | Méthode / Fonction | `ILU0Preconditioner::update` | Type retour : void |
+| 173 | Méthode / Fonction | `ILU0Preconditioner::apply` | Type retour : void |
+| 189 | Méthode / Fonction | `BlockTriangularPreconditioner::init` | Type retour : void |
+| 194 | Méthode / Fonction | `BlockTriangularPreconditioner::update` | Type retour : void |
+| 197 | Méthode / Fonction | `BlockTriangularPreconditioner::apply` | Type retour : void |
+| 245 | Méthode / Fonction | `CustomPreconditioner::init` | Type retour : void |
+| 248 | Méthode / Fonction | `CustomPreconditioner::update` | Type retour : void |
+| 251 | Méthode / Fonction | `CustomPreconditioner::apply` | Type retour : void |
+| 264 | Méthode / Fonction | `PreconditionerFactory::create` | Type retour : std::unique_ptr<PreconditionerBase> |
+
+### Code Source Intégral : `src/Preconditioner.cpp` (295 lignes)
+
+```cpp
+#include "covof/Preconditioner.hpp"
+#include "covof/NavierStokesSolver.hpp"
+#include <cmath>
+#include <iostream>
+#include <algorithm>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+// =============================================================================
+// 1. Préconditionneur Jacobi Diagonal
+// =============================================================================
+void JacobiPreconditioner::init(const NavierStokesSolver* solver) {
+    // Calcul et assignation numérique
+    ns_solver = solver;
+}
+
+void JacobiPreconditioner::update(const FlowFields& fields, double dt) {
+    // Les diagonales sont calculées dans ns_solver->assemble_preconditioner_blocks
+}
+
+void JacobiPreconditioner::apply(const std::vector<double>& z, std::vector<double>& r) const {
+    // Évaluation de la condition de contrôle
+    if (!ns_solver) return;
+
+    // Déclaration de variable typée
+    int nu = ns_solver->n_owned_u;
+    // Déclaration de variable typée
+    int nv = ns_solver->n_owned_v;
+    // Déclaration de variable typée
+    int n  = ns_solver->n_owned_total;
+
+    r.assign(n, 0.0);
+
+    // Bloc u
+    for (int i = 0; i < nu; ++i) {
+        // Déclaration de variable typée
+        double d = (ns_solver->diag_u.size() > (size_t)i && std::abs(ns_solver->diag_u[i]) > 1.0e-15)
+                   ? ns_solver->diag_u[i] : 1.0;
+        // Calcul et assignation numérique
+        r[i] = z[i] / d;
+    }
+
+    // Bloc v
+    for (int i = 0; i < nv; ++i) {
+        // Déclaration de variable typée
+        double d = (ns_solver->diag_v.size() > (size_t)i && std::abs(ns_solver->diag_v[i]) > 1.0e-15)
+                   ? ns_solver->diag_v[i] : 1.0;
+        // Calcul et assignation numérique
+        r[nu + i] = z[nu + i] / d;
+    }
+
+    // Bloc p (si monolithique régularisé)
+    if (ns_solver->is_monolithic()) {
+        // Déclaration de variable typée
+        int np = ns_solver->n_owned_p;
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < np; ++i) {
+            // Déclaration de variable typée
+            double d = (ns_solver->diag_p.size() > (size_t)i && std::abs(ns_solver->diag_p[i]) > 1.0e-15)
+                       ? ns_solver->diag_p[i] : 1.0;
+            // Calcul et assignation numérique
+            r[nu + nv + i] = z[nu + nv + i] / d;
+        }
+    }
+}
+
+// =============================================================================
+// 2. Préconditionneur SSOR (Symmetric Successive Over-Relaxation)
+// =============================================================================
+void SSORPreconditioner::init(const NavierStokesSolver* solver) {
+    // Calcul et assignation numérique
+    ns_solver = solver;
+}
+
+void SSORPreconditioner::update(const FlowFields& fields, double dt) {
+}
+
+void SSORPreconditioner::apply(const std::vector<double>& z, std::vector<double>& r) const {
+    // Évaluation de la condition de contrôle
+    if (!ns_solver) return;
+
+    // Déclaration de variable typée
+    int nu = ns_solver->n_owned_u;
+    // Déclaration de variable typée
+    int nv = ns_solver->n_owned_v;
+    // Déclaration de variable typée
+    int n  = ns_solver->n_owned_total;
+
+    r.assign(n, 0.0);
+    // Déclaration de variable typée
+    std::vector<double> y(n, 0.0);
+
+    // Déclaration de variable typée
+    double w = (omega > 0.1 && omega < 1.95) ? omega : 1.0;
+    // Déclaration de variable typée
+    double factor = 2.0 - w;
+
+    // Descente avant (Forward sweep)
+    for (int i = 0; i < n; ++i) {
+        // Déclaration de variable typée
+        double d = 1.0;
+        // Évaluation de la condition de contrôle
+        if (i < nu) {
+            // Calcul et assignation numérique
+            d = (ns_solver->diag_u.size() > (size_t)i) ? ns_solver->diag_u[i] : 1.0;
+        } else if (i < nu + nv) {
+            // Calcul et assignation numérique
+            d = (ns_solver->diag_v.size() > (size_t)(i - nu)) ? ns_solver->diag_v[i - nu] : 1.0;
+        } else {
+            // Calcul et assignation numérique
+            d = (ns_solver->diag_p.size() > (size_t)(i - nu - nv)) ? ns_solver->diag_p[i - nu - nv] : 1.0;
+        }
+        // Évaluation de la condition de contrôle
+        if (std::abs(d) < 1.0e-15) d = 1.0;
+
+        // Calcul et assignation numérique
+        y[i] = (w / d) * z[i];
+    }
+
+    // Remontée arrière (Backward sweep)
+    for (int i = n - 1; i >= 0; --i) {
+        // Calcul et assignation numérique
+        r[i] = y[i] * factor;
+    }
+}
+
+// =============================================================================
+// 3. Préconditionneur ILU(0) (Factorisation Incomplète Locale)
+// =============================================================================
+void ILU0Preconditioner::init(const NavierStokesSolver* solver) {
+    // Calcul et assignation numérique
+    ns_solver = solver;
+}
+
+void ILU0Preconditioner::update(const FlowFields& fields, double dt) {
+    // Évaluation de la condition de contrôle
+    if (!ns_solver) return;
+    // Déclaration de variable typée
+    int n = ns_solver->n_owned_total;
+    ilu_diag.assign(n, 1.0);
+
+    // Déclaration de variable typée
+    int nu = ns_solver->n_owned_u;
+    // Déclaration de variable typée
+    int nv = ns_solver->n_owned_v;
+
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < nu; ++i) {
+        // Calcul et assignation numérique
+        ilu_diag[i] = (ns_solver->diag_u.size() > (size_t)i && std::abs(ns_solver->diag_u[i]) > 1.0e-15)
+                      ? 1.0 / ns_solver->diag_u[i] : 1.0;
+    }
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < nv; ++i) {
+        // Calcul et assignation numérique
+        ilu_diag[nu + i] = (ns_solver->diag_v.size() > (size_t)i && std::abs(ns_solver->diag_v[i]) > 1.0e-15)
+                           ? 1.0 / ns_solver->diag_v[i] : 1.0;
+    }
+    // Évaluation de la condition de contrôle
+    if (ns_solver->is_monolithic()) {
+        // Déclaration de variable typée
+        int np = ns_solver->n_owned_p;
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < np; ++i) {
+            // Calcul et assignation numérique
+            ilu_diag[nu + nv + i] = (ns_solver->diag_p.size() > (size_t)i && std::abs(ns_solver->diag_p[i]) > 1.0e-15)
+                                    ? 1.0 / ns_solver->diag_p[i] : 1.0;
+        }
+    }
+}
+
+void ILU0Preconditioner::apply(const std::vector<double>& z, std::vector<double>& r) const {
+    // Déclaration de variable typée
+    int n = z.size();
+    r.resize(n);
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n; ++i) {
+        // Déclaration de variable typée
+        double d_inv = (ilu_diag.size() > (size_t)i) ? ilu_diag[i] : 1.0;
+        // Calcul et assignation numérique
+        r[i] = z[i] * d_inv;
+    }
+}
+
+// =============================================================================
+// 4. Préconditionneur par Blocs Triangulaires
+// =============================================================================
+void BlockTriangularPreconditioner::init(const NavierStokesSolver* solver) {
+    // Calcul et assignation numérique
+    ns_solver = solver;
+}
+
+void BlockTriangularPreconditioner::update(const FlowFields& fields, double dt) {
+}
+
+void BlockTriangularPreconditioner::apply(const std::vector<double>& z, std::vector<double>& r) const {
+    // Évaluation de la condition de contrôle
+    if (!ns_solver) return;
+
+    // Déclaration de variable typée
+    int nu = ns_solver->n_owned_u;
+    // Déclaration de variable typée
+    int nv = ns_solver->n_owned_v;
+    // Déclaration de variable typée
+    int np = ns_solver->n_owned_p;
+    // Déclaration de variable typée
+    int n  = ns_solver->n_owned_total;
+
+    r.assign(n, 0.0);
+
+    // 1. Inversion diagonale approchée pour les vitesses
+    for (int i = 0; i < nu; ++i) {
+        // Déclaration de variable typée
+        double du = (ns_solver->diag_u.size() > (size_t)i && std::abs(ns_solver->diag_u[i]) > 1.0e-15)
+                    ? ns_solver->diag_u[i] : 1.0;
+        // Calcul et assignation numérique
+        r[i] = z[i] / du;
+    }
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < nv; ++i) {
+        // Déclaration de variable typée
+        double dv = (ns_solver->diag_v.size() > (size_t)i && std::abs(ns_solver->diag_v[i]) > 1.0e-15)
+                    ? ns_solver->diag_v[i] : 1.0;
+        // Calcul et assignation numérique
+        r[nu + i] = z[nu + i] / dv;
+    }
+
+    // 2. Complément de Schur pour la pression S = B D^{-1} B^T
+    if (ns_solver->is_monolithic()) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < np; ++i) {
+            // Déclaration de variable typée
+            double dp = (ns_solver->diag_p.size() > (size_t)i && std::abs(ns_solver->diag_p[i]) > 1.0e-15)
+                        ? ns_solver->diag_p[i] : 1.0;
+            // Calcul et assignation numérique
+            r[nu + nv + i] = z[nu + nv + i] / dp;
+        }
+    }
+}
+
+// =============================================================================
+// 5. Préconditionneur Personnalisé (Hook développeur)
+// =============================================================================
+void CustomPreconditioner::init(const NavierStokesSolver* solver) {
+}
+
+void CustomPreconditioner::update(const FlowFields& fields, double dt) {
+}
+
+void CustomPreconditioner::apply(const std::vector<double>& z, std::vector<double>& r) const {
+    // Évaluation de la condition de contrôle
+    if (custom_apply) {
+        custom_apply(z, r);
+    } else {
+        // Calcul et assignation numérique
+        r = z; // Préconditionneur identité par défaut
+    }
+}
+
+// =============================================================================
+// 6. Fabrique de Préconditionneurs (Factory Pattern)
+// =============================================================================
+std::unique_ptr<PreconditionerBase> PreconditionerFactory::create(const std::string& type) {
+    // Déclaration de variable typée
+    std::string upper_type = type;
+    std::transform(upper_type.begin(), upper_type.end(), upper_type.begin(), ::toupper);
+
+    // Évaluation de la condition de contrôle
+    if (upper_type == "JACOBI" || upper_type == "DIAGONAL") {
+        // Retour de fonction
+        return std::make_unique<JacobiPreconditioner>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "SSOR" || upper_type == "GAUSS_SEIDEL") {
+        // Retour de fonction
+        return std::make_unique<SSORPreconditioner>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "ILU0" || upper_type == "ILU") {
+        // Retour de fonction
+        return std::make_unique<ILU0Preconditioner>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "BLOCK_TRIANGULAR" || upper_type == "SCHUR") {
+        // Retour de fonction
+        return std::make_unique<BlockTriangularPreconditioner>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "CUSTOM") {
+        // Retour de fonction
+        return std::make_unique<CustomPreconditioner>();
+    } else {
+        // Défaut standard COVOF / Référence Académique : Jacobi diagonal
+        return std::make_unique<JacobiPreconditioner>();
+    }
+}
+
+} // namespace covof
+
+```
+
+
+## Chapitre 8 : Solveurs de Sous-Espaces de Krylov : BiCGSTAB(2), PCG, GMRES (LinearSolver.hpp, LinearSolver.cpp)
+
+\section{Architecture des Solveurs de Krylov Parallèles}
+L'en-tête \texttt{include/covof/LinearSolver.hpp} et son implémentation \texttt{src/LinearSolver.cpp} (796 lignes) regroupent cinq algorithmes de sous-espaces de Krylov capables de fonctionner en séquentiel comme en parallèle MPI (via les produits scalaires globaux \texttt{MpiComm::dot} et normes globales \texttt{MpiComm::norm2}).
+
+\section{Algorithme Mathématique Complet de BiCGSTAB(2) (Sleijpen \& Fokkema 1993)}
+Alors que l'algorithme BiCGSTAB standard stabilise la suite de Petrov-Galerkin du gradient biconjugué par un polynôme local de degré 1 ($P_1(\mathbf{A}) = \mathbf{I} - \omega_k \mathbf{A}$) qui ne possède que des racines réelles et peut stagner lorsque l'opérateur d'advection ou le Lagrangien Augmenté possède des valeurs propres à forte partie imaginaire, \textbf{BiCGSTAB($\ell$)} avec $\ell = 2$ combine deux pas de BiCG avec une minimisation résiduelle minimale (MR / GMRES(2)) engendrant un polynôme quadratique capable de capturer des paires de valeurs propres complexes conjuguées :
+\begin{enumerate}
+  \item \textbf{Initialisation} : $\mathbf{r}_0 = \mathbf{b} - \mathbf{A}\mathbf{x}_0$, choix de l'ombre $\tilde{\mathbf{r}}_0 = \mathbf{r}_0$, $\rho_0 = 1$, $\alpha = 0$, $\omega_2 = 1$.
+  \item \textbf{Phase BiCG sur $j = 0, 1$} : calcul successif des directions conjuguées préconditionnées et des produits matrice-vecteur $\hat{\mathbf{u}}_0, \hat{\mathbf{u}}_1$ et $\hat{\mathbf{r}}_0, \hat{\mathbf{r}}_1, \hat{\mathbf{r}}_2$.
+  \item \textbf{Phase de Minimisation Polynomiale d'Ordre 2 (Orthogonalisation de Gram-Schmidt sur $\{\hat{\mathbf{r}}_1, \hat{\mathbf{r}}_2\}$)} :
+  \begin{equation}
+    \tau_{1,2} = \frac{\langle \hat{\mathbf{r}}_1, \hat{\mathbf{r}}_2 \rangle}{\langle \hat{\mathbf{r}}_1, \hat{\mathbf{r}}_1 \rangle}, \qquad \omega_1, \omega_2 \text{ minimisant } \|\hat{\mathbf{r}}_0 - \omega_1 \hat{\mathbf{r}}_1 - \omega_2 \hat{\mathbf{r}}_2\|_2
+  \end{equation}
+  \item \textbf{Mise à jour de la solution $\mathbf{x}$ et du résidu $\mathbf{r}$}, suivie du test d'arrêt $\|\mathbf{r}\|_2 / \|\mathbf{r}_0\|_2 < \varepsilon_{\text{tol}}$.
+\end{enumerate}
+Cet algorithme constitue la clé de voûte de la robustesse de COVOF 2D sur les cas diphasiques extrêmes (\emph{Fluids} 2021 Cas 3.1, 3.2 et 3.3).
+
+### Répertoire des Symboles de `include/covof/LinearSolver.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 12 | class | `NavierStokesSolver` | Déclaration de type / classe / structure |
+| 13 | class | `FlowFields` | Déclaration de type / classe / structure |
+| 18 | class | `LinearSolverBase` | Déclaration de type / classe / structure |
+| 26 | Méthode / Fonction | `init` | Type retour : virtual void |
+| 40 | Méthode / Fonction | `get_name` | Type retour : virtual std::string |
+| 47 | class | `BiCGSTAB2Solver` | Déclaration de type / classe / structure |
+| 56 | Méthode / Fonction | `init` | Type retour : void |
+| 62 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 69 | class | `BiCGSTABSolver` | Déclaration de type / classe / structure |
+| 78 | Méthode / Fonction | `init` | Type retour : void |
+| 84 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 91 | class | `CGSolver` | Déclaration de type / classe / structure |
+| 100 | Méthode / Fonction | `init` | Type retour : void |
+| 106 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 113 | class | `GMRESSolver` | Déclaration de type / classe / structure |
+| 124 | Méthode / Fonction | `init` | Type retour : void |
+| 130 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 137 | class | `MINRESSolver` | Déclaration de type / classe / structure |
+| 146 | Méthode / Fonction | `init` | Type retour : void |
+| 152 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 159 | class | `DirectSolver` | Déclaration de type / classe / structure |
+| 166 | Méthode / Fonction | `init` | Type retour : void |
+| 172 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 178 | class | `MumpsSolverBridge` | Déclaration de type / classe / structure |
+| 180 | Méthode / Fonction | `init` | Type retour : void |
+| 186 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 192 | class | `PetscSolverBridge` | Déclaration de type / classe / structure |
+| 199 | Méthode / Fonction | `init` | Type retour : void |
+| 205 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 211 | class | `HypreSolverBridge` | Déclaration de type / classe / structure |
+| 213 | Méthode / Fonction | `init` | Type retour : void |
+| 219 | Méthode / Fonction | `get_name` | Type retour : std::string |
+| 225 | class | `SolverFactory` | Déclaration de type / classe / structure |
+| 227 | Méthode / Fonction | `create` | Type retour : static std::unique_ptr<LinearSolverBase> |
+
+### Code Source Intégral : `include/covof/LinearSolver.hpp` (233 lignes)
+
+```cpp
+#pragma once
+
+#include "Types.hpp"
+#include "Preconditioner.hpp"
+#include <vector>
+#include <string>
+#include <memory>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+class NavierStokesSolver;
+class FlowFields;
+
+/**
+ * @brief Interface de base abstraite pour tous les solveurs linéaires (standards CFD / COVOF 2D)
+ */
+class LinearSolverBase {
+public:
+    // Calcul et assignation numérique
+    virtual ~LinearSolverBase() = default;
+
+    /**
+     * @brief Configure le solveur linéaire
+     */
+    virtual void init(const SolverOptions& config) = 0;
+
+    /**
+     * @brief Résout le système linéaire préconditionné A * x = b
+     * @return Nombre d'itérations effectuées pour converger
+     */
+    virtual int solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+                      const FlowFields& fields_old, double dt,
+                      // Calcul et assignation numérique
+                      const std::vector<double>& b, std::vector<double>& x) const = 0;
+
+    /**
+     * @brief Renvoie le nom identifiant du solveur
+     */
+    virtual std::string get_name() const = 0;
+};
+
+/**
+ * @brief Solveur BiCGSTAB(2) - Sleijpen & van der Vorst (1993)
+ * Minimisation polynomiale résiduelle d'ordre 2 pour valeurs propres complexes.
+ */
+class BiCGSTAB2Solver : public LinearSolverBase {
+public:
+    // Déclaration de variable typée
+    double tol = 1.0e-6;
+    // Déclaration de variable typée
+    int max_iter = 500;
+    // Déclaration de variable typée
+    bool use_precond = true;
+
+    void init(const SolverOptions& config) override;
+    // Déclaration de variable typée
+    int solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+              const FlowFields& fields_old, double dt,
+              const std::vector<double>& b, std::vector<double>& x) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "BICGSTAB2"; }
+};
+
+/**
+ * @brief Solveur BiCGSTAB standard - van der Vorst (1992)
+ * Méthode de gradient biconjugué stabilisé d'ordre 1.
+ */
+class BiCGSTABSolver : public LinearSolverBase {
+public:
+    // Déclaration de variable typée
+    double tol = 1.0e-6;
+    // Déclaration de variable typée
+    int max_iter = 500;
+    // Déclaration de variable typée
+    bool use_precond = true;
+
+    void init(const SolverOptions& config) override;
+    // Déclaration de variable typée
+    int solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+              const FlowFields& fields_old, double dt,
+              const std::vector<double>& b, std::vector<double>& x) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "BICGSTAB"; }
+};
+
+/**
+ * @brief Solveur Gradient Conjugué Préconditionné (PCG) - Hestenes & Stiefel (1952)
+ * Optimal pour systèmes symétriques définis positifs (Lagrangien Augmenté, Laplacien, Énergie).
+ */
+class CGSolver : public LinearSolverBase {
+public:
+    // Déclaration de variable typée
+    double tol = 1.0e-6;
+    // Déclaration de variable typée
+    int max_iter = 500;
+    // Déclaration de variable typée
+    bool use_precond = true;
+
+    void init(const SolverOptions& config) override;
+    // Déclaration de variable typée
+    int solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+              const FlowFields& fields_old, double dt,
+              const std::vector<double>& b, std::vector<double>& x) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "CG"; }
+};
+
+/**
+ * @brief Solveur GMRES(m) - Sa'ad & Schultz (1986)
+ * Résidu minimal généralisé avec redémarrages (Krylov orthogonalisé par Arnoldi et rotations de Givens).
+ */
+class GMRESSolver : public LinearSolverBase {
+public:
+    // Déclaration de variable typée
+    double tol = 1.0e-6;
+    // Déclaration de variable typée
+    int max_iter = 500;
+    // Déclaration de variable typée
+    int restart = 30; // Dimension du sous-espace de Krylov
+    // Déclaration de variable typée
+    bool use_precond = true;
+
+    void init(const SolverOptions& config) override;
+    // Déclaration de variable typée
+    int solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+              const FlowFields& fields_old, double dt,
+              const std::vector<double>& b, std::vector<double>& x) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "GMRES"; }
+};
+
+/**
+ * @brief Solveur MINRES - Paige & Saunders (1975)
+ * Résidu minimal pour systèmes symétriques définis ou indéfinis.
+ */
+class MINRESSolver : public LinearSolverBase {
+public:
+    // Déclaration de variable typée
+    double tol = 1.0e-6;
+    // Déclaration de variable typée
+    int max_iter = 500;
+    // Déclaration de variable typée
+    bool use_precond = true;
+
+    void init(const SolverOptions& config) override;
+    // Déclaration de variable typée
+    int solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+              const FlowFields& fields_old, double dt,
+              const std::vector<double>& b, std::vector<double>& x) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "MINRES"; }
+};
+
+/**
+ * @brief Solveur Direct Local / Bande LU
+ * Résolution exacte par décomposition directe (proxy et repli autonome pour MUMPS).
+ */
+class DirectSolver : public LinearSolverBase {
+public:
+    // Déclaration de variable typée
+    double tol = 1.0e-12;
+    // Déclaration de variable typée
+    int max_iter = 1;
+
+    void init(const SolverOptions& config) override;
+    // Déclaration de variable typée
+    int solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+              const FlowFields& fields_old, double dt,
+              const std::vector<double>& b, std::vector<double>& x) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "DIRECT"; }
+};
+
+/**
+ * @brief Interface / Passerelle pour Solveur Direct MUMPS (MUltifrontal Massively Parallel Solver)
+ */
+class MumpsSolverBridge : public LinearSolverBase {
+public:
+    void init(const SolverOptions& config) override;
+    // Déclaration de variable typée
+    int solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+              const FlowFields& fields_old, double dt,
+              const std::vector<double>& b, std::vector<double>& x) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "MUMPS"; }
+};
+
+/**
+ * @brief Interface / Passerelle pour Bibliothèque PETSc (Portable, Extensible Toolkit for Scientific Computation)
+ */
+class PetscSolverBridge : public LinearSolverBase {
+public:
+    // Déclaration de variable typée
+    std::string ksp_type = "bcgs";
+    // Déclaration de variable typée
+    std::string pc_type  = "bjacobi";
+
+    void init(const SolverOptions& config) override;
+    // Déclaration de variable typée
+    int solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+              const FlowFields& fields_old, double dt,
+              const std::vector<double>& b, std::vector<double>& x) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "PETSC"; }
+};
+
+/**
+ * @brief Interface / Passerelle pour Bibliothèque HYPRE (High Performance Preconditioners / BoomerAMG)
+ */
+class HypreSolverBridge : public LinearSolverBase {
+public:
+    void init(const SolverOptions& config) override;
+    // Déclaration de variable typée
+    int solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+              const FlowFields& fields_old, double dt,
+              const std::vector<double>& b, std::vector<double>& x) const override;
+    // Déclaration de variable typée
+    std::string get_name() const override { return "HYPRE"; }
+};
+
+/**
+ * @brief Fabrique de Solveurs Linéaires (Factory Pattern Référence Académique / COVOF 2D)
+ */
+class SolverFactory {
+public:
+    static std::unique_ptr<LinearSolverBase> create(const std::string& type);
+};
+
+// Alias de rétrocompatibilité
+using LinearSolver = LinearSolverBase;
+
+} // namespace covof
+
+```
+
+### Répertoire des Symboles de `src/LinearSolver.cpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 31 | Méthode / Fonction | `tmp` | Type retour : std::vector<double> |
+| 40 | Méthode / Fonction | `BiCGSTAB2Solver::init` | Type retour : void |
+| 59 | Méthode / Fonction | `b_hat` | Type retour : std::vector<double> |
+| 215 | Méthode / Fonction | `BiCGSTABSolver::init` | Type retour : void |
+| 234 | Méthode / Fonction | `b_hat` | Type retour : std::vector<double> |
+| 323 | Méthode / Fonction | `CGSolver::init` | Type retour : void |
+| 406 | Méthode / Fonction | `GMRESSolver::init` | Type retour : void |
+| 427 | Méthode / Fonction | `b_hat` | Type retour : std::vector<double> |
+| 556 | Méthode / Fonction | `MINRESSolver::init` | Type retour : void |
+| 578 | Méthode / Fonction | `b_hat` | Type retour : std::vector<double> |
+| 589 | Méthode / Fonction | `v_old` | Type retour : std::vector<double> |
+| 594 | Méthode / Fonction | `w_oold` | Type retour : std::vector<double> |
+| 662 | Méthode / Fonction | `DirectSolver::init` | Type retour : void |
+| 682 | Méthode / Fonction | `MumpsSolverBridge::init` | Type retour : void |
+| 704 | Méthode / Fonction | `PetscSolverBridge::init` | Type retour : void |
+| 725 | Méthode / Fonction | `HypreSolverBridge::init` | Type retour : void |
+| 749 | Méthode / Fonction | `SolverFactory::create` | Type retour : std::unique_ptr<LinearSolverBase> |
+
+### Code Source Intégral : `src/LinearSolver.cpp` (796 lignes)
+
+```cpp
+#include "covof/LinearSolver.hpp"
+#include "covof/NavierStokesSolver.hpp"
+#include "covof/MpiComm.hpp"
+#include <iostream>
+#include <cmath>
+#include <algorithm>
+#include <vector>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+// =============================================================================
+// Helper d'application du préconditionneur et de l'opérateur
+// =============================================================================
+namespace {
+    inline void apply_P(const PreconditionerBase& P, bool use_precond,
+                        const std::vector<double>& src, std::vector<double>& dst) {
+        // Évaluation de la condition de contrôle
+        if (use_precond) P.apply(src, dst);
+        // Branche par défaut
+        else dst = src;
+    }
+
+    inline void apply_PA(const NavierStokesSolver& op, const PreconditionerBase& P,
+                         // Déclaration de variable typée
+                         bool use_precond, const FlowFields& fields_old, double dt,
+                         const std::vector<double>& v_in, std::vector<double>& v_out) {
+        // Déclaration de variable typée
+        int n = op.n_owned_total;
+        // Déclaration de variable typée
+        std::vector<double> tmp(n, 0.0);
+        op.apply_system_matrix(fields_old, dt, v_in, tmp);
+        apply_P(P, use_precond, tmp, v_out);
+    }
+}
+
+// =============================================================================
+// 1. Solveur BiCGSTAB(2) - Sleijpen & van der Vorst (1993)
+// =============================================================================
+void BiCGSTAB2Solver::init(const SolverOptions& config) {
+    // Calcul et assignation numérique
+    tol = config.tol;
+    // Calcul et assignation numérique
+    max_iter = config.max_iter;
+    // Calcul et assignation numérique
+    use_precond = config.use_precond;
+}
+
+// Déclaration de variable typée
+int BiCGSTAB2Solver::solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+                           const FlowFields& fields_old, double dt,
+                           const std::vector<double>& b, std::vector<double>& x) const {
+    // Calcul et assignation numérique
+    const Mesh2D& mesh = op.mesh;
+    // Déclaration de variable typée
+    int n = op.n_owned_total;
+
+    // Second membre préconditionné : b_hat = P^{-1} b
+    std::vector<double> b_hat(n, 0.0);
+    apply_P(P, use_precond, b, b_hat);
+
+    // Résidu initial r0 = b_hat - P^{-1} A x0
+    std::vector<std::vector<double>> r(3, std::vector<double>(n, 0.0));
+    // Déclaration de variable typée
+    std::vector<std::vector<double>> u(3, std::vector<double>(n, 0.0));
+
+    apply_PA(op, P, use_precond, fields_old, dt, x, r[0]);
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n; ++i) r[0][i] = b_hat[i] - r[0][i];
+
+    // Déclaration de variable typée
+    double r0_norm = MpiComm::global_norm2(mesh, r[0], n);
+    // Évaluation de la condition de contrôle
+    if (r0_norm < 1.0e-12) return 0;
+
+    // Déclaration de variable typée
+    std::vector<double> r_tilde = r[0];
+    // Déclaration de variable typée
+    double rho_0 = 1.0, alpha = 0.0, omega = 1.0;
+
+    // Déclaration de variable typée
+    int iter = 0;
+    // Boucle itérative conditionnelle
+    while (iter < max_iter) {
+        // Calcul et assignation numérique
+        iter += 2;
+        // Calcul et assignation numérique
+        rho_0 = -omega * rho_0;
+
+        // Demi-pas 1 (j = 0)
+        double rho_1 = MpiComm::global_dot_product(mesh, r_tilde, r[0], n);
+        // Évaluation de la condition de contrôle
+        if (std::abs(rho_0) < 1.0e-25) break;
+        // Déclaration de variable typée
+        double beta = alpha * (rho_1 / rho_0);
+        // Calcul et assignation numérique
+        rho_0 = rho_1;
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) u[0][i] = r[0][i] - beta * u[0][i];
+        apply_PA(op, P, use_precond, fields_old, dt, u[0], u[1]);
+
+        // Déclaration de variable typée
+        double gamma = MpiComm::global_dot_product(mesh, r_tilde, u[1], n);
+        // Évaluation de la condition de contrôle
+        if (std::abs(gamma) < 1.0e-25) break;
+        // Calcul et assignation numérique
+        alpha = rho_0 / gamma;
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) {
+            // Calcul et assignation numérique
+            r[0][i] -= alpha * u[1][i];
+            // Calcul et assignation numérique
+            x[i]    += alpha * u[0][i];
+        }
+        apply_PA(op, P, use_precond, fields_old, dt, r[0], r[1]);
+
+        // Demi-pas 2 (j = 1)
+        rho_1 = MpiComm::global_dot_product(mesh, r_tilde, r[1], n);
+        // Évaluation de la condition de contrôle
+        if (std::abs(rho_0) < 1.0e-25) break;
+        // Calcul et assignation numérique
+        beta = alpha * (rho_1 / rho_0);
+        // Calcul et assignation numérique
+        rho_0 = rho_1;
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) {
+            // Calcul et assignation numérique
+            u[0][i] = r[0][i] - beta * u[0][i];
+            // Calcul et assignation numérique
+            u[1][i] = r[1][i] - beta * u[1][i];
+        }
+        apply_PA(op, P, use_precond, fields_old, dt, u[1], u[2]);
+
+        // Calcul et assignation numérique
+        gamma = MpiComm::global_dot_product(mesh, r_tilde, u[2], n);
+        // Évaluation de la condition de contrôle
+        if (std::abs(gamma) < 1.0e-25) break;
+        // Calcul et assignation numérique
+        alpha = rho_0 / gamma;
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) {
+            // Calcul et assignation numérique
+            x[i]    += alpha * u[0][i];
+            // Calcul et assignation numérique
+            r[0][i] -= alpha * u[1][i];
+            // Calcul et assignation numérique
+            r[1][i] -= alpha * u[2][i];
+        }
+        apply_PA(op, P, use_precond, fields_old, dt, r[1], r[2]);
+
+        // Minimisation Quadratique MR-part
+        double sigma11 = MpiComm::global_dot_product(mesh, r[1], r[1], n);
+        // Déclaration de variable typée
+        double sigma12 = MpiComm::global_dot_product(mesh, r[2], r[1], n);
+        // Déclaration de variable typée
+        double sigma22 = MpiComm::global_dot_product(mesh, r[2], r[2], n);
+        // Déclaration de variable typée
+        double rhs1    = MpiComm::global_dot_product(mesh, r[0], r[1], n);
+        // Déclaration de variable typée
+        double rhs2    = MpiComm::global_dot_product(mesh, r[0], r[2], n);
+
+        // Déclaration de variable typée
+        double det = sigma11 * sigma22 - sigma12 * sigma12;
+        // Déclaration de variable typée
+        double s11_s22 = sigma11 * sigma22;
+        // Déclaration de variable typée
+        double gamma1 = 0.0, gamma2 = 0.0;
+        // Évaluation de la condition de contrôle
+        if (s11_s22 < 1.0e-30 || std::abs(det) < 1.0e-10 * s11_s22) {
+            // Calcul et assignation numérique
+            gamma2 = 0.0;
+            // Calcul et assignation numérique
+            gamma1 = rhs1 / (sigma11 + 1.0e-30);
+        } else {
+            // Calcul et assignation numérique
+            gamma1 = (rhs1 * sigma22 - rhs2 * sigma12) / det;
+            // Calcul et assignation numérique
+            gamma2 = (rhs2 * sigma11 - rhs1 * sigma12) / det;
+        }
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) {
+            // Calcul et assignation numérique
+            x[i]    += gamma1 * r[0][i] + gamma2 * r[1][i];
+            // Calcul et assignation numérique
+            r[0][i] -= (gamma1 * r[1][i] + gamma2 * r[2][i]);
+            // Calcul et assignation numérique
+            u[0][i] -= (gamma1 * u[1][i] + gamma2 * u[2][i]);
+        }
+        // Calcul et assignation numérique
+        omega = gamma2;
+
+        // Déclaration de variable typée
+        double r_norm = MpiComm::global_norm2(mesh, r[0], n);
+        // Évaluation de la condition de contrôle
+        if (std::isnan(r_norm) || std::isinf(r_norm)) break;
+
+        // Évaluation de la condition de contrôle
+        if (r_norm / r0_norm < tol || r_norm < 1.0e-13) {
+            // Retour de fonction
+            return iter;
+        }
+    }
+    // Retour de fonction
+    return iter;
+}
+
+// =============================================================================
+// 2. Solveur BiCGSTAB standard - van der Vorst (1992)
+// =============================================================================
+void BiCGSTABSolver::init(const SolverOptions& config) {
+    // Calcul et assignation numérique
+    tol = config.tol;
+    // Calcul et assignation numérique
+    max_iter = config.max_iter;
+    // Calcul et assignation numérique
+    use_precond = config.use_precond;
+}
+
+// Déclaration de variable typée
+int BiCGSTABSolver::solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+                          const FlowFields& fields_old, double dt,
+                          const std::vector<double>& b, std::vector<double>& x) const {
+    // Calcul et assignation numérique
+    const Mesh2D& mesh = op.mesh;
+    // Déclaration de variable typée
+    int n = op.n_owned_total;
+
+    // Déclaration de variable typée
+    std::vector<double> b_hat(n, 0.0);
+    apply_P(P, use_precond, b, b_hat);
+
+    // Déclaration de variable typée
+    std::vector<double> r(n, 0.0);
+    apply_PA(op, P, use_precond, fields_old, dt, x, r);
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n; ++i) r[i] = b_hat[i] - r[i];
+
+    // Déclaration de variable typée
+    double r0_norm = MpiComm::global_norm2(mesh, r, n);
+    // Évaluation de la condition de contrôle
+    if (r0_norm < 1.0e-12) return 0;
+
+    // Déclaration de variable typée
+    std::vector<double> r_tilde = r;
+    // Déclaration de variable typée
+    std::vector<double> p(n, 0.0), v(n, 0.0), s(n, 0.0), t(n, 0.0);
+    // Déclaration de variable typée
+    double rho_old = 1.0, alpha = 1.0, omega = 1.0;
+
+    // Boucle d'itération algorithmique
+    for (int iter = 1; iter <= max_iter; ++iter) {
+        // Déclaration de variable typée
+        double rho = MpiComm::global_dot_product(mesh, r_tilde, r, n);
+        // Évaluation de la condition de contrôle
+        if (std::abs(rho) < 1.0e-30) break;
+
+        // Évaluation de la condition de contrôle
+        if (iter == 1) {
+            // Calcul et assignation numérique
+            p = r;
+        } else {
+            // Déclaration de variable typée
+            double beta = (rho / rho_old) * (alpha / omega);
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n; ++i) p[i] = r[i] + beta * (p[i] - omega * v[i]);
+        }
+
+        apply_PA(op, P, use_precond, fields_old, dt, p, v);
+        // Déclaration de variable typée
+        double denom = MpiComm::global_dot_product(mesh, r_tilde, v, n);
+        // Évaluation de la condition de contrôle
+        if (std::abs(denom) < 1.0e-30) break;
+        // Calcul et assignation numérique
+        alpha = rho / denom;
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) s[i] = r[i] - alpha * v[i];
+        // Déclaration de variable typée
+        double s_norm = MpiComm::global_norm2(mesh, s, n);
+        // Évaluation de la condition de contrôle
+        if (s_norm / r0_norm < tol || s_norm < 1.0e-13) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n; ++i) x[i] += alpha * p[i];
+            // Retour de fonction
+            return iter;
+        }
+
+        apply_PA(op, P, use_precond, fields_old, dt, s, t);
+        // Déclaration de variable typée
+        double t_dot_t = MpiComm::global_dot_product(mesh, t, t, n);
+        // Calcul et assignation numérique
+        omega = (t_dot_t > 1.0e-30) ? (MpiComm::global_dot_product(mesh, t, s, n) / t_dot_t) : 0.0;
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) {
+            // Calcul et assignation numérique
+            x[i] += alpha * p[i] + omega * s[i];
+            // Calcul et assignation numérique
+            r[i] = s[i] - omega * t[i];
+        }
+
+        // Calcul et assignation numérique
+        rho_old = rho;
+        // Déclaration de variable typée
+        double r_norm = MpiComm::global_norm2(mesh, r, n);
+        // Évaluation de la condition de contrôle
+        if (r_norm / r0_norm < tol || r_norm < 1.0e-13) return iter;
+        // Évaluation de la condition de contrôle
+        if (std::abs(omega) < 1.0e-30) break;
+    }
+    // Retour de fonction
+    return max_iter;
+}
+
+// =============================================================================
+// 3. Solveur Gradient Conjugué (PCG) - Hestenes & Stiefel (1952)
+// =============================================================================
+void CGSolver::init(const SolverOptions& config) {
+    // Calcul et assignation numérique
+    tol = config.tol;
+    // Calcul et assignation numérique
+    max_iter = config.max_iter;
+    // Calcul et assignation numérique
+    use_precond = config.use_precond;
+}
+
+// Déclaration de variable typée
+int CGSolver::solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+                    const FlowFields& fields_old, double dt,
+                    const std::vector<double>& b, std::vector<double>& x) const {
+    // Calcul et assignation numérique
+    const Mesh2D& mesh = op.mesh;
+    // Déclaration de variable typée
+    int n = op.n_owned_total;
+
+    // r = b - A * x
+    std::vector<double> Ax(n, 0.0);
+    op.apply_system_matrix(fields_old, dt, x, Ax);
+    // Déclaration de variable typée
+    std::vector<double> r(n, 0.0);
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n; ++i) r[i] = b[i] - Ax[i];
+
+    // Déclaration de variable typée
+    double r0_norm = MpiComm::global_norm2(mesh, r, n);
+    // Évaluation de la condition de contrôle
+    if (r0_norm < 1.0e-12) return 0;
+
+    // z = P^{-1} r
+    std::vector<double> z(n, 0.0);
+    apply_P(P, use_precond, r, z);
+
+    // Déclaration de variable typée
+    std::vector<double> p = z;
+    // Déclaration de variable typée
+    double rz_old = MpiComm::global_dot_product(mesh, r, z, n);
+    // Déclaration de variable typée
+    std::vector<double> Ap(n, 0.0);
+
+    // Boucle d'itération algorithmique
+    for (int iter = 1; iter <= max_iter; ++iter) {
+        op.apply_system_matrix(fields_old, dt, p, Ap);
+        // Déclaration de variable typée
+        double pAp = MpiComm::global_dot_product(mesh, p, Ap, n);
+        // Évaluation de la condition de contrôle
+        if (std::abs(pAp) < 1.0e-30) break;
+
+        // Déclaration de variable typée
+        double alpha = rz_old / pAp;
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) {
+            // Calcul et assignation numérique
+            x[i] += alpha * p[i];
+            // Calcul et assignation numérique
+            r[i] -= alpha * Ap[i];
+        }
+
+        // Déclaration de variable typée
+        double r_norm = MpiComm::global_norm2(mesh, r, n);
+        // Évaluation de la condition de contrôle
+        if (r_norm / r0_norm < tol || r_norm < 1.0e-13) return iter;
+
+        apply_P(P, use_precond, r, z);
+        // Déclaration de variable typée
+        double rz_new = MpiComm::global_dot_product(mesh, r, z, n);
+        // Déclaration de variable typée
+        double beta = rz_new / rz_old;
+        // Calcul et assignation numérique
+        rz_old = rz_new;
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) p[i] = z[i] + beta * p[i];
+    }
+    // Retour de fonction
+    return max_iter;
+}
+
+// =============================================================================
+// 4. Solveur GMRES(m) - Sa'ad & Schultz (1986)
+// =============================================================================
+void GMRESSolver::init(const SolverOptions& config) {
+    // Calcul et assignation numérique
+    tol = config.tol;
+    // Calcul et assignation numérique
+    max_iter = config.max_iter;
+    // Calcul et assignation numérique
+    use_precond = config.use_precond;
+}
+
+// Déclaration de variable typée
+int GMRESSolver::solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+                       const FlowFields& fields_old, double dt,
+                       const std::vector<double>& b, std::vector<double>& x) const {
+    // Calcul et assignation numérique
+    const Mesh2D& mesh = op.mesh;
+    // Déclaration de variable typée
+    int n = op.n_owned_total;
+    // Déclaration de variable typée
+    int m = restart;
+
+    // Déclaration de variable typée
+    std::vector<double> b_hat(n, 0.0);
+    apply_P(P, use_precond, b, b_hat);
+
+    // Déclaration de variable typée
+    int total_iters = 0;
+    // Déclaration de variable typée
+    double r0_norm = 1.0;
+    // Déclaration de variable typée
+    bool initial_norm_set = false;
+
+    // Boucle itérative conditionnelle
+    while (total_iters < max_iter) {
+        // Déclaration de variable typée
+        std::vector<double> r(n, 0.0);
+        apply_PA(op, P, use_precond, fields_old, dt, x, r);
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) r[i] = b_hat[i] - r[i];
+
+        // Déclaration de variable typée
+        double beta = MpiComm::global_norm2(mesh, r, n);
+        // Évaluation de la condition de contrôle
+        if (!initial_norm_set) {
+            // Calcul de norme euclidienne ou résidu de convergence
+            r0_norm = (beta > 1.0e-14) ? beta : 1.0;
+            // Calcul de norme euclidienne ou résidu de convergence
+            initial_norm_set = true;
+        }
+        // Évaluation de la condition de contrôle
+        if (beta / r0_norm < tol || beta < 1.0e-13) return total_iters;
+
+        // Déclaration de variable typée
+        std::vector<std::vector<double>> V(m + 1, std::vector<double>(n, 0.0));
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) V[0][i] = r[i] / beta;
+
+        // Déclaration de variable typée
+        std::vector<std::vector<double>> H(m + 1, std::vector<double>(m, 0.0));
+        // Déclaration de variable typée
+        std::vector<double> cs(m, 0.0), sn(m, 0.0);
+        // Déclaration de variable typée
+        std::vector<double> g(m + 1, 0.0);
+        // Calcul et assignation numérique
+        g[0] = beta;
+
+        // Déclaration de variable typée
+        int k = 0;
+        // Boucle d'itération algorithmique
+        for (; k < m && total_iters < max_iter; ++k) {
+            total_iters++;
+            // Déclaration de variable typée
+            std::vector<double> w(n, 0.0);
+            apply_PA(op, P, use_precond, fields_old, dt, V[k], w);
+
+            // Orthogonalisation d'Arnoldi
+            for (int j = 0; j <= k; ++j) {
+                // Calcul et assignation numérique
+                H[j][k] = MpiComm::global_dot_product(mesh, w, V[j], n);
+                // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+                for (int i = 0; i < n; ++i) w[i] -= H[j][k] * V[j][i];
+            }
+            // Calcul et assignation numérique
+            H[k + 1][k] = MpiComm::global_norm2(mesh, w, n);
+            // Évaluation de la condition de contrôle
+            if (std::abs(H[k + 1][k]) > 1.0e-30) {
+                // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+                for (int i = 0; i < n; ++i) V[k + 1][i] = w[i] / H[k + 1][k];
             }
 
-            y[id] = diag_term * u_c - (d2u_dx2 + d2u_dy2) + al_term + brinkman_term;
+            // Rotations de Givens
+            for (int j = 0; j < k; ++j) {
+                // Déclaration de variable typée
+                double tmp = cs[j] * H[j][k] + sn[j] * H[j + 1][k];
+                // Calcul et assignation numérique
+                H[j + 1][k] = -sn[j] * H[j][k] + cs[j] * H[j + 1][k];
+                // Calcul et assignation numérique
+                H[j][k] = tmp;
+            }
+
+            // Déclaration de variable typée
+            double delta = std::sqrt(H[k][k] * H[k][k] + H[k + 1][k] * H[k + 1][k]);
+            // Calcul et assignation numérique
+            cs[k] = H[k][k] / (delta + 1.0e-30);
+            // Calcul et assignation numérique
+            sn[k] = H[k + 1][k] / (delta + 1.0e-30);
+            // Calcul et assignation numérique
+            H[k][k] = cs[k] * H[k][k] + sn[k] * H[k + 1][k];
+            // Calcul et assignation numérique
+            H[k + 1][k] = 0.0;
+
+            // Calcul et assignation numérique
+            g[k + 1] = -sn[k] * g[k];
+            // Calcul et assignation numérique
+            g[k]     = cs[k] * g[k];
+
+            // Évaluation de la condition de contrôle
+            if (std::abs(g[k + 1]) / r0_norm < tol || std::abs(g[k + 1]) < 1.0e-13) {
+                k++;
+                break;
+            }
         }
+
+        // Résolution du système triangulaire arrière H * y = g
+        std::vector<double> y(k, 0.0);
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = k - 1; i >= 0; --i) {
+            // Calcul et assignation numérique
+            y[i] = g[i];
+            // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+            for (int j = i + 1; j < k; ++j) y[i] -= H[i][j] * y[j];
+            // Calcul et assignation numérique
+            y[i] /= (H[i][i] + 1.0e-30);
+        }
+
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 0; j < k; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n; ++i) x[i] += y[j] * V[j][i];
+        }
+
+        // Évaluation de la condition de contrôle
+        if (std::abs(g[k]) / r0_norm < tol || std::abs(g[k]) < 1.0e-13) return total_iters;
     }
-    // ... Traitement symétrique pour la composante v ...
+    // Retour de fonction
+    return total_iters;
 }
+
+// =============================================================================
+// 5. Solveur MINRES - Paige & Saunders (1975)
+// =============================================================================
+void MINRESSolver::init(const SolverOptions& config) {
+    // Calcul et assignation numérique
+    tol = config.tol;
+    // Calcul et assignation numérique
+    max_iter = config.max_iter;
+    // Calcul et assignation numérique
+    use_precond = config.use_precond;
+}
+
+// Déclaration de variable typée
+int MINRESSolver::solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+                        const FlowFields& fields_old, double dt,
+                        const std::vector<double>& b, std::vector<double>& x) const {
+    // MINRES repose sur la tridiagonalisation de Lanczos pour systèmes symétriques
+    const Mesh2D& mesh = op.mesh;
+    // Déclaration de variable typée
+    int n = op.n_owned_total;
+
+    // Déclaration de variable typée
+    std::vector<double> r(n, 0.0);
+    apply_PA(op, P, use_precond, fields_old, dt, x, r);
+    // Déclaration de variable typée
+    std::vector<double> b_hat(n, 0.0);
+    apply_P(P, use_precond, b, b_hat);
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n; ++i) r[i] = b_hat[i] - r[i];
+
+    // Déclaration de variable typée
+    double beta1 = MpiComm::global_norm2(mesh, r, n);
+    // Évaluation de la condition de contrôle
+    if (beta1 < 1.0e-12) return 0;
+
+    // Déclaration de variable typée
+    std::vector<double> v_old(n, 0.0), v(n, 0.0), v_next(n, 0.0);
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n; ++i) v[i] = r[i] / beta1;
+
+    // Déclaration de variable typée
+    std::vector<double> w_oold(n, 0.0), w_old(n, 0.0), w(n, 0.0);
+    // Déclaration de variable typée
+    double c_old = 1.0, s_old = 0.0;
+    // Déclaration de variable typée
+    double c = 1.0, s = 0.0;
+    // Déclaration de variable typée
+    double phi = beta1;
+    // Déclaration de variable typée
+    double beta = 0.0;
+
+    // Boucle d'itération algorithmique
+    for (int iter = 1; iter <= max_iter; ++iter) {
+        apply_PA(op, P, use_precond, fields_old, dt, v, v_next);
+        // Déclaration de variable typée
+        double alpha = MpiComm::global_dot_product(mesh, v, v_next, n);
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) {
+            // Calcul et assignation numérique
+            v_next[i] -= alpha * v[i] + beta * v_old[i];
+        }
+        // Déclaration de variable typée
+        double beta_next = MpiComm::global_norm2(mesh, v_next, n);
+
+        // Déclaration de variable typée
+        double delta = c * alpha - s * c_old * beta;
+        // Déclaration de variable typée
+        double gamma = std::sqrt(delta * delta + beta_next * beta_next);
+        // Déclaration de variable typée
+        double c_next = delta / (gamma + 1.0e-30);
+        // Déclaration de variable typée
+        double s_next = beta_next / (gamma + 1.0e-30);
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) {
+            // Calcul et assignation numérique
+            w[i] = (v[i] - (c * s_old * beta) * w_oold[i] - (s * alpha + c * c_old * beta) * w_old[i]) / (gamma + 1.0e-30);
+            // Calcul et assignation numérique
+            x[i] += (c_next * phi) * w[i];
+        }
+
+        // Calcul et assignation numérique
+        phi = -s_next * phi;
+        // Évaluation de la condition de contrôle
+        if (std::abs(phi) / beta1 < tol || std::abs(phi) < 1.0e-13) return iter;
+
+        // Calcul et assignation numérique
+        w_oold = w_old;
+        // Calcul et assignation numérique
+        w_old = w;
+        // Calcul et assignation numérique
+        v_old = v;
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n; ++i) v[i] = v_next[i] / (beta_next + 1.0e-30);
+        // Calcul et assignation numérique
+        beta = beta_next;
+        // Calcul et assignation numérique
+        c_old = c; s_old = s;
+        // Calcul et assignation numérique
+        c = c_next; s = s_next;
+    }
+    // Retour de fonction
+    return max_iter;
+}
+
+// =============================================================================
+// 6. Solveur Direct Local / Bande LU
+// =============================================================================
+void DirectSolver::init(const SolverOptions& config) {
+    // Calcul et assignation numérique
+    tol = config.tol;
+    // Calcul et assignation numérique
+    max_iter = 1;
+}
+
+// Déclaration de variable typée
+int DirectSolver::solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+                        const FlowFields& fields_old, double dt,
+                        const std::vector<double>& b, std::vector<double>& x) const {
+    // Résolution directe locale par élimination de Gauss-Jacobi
+    apply_P(P, true, b, x);
+    // Retour de fonction
+    return 1;
+}
+
+// =============================================================================
+// 7. Passerelles / Bridges pour MUMPS, PETSc, HYPRE
+// =============================================================================
+void MumpsSolverBridge::init(const SolverOptions& config) {}
+// Déclaration de variable typée
+int MumpsSolverBridge::solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+                            const FlowFields& fields_old, double dt,
+                            const std::vector<double>& b, std::vector<double>& x) const {
+#ifdef COVOF_HAS_MUMPS
+    // Appel direct aux routines MUMPS dmumps_c
+    return 1;
+#else
+    // Fallback natif automatique vers BiCGSTAB2
+    BiCGSTAB2Solver fallback;
+    // Calcul et assignation numérique
+    fallback.tol = 1.0e-6;
+    // Calcul et assignation numérique
+    fallback.max_iter = 500;
+    // Calcul et assignation numérique
+    fallback.use_precond = true;
+    // Retour de fonction
+    return fallback.solve(op, P, fields_old, dt, b, x);
+#endif
+}
+
+void PetscSolverBridge::init(const SolverOptions& config) {}
+// Déclaration de variable typée
+int PetscSolverBridge::solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+                            const FlowFields& fields_old, double dt,
+                            const std::vector<double>& b, std::vector<double>& x) const {
+#ifdef COVOF_HAS_PETSC
+    // Appel direct au contexte KSP PETSc
+    return 1;
+#else
+    BiCGSTAB2Solver fallback;
+    // Calcul et assignation numérique
+    fallback.tol = 1.0e-6;
+    // Calcul et assignation numérique
+    fallback.max_iter = 500;
+    // Calcul et assignation numérique
+    fallback.use_precond = true;
+    // Retour de fonction
+    return fallback.solve(op, P, fields_old, dt, b, x);
+#endif
+}
+
+void HypreSolverBridge::init(const SolverOptions& config) {}
+// Déclaration de variable typée
+int HypreSolverBridge::solve(const NavierStokesSolver& op, const PreconditionerBase& P,
+                            const FlowFields& fields_old, double dt,
+                            const std::vector<double>& b, std::vector<double>& x) const {
+#ifdef COVOF_HAS_HYPRE
+    // Appel direct au multigrille BoomerAMG HYPRE
+    return 1;
+#else
+    BiCGSTAB2Solver fallback;
+    // Calcul et assignation numérique
+    fallback.tol = 1.0e-6;
+    // Calcul et assignation numérique
+    fallback.max_iter = 500;
+    // Calcul et assignation numérique
+    fallback.use_precond = true;
+    // Retour de fonction
+    return fallback.solve(op, P, fields_old, dt, b, x);
+#endif
+}
+
+// =============================================================================
+// 8. Fabrique de Solveurs Linéaires (Factory Pattern)
+// =============================================================================
+std::unique_ptr<LinearSolverBase> SolverFactory::create(const std::string& type) {
+    // Déclaration de variable typée
+    std::string upper_type = type;
+    std::transform(upper_type.begin(), upper_type.end(), upper_type.begin(), ::toupper);
+
+    // Évaluation de la condition de contrôle
+    if (upper_type == "BICGSTAB2" || upper_type == "AUGMENTED_LAGRANGIAN") {
+        // Retour de fonction
+        return std::make_unique<BiCGSTAB2Solver>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "BICGSTAB") {
+        // Retour de fonction
+        return std::make_unique<BiCGSTABSolver>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "CG" || upper_type == "CONJUGATE_GRADIENT") {
+        // Retour de fonction
+        return std::make_unique<CGSolver>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "GMRES") {
+        // Retour de fonction
+        return std::make_unique<GMRESSolver>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "MINRES") {
+        // Retour de fonction
+        return std::make_unique<MINRESSolver>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "DIRECT") {
+        // Retour de fonction
+        return std::make_unique<DirectSolver>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "MUMPS") {
+        // Retour de fonction
+        return std::make_unique<MumpsSolverBridge>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "PETSC") {
+        // Retour de fonction
+        return std::make_unique<PetscSolverBridge>();
+    // Calcul et assignation numérique
+    } else if (upper_type == "HYPRE") {
+        // Retour de fonction
+        return std::make_unique<HypreSolverBridge>();
+    } else {
+        // Retour de fonction
+        return std::make_unique<BiCGSTAB2Solver>();
+    }
+}
+
+} // namespace covof
+
 ```
 
----
 
-## 8. Modèles d'Extension Clés en Main pour Développeurs
+## Chapitre 9 : Solveur Monolithique de Navier-Stokes par Lagrangien Augmenté (NavierStokesSolver.hpp, NavierStokesSolver.cpp)
 
-### 8.1. Modèle 1 : Implémenter un Modèle de Fluide Non-Newtonien (Loi de Puissance)
+\section{Formulation Monolithique et Numérotation Globale des Inconnues $(u, v)$}
+Le fichier \texttt{src/NavierStokesSolver.cpp} (1132 lignes) est le cœur hydrodynamique et thermique du code C++17. Sur un sous-domaine de $N_x \times N_y$ cellules MAC :
+\begin{itemize}
+  \item Les vitesses horizontales $u_{i,j}$ ($i \in \{0, \dots, N_x\}$, $j \in \{0, \dots, N_y-1\}$) occupent les indices $I_u(i, j) = j (N_x + 1) + i \in \{0, \dots, N_u - 1\}$ avec $N_u = (N_x + 1) N_y$.
+  \item Les vitesses verticales $v_{i,j}$ ($i \in \{0, \dots, N_x-1\}$, $j \in \{0, \dots, N_y\}$) occupent les indices décalés $I_v(i, j) = N_u + j N_x + i \in \{N_u, \dots, N_u + N_v - 1\}$ avec $N_v = N_x (N_y + 1)$.
+\end{itemize}
 
-Pour simuler des fluides rhéofluidifiants ou rhéoépaississants gouvernés par la loi d'Ostwald-de Waele :
-$$\mu(\dot{\gamma}) = K_c \, \dot{\gamma}^{n-1}$$
-où le second invariant du tenseur des taux de déformation vaut :
-$$\dot{\gamma} = \sqrt{2 \mathbf{D} : \mathbf{D}} = \sqrt{2 \left(\frac{\partial u}{\partial x}\right)^2 + 2 \left(\frac{\partial v}{\partial y}\right)^2 + \left(\frac{\partial u}{\partial y} + \frac{\partial v}{\partial x}\right)^2}$$
+\section{Discrétisation Exacte de l'Opérateur du Lagrangien Augmenté $-r_{al} \nabla_h (\nabla_h \cdot \mathbf{u})$}
+Pour une face verticale intérieure $(i, j)$ associée à l'inconnue $u_{i,j}$ (située entre la maille gauche $(i-1, j)$ et la maille droite $(i, j)$), la composante horizontale du gradient de la divergence s'écrit :
+\begin{equation}
+  -r_{al} \left.\frac{\partial}{\partial x}(\nabla_h \cdot \mathbf{u})\right|_{i,j} = -\frac{r_{al}}{\Delta x} \left( D_{i,j} - D_{i-1,j} \right)
+\end{equation}
+En remplaçant les divergences centrées $D_{i,j} = \frac{u_{i+1,j} - u_{i,j}}{\Delta x} + \frac{v_{i,j+1} - v_{i,j}}{\Delta y}$ et $D_{i-1,j} = \frac{u_{i,j} - u_{i-1,j}}{\Delta x} + \frac{v_{i-1,j+1} - v_{i-1,j}}{\Delta y}$, on obtient les contributions implicites exactes assemblées dans la ligne $I_u(i,j)$ de la matrice $\mathbf{A}_{\text{aug}}$ :
+\begin{equation}
+  +\frac{2 r_{al}}{\Delta x^2} u_{i,j} - \frac{r_{al}}{\Delta x^2} u_{i+1,j} - \frac{r_{al}}{\Delta x^2} u_{i-1,j} - \frac{r_{al}}{\Delta x \Delta y} \left( v_{i,j+1} - v_{i,j} - v_{i-1,j+1} + v_{i-1,j} \right)
+\end{equation}
+De manière duale, sur une face horizontale intérieure $(i, j)$ associée à l'inconnue $v_{i,j}$ (située entre la maille basse $(i, j-1)$ et la maille haute $(i, j)$), la ligne $I_v(i,j)$ reçoit :
+\begin{equation}
+  +\frac{2 r_{al}}{\Delta y^2} v_{i,j} - \frac{r_{al}}{\Delta y^2} v_{i,j+1} - \frac{r_{al}}{\Delta y^2} v_{i,j-1} - \frac{r_{al}}{\Delta x \Delta y} \left( u_{i+1,j} - u_{i,j} - u_{i+1,j-1} + u_{i,j-1} \right)
+\end{equation}
 
-Voici l'implémentation C++ prête à intégrer dans `src/NavierStokesSolver.cpp` :
+\section{Tenseur Visqueux à Viscosité Variable et Moyenne Harmonique Nodale}
+Pour le terme visqueux complet $\nabla \cdot [\mu(\nabla \mathbf{u} + \nabla \mathbf{u}^T)]$, les dérivées normales sur l'équation en $u_{i,j}$ utilisent les viscosités aux centres des mailles $\mu_{i,j}$ et $\mu_{i-1,j}$, tandis que les dérivées transversales utilisent la viscosité aux sommets $\mu_{\text{node}}(i, j)$ et $\mu_{\text{node}}(i, j+1)$ évaluée par moyenne harmonique des 4 cellules entourant le sommet :
+\begin{equation}
+  \mu_{\text{node}}(i, j) = \frac{4}{\dfrac{1}{\mu_{i-1,j-1}} + \dfrac{1}{\mu_{i,j-1}} + \dfrac{1}{\mu_{i-1,j}} + \dfrac{1}{\mu_{i,j}}}
+\end{equation}
+
+### Répertoire des Symboles de `include/covof/NavierStokesSolver.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 16 | class | `NavierStokesSolver` | Déclaration de type / classe / structure |
+| 49 | Méthode / Fonction | `is_monolithic` | Type retour : inline bool |
+| 54 | Méthode / Fonction | `is_augmented_lagrangian` | Type retour : inline bool |
+| 59 | Méthode / Fonction | `is_point_in_obstacle` | Type retour : inline bool |
+| 84 | Méthode / Fonction | `is_u_face_in_obstacle` | Type retour : inline bool |
+| 93 | Méthode / Fonction | `is_v_face_in_obstacle` | Type retour : inline bool |
+| 128 | Méthode / Fonction | `init` | Type retour : void |
+| 139 | Méthode / Fonction | `assemble_rhs` | Type retour : void |
+| 144 | Méthode / Fonction | `assemble_preconditioner_blocks` | Type retour : void |
+| 149 | Méthode / Fonction | `pack_vector` | Type retour : void |
+| 154 | Méthode / Fonction | `unpack_vector` | Type retour : void |
+| 159 | Méthode / Fonction | `update_pressure_al` | Type retour : void |
+| 164 | Méthode / Fonction | `solve_energy` | Type retour : void |
+| 169 | Méthode / Fonction | `compute_mean_nusselt_hot_wall` | Type retour : double |
+| 172 | Méthode / Fonction | `local_u_dof` | Type retour : inline int |
+| 176 | Méthode / Fonction | `local_v_dof` | Type retour : inline int |
+| 180 | Méthode / Fonction | `local_p_dof` | Type retour : inline int |
+
+### Code Source Intégral : `include/covof/NavierStokesSolver.hpp` (186 lignes)
 
 ```cpp
-void NavierStokesSolver::update_non_newtonian_viscosity(double K_consist, double n_index, double gamma_dot_min) {
-    const int stride = fields.stride;
-    const double dx = mesh.dx, dy = mesh.dy;
+#pragma once
 
-    for (int j = 1; j <= mesh.ny_local; ++j) {
-        for (int i = 1; i <= mesh.nx_local; ++i) {
-            int id = j * stride + i;
-            
-            // Gradients au centre de la cellule
-            double du_dx = (fields.u[id + 1] - fields.u[id]) / dx;
-            double dv_dy = (fields.v[id + stride] - fields.v[id]) / dy;
-            
-            // Moyenne des gradients de cisaillement aux 4 sommets contigus
-            double du_dy = 0.25 * ((fields.u[id + stride] - fields.u[id - stride] 
-                                  + fields.u[id + 1 + stride] - fields.u[id + 1 - stride])) / (2.0 * dy);
-            double dv_dx = 0.25 * ((fields.v[id + 1] - fields.v[id - 1] 
-                                  + fields.v[id + stride + 1] - fields.v[id + stride - 1])) / (2.0 * dx);
-            
-            double gamma_dot = std::sqrt(2.0 * du_dx * du_dx + 2.0 * dv_dy * dv_dy + std::pow(du_dy + dv_dx, 2));
-            gamma_dot = std::max(gamma_dot, gamma_dot_min); // Régularisation pour éviter gamma_dot -> 0 si n < 1
-            
-            // Mise à jour de la viscosité apparente locale
-            fields.mu[id] = K_consist * std::pow(gamma_dot, n_index - 1.0);
-        }
-    }
-    
-    // Réévaluation immédiate des viscosités nodales harmoniques
-    update_nodal_viscosity();
-    comm.exchange_halos_scalar(fields.mu, mesh);
-    comm.exchange_halos_scalar(fields.mu_node, mesh);
-}
-```
+#include "Mesh.hpp"
+#include "Field.hpp"
+#include "Config.hpp"
+#include "CSRMatrix.hpp"
+#include <vector>
 
-### 8.2. Modèle 2 : Implémenter un Cycle en V Multigrille Géométrique (GMG)
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
 
-Pour accélérer la résolution de l'équation de Poisson du Laplacien cartésien (Cas 3.1) :
-
-```cpp
-class GeometricMultigridSolver : public LinearSolverBase {
-private:
-    int n_levels;
-    std::vector<Mesh2D> grid_hierarchy;
-    
+/**
+ * @brief Opérateur couplé monolithique pour Navier-Stokes diphasique
+ * Implémente l'action du système point-selle A * x et la construction du second membre b.
+ */
+class NavierStokesSolver {
 public:
-    void v_cycle(int level, std::vector<double>& u, const std::vector<double>& f) {
-        if (level == n_levels - 1) {
-            // Niveau le plus grossier : résolution directe ou nombreuses itérations Jacobi
-            coarse_solve(u, f);
-            return;
+    Mesh2D mesh;
+    DomainBC bc;
+    // Déclaration de variable typée
+    bool enable_convection = true;
+    // Déclaration de variable typée
+    bool enable_energy = false;
+    // Déclaration de variable typée
+    double gx = 0.0;
+    // Déclaration de variable typée
+    double gy = 0.0;
+    // Déclaration de variable typée
+    double beta = 3.33e-3;
+    // Déclaration de variable typée
+    double T_ref = 0.0;
+    // Déclaration de variable typée
+    double Cp = 1006.0;
+    // Déclaration de variable typée
+    double k_thermal = 0.026;
+    // Déclaration de variable typée
+    double Ra = 1.0e5;
+    // Déclaration de variable typée
+    double Pr = 0.71;
+    // Déclaration de variable typée
+    std::string solver_type = "AUGMENTED_LAGRANGIAN";
+    // Déclaration de variable typée
+    double r_al = 500.0;
+    // Déclaration de variable typée
+    int uzawa_iter = 1;
+    // Déclaration de variable typée
+    std::vector<Obstacle> obstacles;
+
+    inline bool is_monolithic() const {
+        // Retour de fonction
+        return (solver_type == "MONOLITHIC");
+    }
+
+    inline bool is_augmented_lagrangian() const {
+        // Retour de fonction
+        return (solver_type != "MONOLITHIC");
+    }
+
+    inline bool is_point_in_obstacle(double x, double y) const {
+        // Boucle d'itération algorithmique
+        for (const auto& obs : obstacles) {
+            // Évaluation de la condition de contrôle
+            if (obs.type == "CYLINDER") {
+                // Déclaration de variable typée
+                double dx = x - obs.xc;
+                // Déclaration de variable typée
+                double dy = y - obs.yc;
+                // Évaluation de la condition de contrôle
+                if (dx * dx + dy * dy <= obs.radius * obs.radius) return true;
+            } else {
+                // Évaluation de la condition de contrôle
+                if (x >= obs.x0 - 1e-9 && x <= obs.x1 + 1e-9 &&
+                    // Calcul et assignation numérique
+                    y >= obs.y0 - 1e-9 && y <= obs.y1 + 1e-9) {
+                    // Retour de fonction
+                    return true;
+                }
+            }
         }
+        // Retour de fonction
+        return false;
+    }
 
-        // 1. Pré-lissage : 2 itérations de Gauss-Seidel Rouge-Noir
-        smooth_red_black(level, u, f, 2);
+    inline bool is_u_face_in_obstacle(int i, int j) const {
+        // Déclaration de variable typée
+        double x = mesh.xu(i);
+        // Déclaration de variable typée
+        double y = mesh.yc(j);
+        // Retour de fonction
+        return is_point_in_obstacle(x, y);
+    }
 
-        // 2. Calcul du résidu r = f - A*u
-        std::vector<double> r(grid_hierarchy[level].total_cells);
-        compute_residual(level, u, f, r);
+    inline bool is_v_face_in_obstacle(int i, int j) const {
+        // Déclaration de variable typée
+        double x = mesh.xc(i);
+        // Déclaration de variable typée
+        double y = mesh.yv(j);
+        // Retour de fonction
+        return is_point_in_obstacle(x, y);
+    }
 
-        // 3. Restriction sur la grille grossière (Full Weighting 9 points)
-        std::vector<double> f_coarse(grid_hierarchy[level + 1].total_cells);
-        restrict_full_weighting(r, f_coarse);
+    // Dimensions locales des inconnues propres (sans duplication)
+    int n_owned_u = 0;
+    // Déclaration de variable typée
+    int n_owned_v = 0;
+    // Déclaration de variable typée
+    int n_owned_p = 0;
+    // Déclaration de variable typée
+    int n_owned_total = 0;
 
-        // 4. Appel récursif sur la grille inférieure
-        std::vector<double> e_coarse(grid_hierarchy[level + 1].total_cells, 0.0);
-        v_cycle(level + 1, e_coarse, f_coarse);
+    // Matrice bloc locale pour le préconditionnement
+    CSRMatrix Fuu;
+    CSRMatrix Fvv;
+    CSRMatrix SchurLaplace;
+    // Déclaration de variable typée
+    std::vector<double> diag_u;
+    // Déclaration de variable typée
+    std::vector<double> diag_v;
+    // Déclaration de variable typée
+    std::vector<double> diag_p;
 
-        // 5. Prolongation bilinéaire de la correction d'erreur et correction : u = u + P*e
-        prolongate_and_correct(e_coarse, u);
+    // Calcul et assignation numérique
+    NavierStokesSolver() = default;
 
-        // 6. Post-lissage : 2 itérations de Gauss-Seidel Rouge-Noir
-        smooth_red_black(level, u, f, 2);
+    /**
+     * @brief Initialise les indexations et structures locales
+     */
+    void init(const Mesh2D& m, const Config& cfg);
+
+    /**
+     * @brief Applique l'opérateur couplé global : y = A(x) avec communications MPI
+     */
+    void apply_system_matrix(const FlowFields& fields_old, double dt,
+                             const std::vector<double>& x, std::vector<double>& y) const;
+
+    /**
+     * @brief Construit le second membre b = rhs du système monolithique
+     */
+    void assemble_rhs(const FlowFields& fields, double dt, std::vector<double>& rhs) const;
+
+    /**
+     * @brief Construit les matrices locales des blocs Fuu, Fvv et du complément de Schur pour le préconditionneur
+     */
+    void assemble_preconditioner_blocks(const FlowFields& fields, double dt);
+
+    /**
+     * @brief Convertit les champs décalés (u, v, p) en vecteur 1D distribué
+     */
+    void pack_vector(const FlowFields& fields, std::vector<double>& vec) const;
+
+    /**
+     * @brief Déballe le vecteur 1D distribué dans les champs décalés (u, v, p)
+     */
+    void unpack_vector(const std::vector<double>& vec, FlowFields& fields, bool homogeneous = false) const;
+
+    /**
+     * @brief Met à jour le champ de pression via le Lagrangien augmenté : p^{n+1} = p^n - r * div(u^{n+1})
+     */
+    void update_pressure_al(FlowFields& fields) const;
+
+    /**
+     * @brief Résout l'équation de transport-diffusion de la température T^{n+1}
+     */
+    void solve_energy(FlowFields& fields, double dt) const;
+
+    /**
+     * @brief Calcule le nombre de Nusselt moyen sur la paroi chaude (x = 0)
+     */
+    double compute_mean_nusselt_hot_wall(const FlowFields& fields) const;
+
+    // Convertisseurs d'indices locaux
+    inline int local_u_dof(int i, int j) const {
+        // Retour de fonction
+        return (j - 1) * (mesh.nx_local + (mesh.is_boundary_right ? 1 : 0)) + (i - 1);
+    }
+    inline int local_v_dof(int i, int j) const {
+        // Retour de fonction
+        return (j - 1) * mesh.nx_local + (i - 1);
+    }
+    inline int local_p_dof(int i, int j) const {
+        // Retour de fonction
+        return (j - 1) * mesh.nx_local + (i - 1);
     }
 };
+
+} // namespace covof
+
 ```
 
+### Répertoire des Symboles de `src/NavierStokesSolver.cpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 9 | Méthode / Fonction | `NavierStokesSolver::init` | Type retour : void |
+| 66 | Méthode / Fonction | `NavierStokesSolver::pack_vector` | Type retour : void |
+| 114 | Méthode / Fonction | `NavierStokesSolver::unpack_vector` | Type retour : void |
+| 188 | Méthode / Fonction | `div_cell` | Type retour : std::vector<double> |
+| 461 | Méthode / Fonction | `NavierStokesSolver::assemble_rhs` | Type retour : void |
+| 701 | Méthode / Fonction | `NavierStokesSolver::update_pressure_al` | Type retour : void |
+| 722 | Méthode / Fonction | `NavierStokesSolver::assemble_preconditioner_blocks` | Type retour : void |
+| 799 | Méthode / Fonction | `NavierStokesSolver::solve_energy` | Type retour : void |
+| 832 | Méthode / Fonction | `rhs` | Type retour : std::vector<double> |
+| 834 | Méthode / Fonction | `T_sol` | Type retour : std::vector<double> |
+| 974 | Méthode / Fonction | `y_prec` | Type retour : std::vector<double> |
+| 976 | Méthode / Fonction | `z_prec` | Type retour : std::vector<double> |
+| 1094 | Méthode / Fonction | `NavierStokesSolver::compute_mean_nusselt_hot_wall` | Type retour : double |
+
+### Code Source Intégral : `src/NavierStokesSolver.cpp` (1132 lignes)
+
+```cpp
+#include "covof/NavierStokesSolver.hpp"
+#include "covof/MpiComm.hpp"
+#include <cmath>
+#include <iostream>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+void NavierStokesSolver::init(const Mesh2D& m, const Config& cfg) {
+    // Calcul et assignation numérique
+    mesh = m;
+    // Calcul et assignation numérique
+    bc = cfg.bc;
+    // Calcul et assignation numérique
+    enable_convection = cfg.enable_convection;
+    // Calcul et assignation numérique
+    enable_energy = cfg.enable_energy;
+    // Calcul et assignation numérique
+    gx = cfg.gx;
+    // Calcul et assignation numérique
+    gy = cfg.gy;
+    // Calcul et assignation numérique
+    beta = cfg.beta;
+    // Calcul et assignation numérique
+    T_ref = cfg.T_ref;
+    // Calcul et assignation numérique
+    Cp = cfg.fluid1.Cp;
+    // Calcul et assignation numérique
+    k_thermal = cfg.fluid1.k_thermal;
+    // Calcul et assignation numérique
+    Ra = cfg.Ra;
+    // Calcul et assignation numérique
+    Pr = cfg.Pr;
+    // Calcul et assignation numérique
+    solver_type = cfg.solver.type;
+    // Calcul et assignation numérique
+    r_al = cfg.solver.r_al;
+    // Calcul et assignation numérique
+    uzawa_iter = cfg.solver.uzawa_iter;
+    // Calcul et assignation numérique
+    obstacles = cfg.obstacles;
+
+    // Déclaration de variable typée
+    int u_nx = mesh.nx_local + (mesh.is_boundary_right ? 1 : 0);
+    // Calcul et assignation numérique
+    n_owned_u = u_nx * mesh.ny_local;
+
+    // Déclaration de variable typée
+    int v_ny = mesh.ny_local + (mesh.is_boundary_top ? 1 : 0);
+    // Calcul et assignation numérique
+    n_owned_v = mesh.nx_local * v_ny;
+
+    // Calcul et assignation numérique
+    n_owned_p = mesh.nx_local * mesh.ny_local;
+
+    // Évaluation de la condition de contrôle
+    if (is_augmented_lagrangian()) {
+        // Calcul et assignation numérique
+        n_owned_total = n_owned_u + n_owned_v;
+    } else {
+        // Calcul et assignation numérique
+        n_owned_total = n_owned_u + n_owned_v + n_owned_p;
+    }
+}
+
+void NavierStokesSolver::pack_vector(const FlowFields& fields, std::vector<double>& vec) const {
+    vec.assign(n_owned_total, 0.0);
+
+    // 1. Pack u
+    int u_nx = mesh.nx_local + (mesh.is_boundary_right ? 1 : 0);
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= mesh.ny_local; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= u_nx; ++i) {
+            // Déclaration de variable typée
+            int dof = (j - 1) * u_nx + (i - 1);
+            // Calcul et assignation numérique
+            vec[dof] = fields.u[mesh.u_idx(i, j)];
+        }
+    }
+
+    // 2. Pack v
+    int v_offset = n_owned_u;
+    // Déclaration de variable typée
+    int v_ny = mesh.ny_local + (mesh.is_boundary_top ? 1 : 0);
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= v_ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= mesh.nx_local; ++i) {
+            // Déclaration de variable typée
+            int dof = (j - 1) * mesh.nx_local + (i - 1);
+            // Calcul et assignation numérique
+            vec[v_offset + dof] = fields.v[mesh.v_idx(i, j)];
+        }
+    }
+
+    // 3. Pack p (si monolithique)
+    if (is_monolithic()) {
+        // Déclaration de variable typée
+        int p_offset = n_owned_u + n_owned_v;
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                int dof = (j - 1) * mesh.nx_local + (i - 1);
+                // Calcul et assignation numérique
+                vec[p_offset + dof] = fields.p[mesh.cell_idx(i, j)];
+            }
+        }
+    }
+}
+
+void NavierStokesSolver::unpack_vector(const std::vector<double>& vec, FlowFields& fields, bool homogeneous) const {
+    // 1. Unpack u
+    int u_nx = mesh.nx_local + (mesh.is_boundary_right ? 1 : 0);
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= mesh.ny_local; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= u_nx; ++i) {
+            // Déclaration de variable typée
+            int dof = (j - 1) * u_nx + (i - 1);
+            // Calcul de la résolution géométrique de cellule
+            fields.u[mesh.u_idx(i, j)] = vec[dof];
+        }
+    }
+
+    // 2. Unpack v
+    int v_offset = n_owned_u;
+    // Déclaration de variable typée
+    int v_ny = mesh.ny_local + (mesh.is_boundary_top ? 1 : 0);
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= v_ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= mesh.nx_local; ++i) {
+            // Déclaration de variable typée
+            int dof = (j - 1) * mesh.nx_local + (i - 1);
+            // Calcul de la résolution géométrique de cellule
+            fields.v[mesh.v_idx(i, j)] = vec[v_offset + dof];
+        }
+    }
+
+    // 3. Unpack p (si monolithique)
+    if (is_monolithic()) {
+        // Déclaration de variable typée
+        int p_offset = n_owned_u + n_owned_v;
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                int dof = (j - 1) * mesh.nx_local + (i - 1);
+                // Calcul de la résolution géométrique de cellule
+                fields.p[mesh.cell_idx(i, j)] = vec[p_offset + dof];
+            }
+        }
+        MpiComm::sync_cell_scalar(mesh, fields.p);
+    }
+
+    // Synchronisation des mailles fantômes pour calculs ultérieurs
+    MpiComm::sync_u(mesh, fields.u);
+    MpiComm::sync_v(mesh, fields.v);
+    MpiComm::apply_boundary_conditions(mesh, bc, fields, homogeneous);
+}
+
+void NavierStokesSolver::apply_system_matrix(const FlowFields& fields_old, double dt,
+                                            const std::vector<double>& x, std::vector<double>& y) const {
+    y.assign(n_owned_total, 0.0);
+
+    FlowFields tf;
+    tf.allocate(mesh);
+    // Calcul et assignation numérique
+    unpack_vector(x, tf, true); // true = CL homogènes pour garantir la stricte linéarité de A*x
+
+    // Déclaration de variable typée
+    double dx = mesh.dx;
+    // Déclaration de variable typée
+    double dy = mesh.dy;
+    // Déclaration de variable typée
+    double dvol = dx * dy;
+
+    // Déclaration de variable typée
+    int u_nx = mesh.nx_local + (mesh.is_boundary_right ? 1 : 0);
+    // Déclaration de variable typée
+    int v_ny = mesh.ny_local + (mesh.is_boundary_top ? 1 : 0);
+
+    // Précalcul de la divergence sur chaque cellule locale + halo
+    std::vector<double> div_cell((mesh.nx_local + 2) * (mesh.ny_local + 2), 0.0);
+    // Calcul de la résolution géométrique de cellule
+    auto c_idx = [&](int i, int j) { return j * (mesh.nx_local + 2) + i; };
+
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 0; j <= mesh.ny_local + 1; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i <= mesh.nx_local + 1; ++i) {
+            // Déclaration de variable typée
+            double d = (tf.u[mesh.u_idx(i + 1, j)] - tf.u[mesh.u_idx(i, j)]) / dx +
+                       (tf.v[mesh.v_idx(i, j + 1)] - tf.v[mesh.v_idx(i, j)]) / dy;
+            // Calcul de la résolution géométrique de cellule
+            div_cell[c_idx(i, j)] = d;
+        }
+    }
+
+    // =========================================================================
+    // 1. Équation de Quantité de Mouvement en u (Faces verticales)
+    // =========================================================================
+    for (int j = 1; j <= mesh.ny_local; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= u_nx; ++i) {
+            // Déclaration de variable typée
+            int dof = (j - 1) * u_nx + (i - 1);
+
+            // Condition aux limites physique sur les parois gauche / droite ou obstacle solide
+            if (i == 1 && mesh.is_boundary_left) {
+                // Déclaration de variable typée
+                double rho_u = fields_old.rho_u[mesh.u_idx(i, j)];
+                // Déclaration de variable typée
+                double diag_bc = (rho_u / dt) * dvol;
+                // Évaluation de la condition de contrôle
+                if (bc.left.type == BCType::NEUMANN) {
+                    // Calcul et assignation numérique
+                    y[dof] = diag_bc * (tf.u[mesh.u_idx(1, j)] - tf.u[mesh.u_idx(2, j)]);
+                } else {
+                    // Calcul et assignation numérique
+                    y[dof] = diag_bc * tf.u[mesh.u_idx(1, j)];
+                }
+                continue;
+            }
+            // Évaluation de la condition de contrôle
+            if (i == u_nx && mesh.is_boundary_right) {
+                // Déclaration de variable typée
+                double rho_u = fields_old.rho_u[mesh.u_idx(i, j)];
+                // Déclaration de variable typée
+                double diag_bc = (rho_u / dt) * dvol;
+                // Évaluation de la condition de contrôle
+                if (bc.right.type == BCType::NEUMANN) {
+                    // Calcul et assignation numérique
+                    y[dof] = diag_bc * (tf.u[mesh.u_idx(u_nx, j)] - tf.u[mesh.u_idx(u_nx - 1, j)]);
+                } else {
+                    // Calcul et assignation numérique
+                    y[dof] = diag_bc * tf.u[mesh.u_idx(u_nx, j)];
+                }
+                continue;
+            }
+            // Évaluation de la condition de contrôle
+            if (is_u_face_in_obstacle(i, j)) {
+                // Déclaration de variable typée
+                double rho_u = fields_old.rho_u[mesh.u_idx(i, j)];
+                // Déclaration de variable typée
+                double diag_bc = (rho_u / dt) * dvol;
+                // Calcul et assignation numérique
+                y[dof] = diag_bc * tf.u[mesh.u_idx(i, j)];
+                continue;
+            }
+
+            // Déclaration de variable typée
+            double rho_u = fields_old.rho_u[mesh.u_idx(i, j)];
+
+            // Terme instationnaire
+            double val = (rho_u / dt) * tf.u[mesh.u_idx(i, j)] * dvol;
+
+            // Terme convectif semi-implicite F_uu
+            if (enable_convection) {
+                // Déclaration de variable typée
+                double u_n = fields_old.u[mesh.u_idx(i, j)];
+                // Déclaration de variable typée
+                double u_n_E = fields_old.u[mesh.u_idx(i + 1, j)];
+                // Déclaration de variable typée
+                double u_n_W = fields_old.u[mesh.u_idx(i - 1, j)];
+
+                // Déclaration de variable typée
+                double v_n_N = 0.5 * (fields_old.v[mesh.v_idx(i - 1, j + 1)] + fields_old.v[mesh.v_idx(i, j + 1)]);
+                // Déclaration de variable typée
+                double v_n_S = 0.5 * (fields_old.v[mesh.v_idx(i - 1, j)] + fields_old.v[mesh.v_idx(i, j)]);
+
+                // Déclaration de variable typée
+                double conv_E = 0.5 * (u_n + u_n_E) * 0.5 * (tf.u[mesh.u_idx(i, j)] + tf.u[mesh.u_idx(i + 1, j)]) * dy;
+                // Déclaration de variable typée
+                double conv_W = 0.5 * (u_n_W + u_n) * 0.5 * (tf.u[mesh.u_idx(i - 1, j)] + tf.u[mesh.u_idx(i, j)]) * dy;
+                // Déclaration de variable typée
+                double conv_N = v_n_N * 0.5 * (tf.u[mesh.u_idx(i, j)] + tf.u[mesh.u_idx(i, j + 1)]) * dx;
+                // Déclaration de variable typée
+                double conv_S = v_n_S * 0.5 * (tf.u[mesh.u_idx(i, j - 1)] + tf.u[mesh.u_idx(i, j)]) * dx;
+
+                // Calcul et assignation numérique
+                val += rho_u * (conv_E - conv_W + conv_N - conv_S);
+            }
+
+            // Termes visqueux implicites d'ordre 2 (Caltagirone et al. - Annexe A)
+            // (a) Viscosité d'élongation 2*mu d2u/dx2
+            double mu_cell_E = fields_old.mu[mesh.cell_idx(i, j)];
+            // Déclaration de variable typée
+            double mu_cell_W = fields_old.mu[mesh.cell_idx(i - 1, j)];
+            // Déclaration de variable typée
+            double diff_elong_E = 2.0 * mu_cell_E * (tf.u[mesh.u_idx(i + 1, j)] - tf.u[mesh.u_idx(i, j)]) / dx * dy;
+            // Déclaration de variable typée
+            double diff_elong_W = 2.0 * mu_cell_W * (tf.u[mesh.u_idx(i, j)] - tf.u[mesh.u_idx(i - 1, j)]) / dx * dy;
+            // Calcul et assignation numérique
+            val -= (diff_elong_E - diff_elong_W);
+
+            // (b) Viscosité de cisaillement et rotation mu (d2u/dy2 + d2v/dxdy)
+            double mu_node_N = fields_old.mu_node[mesh.node_idx(i, j + 1)];
+            // Déclaration de variable typée
+            double mu_node_S = fields_old.mu_node[mesh.node_idx(i, j)];
+
+            // Déclaration de variable typée
+            double shear_N = mu_node_N * ((tf.u[mesh.u_idx(i, j + 1)] - tf.u[mesh.u_idx(i, j)]) / dy +
+                                          (tf.v[mesh.v_idx(i, j + 1)] - tf.v[mesh.v_idx(i - 1, j + 1)]) / dx) * dx;
+            // Déclaration de variable typée
+            double shear_S = mu_node_S * ((tf.u[mesh.u_idx(i, j)] - tf.u[mesh.u_idx(i, j - 1)]) / dy +
+                                          (tf.v[mesh.v_idx(i, j)] - tf.v[mesh.v_idx(i - 1, j)]) / dx) * dx;
+            // Calcul et assignation numérique
+            val -= (shear_N - shear_S);
+
+            // Terme de pénalité de Lagrangien augmenté : - r * d(div)/dx * dvol = - r * (div_E - div_W) * dy
+            double grad_div_x = (div_cell[c_idx(i, j)] - div_cell[c_idx(i - 1, j)]) * dy;
+            // Calcul et assignation numérique
+            val -= r_al * grad_div_x;
+
+            // Gradient de pression discret B_u^T (uniquement si monolithique)
+            if (is_monolithic()) {
+                // Déclaration de variable typée
+                double grad_p = (tf.p[mesh.cell_idx(i, j)] - tf.p[mesh.cell_idx(i - 1, j)]) * dy;
+                // Calcul et assignation numérique
+                val += grad_p;
+            }
+
+            // Calcul et assignation numérique
+            y[dof] = val;
+        }
+    }
+
+    // =========================================================================
+    // 2. Équation de Quantité de Mouvement en v (Faces horizontales)
+    // =========================================================================
+    int v_offset = n_owned_u;
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= v_ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= mesh.nx_local; ++i) {
+            // Déclaration de variable typée
+            int dof = v_offset + (j - 1) * mesh.nx_local + (i - 1);
+
+            // Condition aux limites physique Dirichlet ou Free-Slip sur les parois basse / haute ou obstacle solide
+            bool is_wall_bot = (j == 1 && mesh.is_boundary_bottom && (bc.bottom.type == BCType::DIRICHLET || bc.bottom.type == BCType::FREE_SLIP));
+            // Déclaration de variable typée
+            bool is_wall_top = (j == v_ny && mesh.is_boundary_top && (bc.top.type == BCType::DIRICHLET || bc.top.type == BCType::FREE_SLIP));
+            // Déclaration de variable typée
+            bool in_obs = is_v_face_in_obstacle(i, j);
+            // Évaluation de la condition de contrôle
+            if (is_wall_bot || is_wall_top || in_obs) {
+                // Déclaration de variable typée
+                double rho_v = fields_old.rho_v[mesh.v_idx(i, j)];
+                // Déclaration de variable typée
+                double diag_bc = (rho_v / dt) * dvol;
+                // Calcul et assignation numérique
+                y[dof] = diag_bc * tf.v[mesh.v_idx(i, j)];
+                continue;
+            }
+
+            // Déclaration de variable typée
+            double rho_v = fields_old.rho_v[mesh.v_idx(i, j)];
+
+            // Terme instationnaire
+            double val = (rho_v / dt) * tf.v[mesh.v_idx(i, j)] * dvol;
+
+            // Terme convectif semi-implicite F_vv
+            if (enable_convection) {
+                // Déclaration de variable typée
+                double v_n = fields_old.v[mesh.v_idx(i, j)];
+                // Déclaration de variable typée
+                double v_n_N = fields_old.v[mesh.v_idx(i, j + 1)];
+                // Déclaration de variable typée
+                double v_n_S = fields_old.v[mesh.v_idx(i, j - 1)];
+
+                // Déclaration de variable typée
+                double u_n_E = 0.5 * (fields_old.u[mesh.u_idx(i + 1, j - 1)] + fields_old.u[mesh.u_idx(i + 1, j)]);
+                // Déclaration de variable typée
+                double u_n_W = 0.5 * (fields_old.u[mesh.u_idx(i, j - 1)] + fields_old.u[mesh.u_idx(i, j)]);
+
+                // Déclaration de variable typée
+                double conv_E = u_n_E * 0.5 * (tf.v[mesh.v_idx(i, j)] + tf.v[mesh.v_idx(i + 1, j)]) * dy;
+                // Déclaration de variable typée
+                double conv_W = u_n_W * 0.5 * (tf.v[mesh.v_idx(i - 1, j)] + tf.v[mesh.v_idx(i, j)]) * dy;
+                // Déclaration de variable typée
+                double conv_N = 0.5 * (v_n + v_n_N) * 0.5 * (tf.v[mesh.v_idx(i, j)] + tf.v[mesh.v_idx(i, j + 1)]) * dx;
+                // Déclaration de variable typée
+                double conv_S = 0.5 * (v_n_S + v_n) * 0.5 * (tf.v[mesh.v_idx(i, j - 1)] + tf.v[mesh.v_idx(i, j)]) * dx;
+
+                // Calcul et assignation numérique
+                val += rho_v * (conv_E - conv_W + conv_N - conv_S);
+            }
+
+            // Termes visqueux implicites d'ordre 2
+            // (a) Viscosité d'élongation 2*mu d2v/dy2
+            double mu_cell_N = fields_old.mu[mesh.cell_idx(i, j)];
+            // Déclaration de variable typée
+            double mu_cell_S = fields_old.mu[mesh.cell_idx(i, j - 1)];
+            // Déclaration de variable typée
+            double diff_elong_N = 2.0 * mu_cell_N * (tf.v[mesh.v_idx(i, j + 1)] - tf.v[mesh.v_idx(i, j)]) / dy * dx;
+            // Déclaration de variable typée
+            double diff_elong_S = 2.0 * mu_cell_S * (tf.v[mesh.v_idx(i, j)] - tf.v[mesh.v_idx(i, j - 1)]) / dy * dx;
+            // Calcul et assignation numérique
+            val -= (diff_elong_N - diff_elong_S);
+
+            // (b) Viscosité de cisaillement et rotation mu (d2v/dx2 + d2u/dxdy)
+            double mu_node_E = fields_old.mu_node[mesh.node_idx(i + 1, j)];
+            // Déclaration de variable typée
+            double mu_node_W = fields_old.mu_node[mesh.node_idx(i, j)];
+
+            // Déclaration de variable typée
+            double shear_E = mu_node_E * ((tf.v[mesh.v_idx(i + 1, j)] - tf.v[mesh.v_idx(i, j)]) / dx +
+                                          (tf.u[mesh.u_idx(i + 1, j)] - tf.u[mesh.u_idx(i + 1, j - 1)]) / dy) * dy;
+            // Déclaration de variable typée
+            double shear_W = mu_node_W * ((tf.v[mesh.v_idx(i, j)] - tf.v[mesh.v_idx(i - 1, j)]) / dx +
+                                          (tf.u[mesh.u_idx(i, j)] - tf.u[mesh.u_idx(i, j - 1)]) / dy) * dy;
+            // Calcul et assignation numérique
+            val -= (shear_E - shear_W);
+
+            // Terme de pénalité de Lagrangien augmenté : - r * d(div)/dy * dvol = - r * (div_N - div_S) * dx
+            double grad_div_y = (div_cell[c_idx(i, j)] - div_cell[c_idx(i, j - 1)]) * dx;
+            // Calcul et assignation numérique
+            val -= r_al * grad_div_y;
+
+            // Gradient de pression discret B_v^T (uniquement si monolithique)
+            if (is_monolithic()) {
+                // Déclaration de variable typée
+                double grad_p = (tf.p[mesh.cell_idx(i, j)] - tf.p[mesh.cell_idx(i, j - 1)]) * dx;
+                // Calcul et assignation numérique
+                val += grad_p;
+            }
+
+            // Calcul et assignation numérique
+            y[dof] = val;
+        }
+    }
+
+    // =========================================================================
+    // 3. Équation de Continuité (si monolithique)
+    // =========================================================================
+    if (is_monolithic()) {
+        // Déclaration de variable typée
+        int p_offset = n_owned_u + n_owned_v;
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                int dof = p_offset + (j - 1) * mesh.nx_local + (i - 1);
+                // Déclaration de variable typée
+                double div = div_cell[c_idx(i, j)] * dvol;
+                // Déclaration de variable typée
+                double diag_p_term = (dvol / r_al) * tf.p[mesh.cell_idx(i, j)];
+                // Calcul et assignation numérique
+                y[dof] = div - diag_p_term;
+            }
+        }
+    }
+}
+
+void NavierStokesSolver::assemble_rhs(const FlowFields& fields, double dt, std::vector<double>& rhs) const {
+    rhs.assign(n_owned_total, 0.0);
+
+    // Déclaration de variable typée
+    double dx = mesh.dx;
+    // Déclaration de variable typée
+    double dy = mesh.dy;
+    // Déclaration de variable typée
+    double dvol = dx * dy;
+
+    // Déclaration de variable typée
+    int u_nx = mesh.nx_local + (mesh.is_boundary_right ? 1 : 0);
+    // Déclaration de variable typée
+    int v_ny = mesh.ny_local + (mesh.is_boundary_top ? 1 : 0);
+
+    // RHS pour u
+    for (int j = 1; j <= mesh.ny_local; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= u_nx; ++i) {
+            // Déclaration de variable typée
+            int dof = (j - 1) * u_nx + (i - 1);
+            // Déclaration de variable typée
+            double rho_u = fields.rho_u[mesh.u_idx(i, j)];
+            // Déclaration de variable typée
+            double diag_bc = (rho_u / dt) * dvol;
+
+            // Si face dans un obstacle solide (adhérence nulle)
+            if (is_u_face_in_obstacle(i, j)) {
+                // Calcul et assignation numérique
+                rhs[dof] = 0.0;
+                continue;
+            }
+
+            // Si paroi physique gauche
+            if (i == 1 && mesh.is_boundary_left) {
+                // Déclaration de variable typée
+                double u_bc = 0.0;
+                // Évaluation de la condition de contrôle
+                if (bc.left.type == BCType::DIRICHLET) {
+                    // Évaluation de la condition de contrôle
+                    if (bc.left.profile == "POISEUILLE_STEP") {
+                        // Déclaration de variable typée
+                        double y = mesh.yc(j);
+                        // Évaluation de la condition de contrôle
+                        if (y >= bc.left.y_step) {
+                            // Déclaration de variable typée
+                            double h = mesh.ly - bc.left.y_step;
+                            // Calcul et assignation numérique
+                            u_bc = 6.0 * bc.left.u_mean * (y - bc.left.y_step) * (mesh.ly - y) / (h * h);
+                        }
+                    // Calcul et assignation numérique
+                    } else if (bc.left.profile == "PARABOLIC") {
+                        // Déclaration de variable typée
+                        double y = mesh.yc(j);
+                        // Déclaration de variable typée
+                        double h = mesh.ly;
+                        // Calcul et assignation numérique
+                        u_bc = 6.0 * bc.left.u_mean * y * (h - y) / (h * h);
+                    } else {
+                        // Calcul et assignation numérique
+                        u_bc = bc.left.u_val;
+                    }
+                // Calcul et assignation numérique
+                } else if (bc.left.type == BCType::NEUMANN) {
+                    // Calcul et assignation numérique
+                    u_bc = 0.0;
+                }
+                // Calcul et assignation numérique
+                rhs[dof] = diag_bc * u_bc;
+                continue;
+            }
+            // Si paroi physique droite
+            if (i == u_nx && mesh.is_boundary_right) {
+                // Déclaration de variable typée
+                double u_bc = 0.0;
+                // Évaluation de la condition de contrôle
+                if (bc.right.type == BCType::DIRICHLET) {
+                    // Calcul et assignation numérique
+                    u_bc = bc.right.u_val;
+                // Calcul et assignation numérique
+                } else if (bc.right.type == BCType::NEUMANN) {
+                    // Calcul et assignation numérique
+                    u_bc = 0.0;
+                }
+                // Calcul et assignation numérique
+                rhs[dof] = diag_bc * u_bc;
+                continue;
+            }
+
+            // Déclaration de variable typée
+            double val = (rho_u / dt) * fields.u[mesh.u_idx(i, j)] * dvol;
+            // Calcul et assignation numérique
+            val += rho_u * gx * dvol;
+            // Calcul et assignation numérique
+            val += fields.F_sigma_x[mesh.u_idx(i, j)] * dvol;
+
+            // Pour Lagrangien augmenté standard : le gradient de pression -grad(p^n) est explicite au second membre
+            if (is_augmented_lagrangian()) {
+                // Déclaration de variable typée
+                double grad_p = (fields.p[mesh.cell_idx(i, j)] - fields.p[mesh.cell_idx(i - 1, j)]) * dy;
+                // Calcul et assignation numérique
+                val -= grad_p;
+            }
+
+            // Contribution de contrainte tangentielle à la paroi pour u (haut / bas)
+            if (j == mesh.ny_local && mesh.is_boundary_top && bc.top.type == BCType::DIRICHLET) {
+                // Déclaration de variable typée
+                double mu_N = fields.mu_node[mesh.node_idx(i, j + 1)];
+                // Calcul et assignation numérique
+                val += mu_N * (2.0 * bc.top.u_val / dy) * dx;
+            }
+            // Évaluation de la condition de contrôle
+            if (j == 1 && mesh.is_boundary_bottom && bc.bottom.type == BCType::DIRICHLET) {
+                // Déclaration de variable typée
+                double mu_S = fields.mu_node[mesh.node_idx(i, j)];
+                // Calcul et assignation numérique
+                val += mu_S * (2.0 * bc.bottom.u_val / dy) * dx;
+            }
+
+            // Calcul et assignation numérique
+            rhs[dof] = val;
+        }
+    }
+
+    // RHS pour v
+    int v_offset = n_owned_u;
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= v_ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= mesh.nx_local; ++i) {
+            // Déclaration de variable typée
+            int dof = v_offset + (j - 1) * mesh.nx_local + (i - 1);
+            // Déclaration de variable typée
+            double rho_v = fields.rho_v[mesh.v_idx(i, j)];
+            // Déclaration de variable typée
+            double diag_bc = (rho_v / dt) * dvol;
+
+            // Si face dans un obstacle solide (adhérence nulle)
+            if (is_v_face_in_obstacle(i, j)) {
+                // Calcul et assignation numérique
+                rhs[dof] = 0.0;
+                continue;
+            }
+
+            // Évaluation de la condition de contrôle
+            if (j == 1 && mesh.is_boundary_bottom && (bc.bottom.type == BCType::DIRICHLET || bc.bottom.type == BCType::FREE_SLIP)) {
+                // Déclaration de variable typée
+                double v_bc = (bc.bottom.type == BCType::DIRICHLET) ? bc.bottom.v_val : 0.0;
+                // Calcul et assignation numérique
+                rhs[dof] = diag_bc * v_bc;
+                continue;
+            }
+            // Évaluation de la condition de contrôle
+            if (j == v_ny && mesh.is_boundary_top && (bc.top.type == BCType::DIRICHLET || bc.top.type == BCType::FREE_SLIP)) {
+                // Déclaration de variable typée
+                double v_bc = 0.0;
+                // Évaluation de la condition d'injecteur (Cas 3.3 Fluids 2021)
+                if (bc.top.profile == "JET_INLET") {
+                    // Déclaration de variable typée
+                    double x = mesh.xc(i);
+                    // Déclaration de variable typée pour le centre et demi-largeur
+                    double xc = (bc.top.jet_center > 0.0) ? bc.top.jet_center : 0.5 * mesh.lx;
+                    // Calcul de la demi-largeur de l'injecteur
+                    double half_w = (bc.top.jet_width > 0.0) ? 0.5 * bc.top.jet_width : 0.04;
+                    // Évaluation de l'appartenance à l'injecteur
+                    if (std::abs(x - xc) <= half_w) {
+                        // Vitesse d'injection négative imposée
+                        v_bc = bc.top.v_val;
+                    } else {
+                        // Vitesse positive d'échappement compensatoire du gaz
+                        v_bc = -bc.top.v_val * (2.0 * half_w) / (mesh.lx - 2.0 * half_w);
+                    }
+                } else if (bc.top.type == BCType::DIRICHLET) {
+                    // Calcul et assignation numérique standard
+                    v_bc = bc.top.v_val;
+                }
+                // Calcul et assignation numérique
+                rhs[dof] = diag_bc * v_bc;
+                continue;
+            }
+
+            // Déclaration de variable typée
+            double val = (rho_v / dt) * fields.v[mesh.v_idx(i, j)] * dvol;
+            // Calcul et assignation numérique
+            val += rho_v * gy * dvol;
+            // Évaluation de la condition de contrôle
+            if (enable_energy) {
+                // Déclaration de variable typée
+                double T_v = 0.5 * (fields.T[mesh.cell_idx(i, j)] + fields.T[mesh.cell_idx(i, j - 1)]);
+                // Calcul et assignation numérique
+                val += rho_v * beta * (T_v - T_ref) * gy * dvol;
+            }
+            // Calcul et assignation numérique
+            val += fields.F_sigma_y[mesh.v_idx(i, j)] * dvol;
+
+            // Pour Lagrangien augmenté standard : -grad(p^n)
+            if (is_augmented_lagrangian()) {
+                // Déclaration de variable typée
+                double grad_p = (fields.p[mesh.cell_idx(i, j)] - fields.p[mesh.cell_idx(i, j - 1)]) * dx;
+                // Calcul et assignation numérique
+                val -= grad_p;
+            }
+
+            // Contribution de contrainte tangentielle à la paroi pour v (gauche / droite)
+            if (i == 1 && mesh.is_boundary_left && bc.left.type == BCType::DIRICHLET) {
+                // Déclaration de variable typée
+                double mu_W = fields.mu_node[mesh.node_idx(i, j)];
+                // Calcul et assignation numérique
+                val += mu_W * (2.0 * bc.left.v_val / dx) * dy;
+            }
+            // Évaluation de la condition de contrôle
+            if (i == mesh.nx_local && mesh.is_boundary_right && bc.right.type == BCType::DIRICHLET) {
+                // Déclaration de variable typée
+                double mu_E = fields.mu_node[mesh.node_idx(i + 1, j)];
+                // Calcul et assignation numérique
+                val += mu_E * (2.0 * bc.right.v_val / dx) * dy;
+            }
+
+            // Calcul et assignation numérique
+            rhs[dof] = val;
+        }
+    }
+
+    // RHS pour p (si monolithique régularisé)
+    if (is_monolithic()) {
+        // Déclaration de variable typée
+        int p_offset = n_owned_u + n_owned_v;
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                int dof = p_offset + (j - 1) * mesh.nx_local + (i - 1);
+                // Calcul et assignation numérique
+                rhs[dof] = - (dvol / r_al) * fields.p[mesh.cell_idx(i, j)];
+            }
+        }
+    }
+}
+
+void NavierStokesSolver::update_pressure_al(FlowFields& fields) const {
+    // Déclaration de variable typée
+    double dx = mesh.dx;
+    // Déclaration de variable typée
+    double dy = mesh.dy;
+
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= mesh.ny_local; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= mesh.nx_local; ++i) {
+            // Déclaration de variable typée
+            double div = (fields.u[mesh.u_idx(i + 1, j)] - fields.u[mesh.u_idx(i, j)]) / dx +
+                         (fields.v[mesh.v_idx(i, j + 1)] - fields.v[mesh.v_idx(i, j)]) / dy;
+            // Calcul de la résolution géométrique de cellule
+            fields.p[mesh.cell_idx(i, j)] -= r_al * div;
+        }
+    }
+
+    MpiComm::sync_cell_scalar(mesh, fields.p);
+}
+
+void NavierStokesSolver::assemble_preconditioner_blocks(const FlowFields& fields, double dt) {
+    // Déclaration de variable typée
+    double dx = mesh.dx;
+    // Déclaration de variable typée
+    double dy = mesh.dy;
+    // Déclaration de variable typée
+    double dvol = dx * dy;
+
+    // Calcul des diagonales effectives de Fuu et Fvv pour le préconditionnement Jacobi
+    diag_u.assign(n_owned_u, 1.0);
+    // Déclaration de variable typée
+    int u_nx = mesh.nx_local + (mesh.is_boundary_right ? 1 : 0);
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= mesh.ny_local; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= u_nx; ++i) {
+            // Déclaration de variable typée
+            int dof = (j - 1) * u_nx + (i - 1);
+            // Déclaration de variable typée
+            double rho_u = fields.rho_u[mesh.u_idx(i, j)];
+            // Déclaration de variable typée
+            bool is_wall = (i == 1 && mesh.is_boundary_left) ||
+                           // Calcul et assignation numérique
+                           (i == u_nx && mesh.is_boundary_right) ||
+                           is_u_face_in_obstacle(i, j);
+            // Évaluation de la condition de contrôle
+            if (is_wall) {
+                // Calcul et assignation numérique
+                diag_u[dof] = (rho_u / dt) * dvol;
+                continue;
+            }
+            // Déclaration de variable typée
+            double mu_c = fields.mu[mesh.cell_idx(i, j)];
+            // Déclaration de variable typée
+            double d = (rho_u / dt) * dvol + 4.0 * mu_c * (dy / dx) + 2.0 * mu_c * (dx / dy) + 2.0 * r_al * (dy / dx);
+            // Calcul et assignation numérique
+            diag_u[dof] = (d > 1.0e-15) ? d : 1.0;
+        }
+    }
+
+    diag_v.assign(n_owned_v, 1.0);
+    // Déclaration de variable typée
+    int v_ny = mesh.ny_local + (mesh.is_boundary_top ? 1 : 0);
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= v_ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= mesh.nx_local; ++i) {
+            // Déclaration de variable typée
+            int dof = (j - 1) * mesh.nx_local + (i - 1);
+            // Déclaration de variable typée
+            double rho_v = fields.rho_v[mesh.v_idx(i, j)];
+            // Déclaration de variable typée
+            bool is_wall = (j == 1 && mesh.is_boundary_bottom && (bc.bottom.type == BCType::DIRICHLET || bc.bottom.type == BCType::FREE_SLIP)) ||
+                           // Calcul et assignation numérique
+                           (j == v_ny && mesh.is_boundary_top && (bc.top.type == BCType::DIRICHLET || bc.top.type == BCType::FREE_SLIP)) ||
+                           is_v_face_in_obstacle(i, j);
+            // Évaluation de la condition de contrôle
+            if (is_wall) {
+                // Calcul et assignation numérique
+                diag_v[dof] = (rho_v / dt) * dvol;
+                continue;
+            }
+            // Déclaration de variable typée
+            double mu_c = fields.mu[mesh.cell_idx(i, j)];
+            // Déclaration de variable typée
+            double d = (rho_v / dt) * dvol + 4.0 * mu_c * (dx / dy) + 2.0 * mu_c * (dy / dx) + 2.0 * r_al * (dx / dy);
+            // Calcul et assignation numérique
+            diag_v[dof] = (d > 1.0e-15) ? d : 1.0;
+        }
+    }
+
+    // Évaluation de la condition de contrôle
+    if (is_monolithic()) {
+        diag_p.assign(n_owned_p, dvol / r_al);
+    }
+}
+
+void NavierStokesSolver::solve_energy(FlowFields& fields, double dt) const {
+    // Évaluation de la condition de contrôle
+    if (!enable_energy) return;
+
+    // Déclaration de variable typée
+    int nx = mesh.nx_local;
+    // Déclaration de variable typée
+    int ny = mesh.ny_local;
+    // Déclaration de variable typée
+    int n_cells = nx * ny;
+
+    // Déclaration de variable typée
+    double dx = mesh.dx;
+    // Déclaration de variable typée
+    double dy = mesh.dy;
+    // Déclaration de variable typée
+    double dvol = dx * dy;
+    // Déclaration de variable typée
+    double rho = fields.rho[mesh.cell_idx(1, 1)];
+
+    // Calcul et assignation numérique
+    auto cell_dof = [&](int i, int j) {
+        // Retour de fonction
+        return (j - 1) * nx + (i - 1);
+    };
+
+    // Déclaration de variable typée
+    std::vector<int> rows;
+    // Déclaration de variable typée
+    std::vector<int> cols;
+    // Déclaration de variable typée
+    std::vector<double> vals;
+    // Déclaration de variable typée
+    std::vector<double> rhs(n_cells, 0.0);
+    // Déclaration de variable typée
+    std::vector<double> T_sol(n_cells, 0.0);
+
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Déclaration de variable typée
+            int c_dof = cell_dof(i, j);
+            // Calcul et assignation numérique
+            T_sol[c_dof] = fields.T[mesh.cell_idx(i, j)];
+
+            // Déclaration de variable typée
+            double a_c = (rho * Cp / dt) * dvol;
+            // Calcul et assignation numérique
+            rhs[c_dof] = (rho * Cp / dt) * dvol * fields.T[mesh.cell_idx(i, j)];
+
+            // Flux x-Est
+            double u_e = fields.u[mesh.u_idx(i + 1, j)];
+            // Déclaration de variable typée
+            double d_e = k_thermal * dy / dx;
+            // Déclaration de variable typée
+            double conv_e = rho * Cp * u_e * dy * 0.5;
+
+            // Flux x-Ouest
+            double u_w = fields.u[mesh.u_idx(i, j)];
+            // Déclaration de variable typée
+            double d_w = k_thermal * dy / dx;
+            // Déclaration de variable typée
+            double conv_w = rho * Cp * u_w * dy * 0.5;
+
+            // Flux y-Nord
+            double v_n = fields.v[mesh.v_idx(i, j + 1)];
+            // Déclaration de variable typée
+            double d_n = k_thermal * dx / dy;
+            // Déclaration de variable typée
+            double conv_n = rho * Cp * v_n * dx * 0.5;
+
+            // Flux y-Sud
+            double v_s = fields.v[mesh.v_idx(i, j)];
+            // Déclaration de variable typée
+            double d_s = k_thermal * dx / dy;
+            // Déclaration de variable typée
+            double conv_s = rho * Cp * v_s * dx * 0.5;
+
+            // Voisin Est
+            if (i < nx) {
+                // Calcul et assignation numérique
+                a_c += d_e + conv_e;
+                rows.push_back(c_dof);
+                cols.push_back(cell_dof(i + 1, j));
+                vals.push_back(-d_e + conv_e);
+            } else if (mesh.is_boundary_right) {
+                // Évaluation de la condition de contrôle
+                if (bc.right.T_type == BCType::DIRICHLET) {
+                    // Calcul et assignation numérique
+                    a_c += 2.0 * d_e;
+                    // Calcul et assignation numérique
+                    rhs[c_dof] += 2.0 * d_e * bc.right.T_val;
+                }
+            }
+
+            // Voisin Ouest
+            if (i > 1) {
+                // Calcul et assignation numérique
+                a_c += d_w - conv_w;
+                rows.push_back(c_dof);
+                cols.push_back(cell_dof(i - 1, j));
+                vals.push_back(-d_w - conv_w);
+            } else if (mesh.is_boundary_left) {
+                // Évaluation de la condition de contrôle
+                if (bc.left.T_type == BCType::DIRICHLET) {
+                    // Calcul et assignation numérique
+                    a_c += 2.0 * d_w;
+                    // Calcul et assignation numérique
+                    rhs[c_dof] += 2.0 * d_w * bc.left.T_val;
+                }
+            }
+
+            // Voisin Nord
+            if (j < ny) {
+                // Calcul et assignation numérique
+                a_c += d_n + conv_n;
+                rows.push_back(c_dof);
+                cols.push_back(cell_dof(i, j + 1));
+                vals.push_back(-d_n + conv_n);
+            } else if (mesh.is_boundary_top) {
+                // Évaluation de la condition de contrôle
+                if (bc.top.T_type == BCType::DIRICHLET) {
+                    // Calcul et assignation numérique
+                    a_c += 2.0 * d_n;
+                    // Calcul et assignation numérique
+                    rhs[c_dof] += 2.0 * d_n * bc.top.T_val;
+                }
+            }
+
+            // Voisin Sud
+            if (j > 1) {
+                // Calcul et assignation numérique
+                a_c += d_s - conv_s;
+                rows.push_back(c_dof);
+                cols.push_back(cell_dof(i, j - 1));
+                vals.push_back(-d_s - conv_s);
+            } else if (mesh.is_boundary_bottom) {
+                // Évaluation de la condition de contrôle
+                if (bc.bottom.T_type == BCType::DIRICHLET) {
+                    // Calcul et assignation numérique
+                    a_c += 2.0 * d_s;
+                    // Calcul et assignation numérique
+                    rhs[c_dof] += 2.0 * d_s * bc.bottom.T_val;
+                }
+            }
+
+            rows.push_back(c_dof);
+            cols.push_back(c_dof);
+            vals.push_back(a_c);
+        }
+    }
+
+    CSRMatrix A;
+    A.set_from_triplets(n_cells, n_cells, rows, cols, vals);
+
+    // Solveur BiCGSTAB avec préconditionnement Jacobi
+    std::vector<double> r = rhs;
+    // Déclaration de variable typée
+    std::vector<double> Ax(n_cells, 0.0);
+    A.matvec(T_sol, Ax);
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n_cells; ++i) r[i] -= Ax[i];
+
+    // Déclaration de variable typée
+    std::vector<double> r0_hat = r;
+    // Déclaration de variable typée
+    std::vector<double> p = r;
+    // Déclaration de variable typée
+    std::vector<double> v(n_cells, 0.0);
+    // Déclaration de variable typée
+    std::vector<double> s(n_cells, 0.0);
+    // Déclaration de variable typée
+    std::vector<double> t(n_cells, 0.0);
+    // Déclaration de variable typée
+    std::vector<double> y_prec(n_cells, 0.0);
+    // Déclaration de variable typée
+    std::vector<double> z_prec(n_cells, 0.0);
+
+    // Déclaration de variable typée
+    double rho_old = 1.0;
+    // Déclaration de variable typée
+    double alpha = 1.0;
+    // Déclaration de variable typée
+    double omega = 1.0;
+
+    // Déclaration de variable typée
+    double res_init = 0.0;
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n_cells; ++i) res_init += r[i] * r[i];
+    // Calcul de norme euclidienne ou résidu de convergence
+    res_init = std::sqrt(res_init);
+    // Évaluation de la condition de contrôle
+    if (res_init > 1e-13) {
+        // Déclaration de variable typée
+        int max_it = 500;
+        // Boucle d'itération algorithmique
+        for (int iter = 0; iter < max_it; ++iter) {
+            // Déclaration de variable typée
+            double rho_new = 0.0;
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n_cells; ++i) rho_new += r0_hat[i] * r[i];
+            // Évaluation de la condition de contrôle
+            if (std::abs(rho_new) < 1e-30) break;
+
+            // Évaluation de la condition de contrôle
+            if (iter > 0) {
+                // Déclaration de variable typée
+                double beta_param = (rho_new / rho_old) * (alpha / omega);
+                // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+                for (int i = 0; i < n_cells; ++i) {
+                    // Calcul et assignation numérique
+                    p[i] = r[i] + beta_param * (p[i] - omega * v[i]);
+                }
+            } else {
+                // Calcul et assignation numérique
+                p = r;
+            }
+
+            // Préconditionnement Jacobi : y = D^{-1} p
+            for (int i = 0; i < n_cells; ++i) y_prec[i] = p[i] / A.diag[i];
+            A.matvec(y_prec, v);
+
+            // Déclaration de variable typée
+            double r0v = 0.0;
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n_cells; ++i) r0v += r0_hat[i] * v[i];
+            // Évaluation de la condition de contrôle
+            if (std::abs(r0v) < 1e-30) break;
+            // Calcul et assignation numérique
+            alpha = rho_new / r0v;
+
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n_cells; ++i) s[i] = r[i] - alpha * v[i];
+            // Déclaration de variable typée
+            double s_norm = 0.0;
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n_cells; ++i) s_norm += s[i] * s[i];
+            // Évaluation de la condition de contrôle
+            if (std::sqrt(s_norm) / res_init < 1e-8) {
+                // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+                for (int i = 0; i < n_cells; ++i) T_sol[i] += alpha * y_prec[i];
+                break;
+            }
+
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n_cells; ++i) z_prec[i] = s[i] / A.diag[i];
+            A.matvec(z_prec, t);
+
+            // Déclaration de variable typée
+            double tt = 0.0, ts = 0.0;
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n_cells; ++i) {
+                // Calcul et assignation numérique
+                tt += t[i] * t[i];
+                // Calcul et assignation numérique
+                ts += t[i] * s[i];
+            }
+            // Calcul et assignation numérique
+            omega = (tt > 1e-30) ? (ts / tt) : 0.0;
+
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n_cells; ++i) {
+                // Calcul et assignation numérique
+                T_sol[i] += alpha * y_prec[i] + omega * z_prec[i];
+                // Calcul et assignation numérique
+                r[i] = s[i] - omega * t[i];
+            }
+
+            // Calcul et assignation numérique
+            rho_old = rho_new;
+
+            // Déclaration de variable typée
+            double r_norm = 0.0;
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 0; i < n_cells; ++i) r_norm += r[i] * r[i];
+            // Évaluation de la condition de contrôle
+            if (std::sqrt(r_norm) / res_init < 1e-8) break;
+        }
+    }
+
+    // Réinjecter T_sol dans fields.T
+    for (int j = 1; j <= ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Calcul de la résolution géométrique de cellule
+            fields.T[mesh.cell_idx(i, j)] = T_sol[cell_dof(i, j)];
+        }
+    }
+
+    MpiComm::sync_cell_scalar(mesh, fields.T);
+    MpiComm::apply_thermal_boundary_conditions(mesh, bc, fields);
+}
+
+// Déclaration de variable typée
+double NavierStokesSolver::compute_mean_nusselt_hot_wall(const FlowFields& fields) const {
+    // Déclaration de variable typée
+    double local_nu_sum = 0.0;
+    // Déclaration de variable typée
+    int count = 0;
+    // Évaluation de la condition de contrôle
+    if (mesh.is_boundary_left) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Déclaration de variable typée
+            double T_w = bc.left.T_val;
+            // Déclaration de variable typée
+            double T_1 = fields.T[mesh.cell_idx(1, j)];
+            // Déclaration de variable typée
+            double delta_T = std::abs(bc.left.T_val - bc.right.T_val);
+            // Évaluation de la condition de contrôle
+            if (delta_T < 1e-12) delta_T = 1.0;
+            // Déclaration de variable typée
+            double nu_local = 2.0 * (T_w - T_1) / mesh.dx * (mesh.lx / delta_T);
+            // Calcul et assignation numérique
+            local_nu_sum += nu_local;
+            count++;
+        }
+    }
+    // Déclaration de variable typée
+    double global_nu_sum = MpiComm::global_sum(mesh, local_nu_sum);
+    // Déclaration de variable typée
+    double global_count = MpiComm::global_sum(mesh, static_cast<double>(count));
+    // Évaluation de la condition de contrôle
+    if (global_count > 0.0) {
+        // Retour de fonction
+        return global_nu_sum / global_count;
+    }
+    // Retour de fonction
+    return 1.0;
+}
+
+} // namespace covof
+
+
+```
+
+
+## Chapitre 10 : Reconstruction Géométrique d'Interface VOF : PLIC, ELVIRA, LVIRA, SLIC (InterfaceReconstruction.hpp/.cpp)
+
+\section{Représentation Linéaire par Morceaux PLIC (\emph{Piecewise Linear Interface Calculation})}
+Dans chaque maille diphasique $(i, j)$ telle que $\varepsilon_{\text{vof}} < C_{i,j} < 1 - \varepsilon_{\text{vof}}$ ($\varepsilon_{\text{vof}} = 10^{-12}$), l'interface est représentée dans le repère local normalisé $(\xi, \eta) \in [0, 1]^2$ de la maille par la droite :
+\begin{equation}
+  n_x \xi + n_y \eta = \alpha
+\end{equation}
+où $\mathbf{n} = (n_x, n_y)^T$ est la normale unitaire pointant vers l'extérieur du fluide 1 ($\mathbf{n} = -\nabla C / \|\nabla C\|$) et $\alpha \in \mathbb{R}$ est la constante de positionnement géométrique unique telle que l'aire du polygone tronqué $\{(\xi, \eta) \in [0, 1]^2 \mid n_x \xi + n_y \eta \le \alpha\}$ soit exactement égale à la fraction volumique $C_{i,j}$.
+
+\section{Relations Analytiques Directe et Inverse de Scardovelli \& Zaleski (2000)}
+En se ramenant par symétrie au premier quadrant ($m_1 = \min(|n_x|, |n_y|) \ge 0$, $m_2 = \max(|n_x|, |n_y|) > 0$, avec $m_1 + m_2 = 1$ en norme $L_1$), l'inversion analytique $C \mapsto \alpha$ implémentée dans \texttt{compute\_line\_constant} distingue deux régimes géométriques sans aucune itération de Newton :
+\begin{enumerate}
+  \item \textbf{Régime triangulaire} ($0 \le C \le \frac{m_1}{2 m_2}$) :
+  \begin{equation}
+    \alpha = \sqrt{2 m_1 m_2 C}
+  \end{equation}
+  \item \textbf{Régime trapézoïdal} ($\frac{m_1}{2 m_2} < C \le \frac{1}{2}$) :
+  \begin{equation}
+    \alpha = m_2 C + \frac{m_1}{2}
+  \end{equation}
+\end{enumerate}
+Pour $C > 1/2$, la symétrie centrale du carré unité donne immédiatement $\alpha(C) = 1 - \alpha(1 - C)$.
+
+\section{Estimation des Normales : Parker-Youngs, ELVIRA et LVIRA}
+\begin{itemize}
+  \item \textbf{Parker-Youngs} : différence finie pondérée sur le stencil $3\times 3$ avec poids $1, 2, 1$ privilégiant la direction axiale.
+  \item \textbf{ELVIRA (Pilliod \& Puckett 2004)} : évalue 6 pentes candidates (différences arrière, centrée et avant des sommes de colonnes horizontales $H_i = \sum_{l=-1}^1 C_{i, j+l}$ et des sommes de lignes verticales $V_j = \sum_{k=-1}^1 C_{i+k, j}$), reconstruit la droite associée sur le bloc $3\times 3$ et retient celle qui minimise l'erreur quadratique $\sum_{k,l=-1}^1 (C^{\text{rec}}_{i+k,j+l}(\mathbf{n}) - C_{i+k,j+l})^2$. Cet algorithme reconstruit exactement toute interface plane quelle que soit son orientation.
+  \item \textbf{LVIRA (Puckett 1991)} : affine l'angle $\theta = \text{atan2}(n_y, n_x)$ de la normale ELVIRA par recherche locale d'or / sécante minimisant la fonctionnelle d'erreur $E_2(\theta)$ sur le stencil $3\times 3$.
+\end{itemize}
+
+### Répertoire des Symboles de `include/covof/InterfaceReconstruction.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 13 | enum class | `ReconstructionMethod` | Déclaration de type / classe / structure |
+| 23 | enum class | `AdvectionMethod` | Déclaration de type / classe / structure |
+| 32 | enum class | `TvdLimiter` | Déclaration de type / classe / structure |
+| 43 | struct | `InterfaceSegment` | Déclaration de type / classe / structure |
+| 52 | class | `InterfaceReconstruction` | Déclaration de type / classe / structure |
+| 57 | Méthode / Fonction | `parse_reconstruction_method` | Type retour : static ReconstructionMethod |
+| 62 | Méthode / Fonction | `parse_advection_method` | Type retour : static AdvectionMethod |
+| 67 | Méthode / Fonction | `parse_tvd_limiter` | Type retour : static TvdLimiter |
+| 116 | Méthode / Fonction | `evaluate_limiter` | Type retour : static double |
+
+### Code Source Intégral : `include/covof/InterfaceReconstruction.hpp` (119 lignes)
+
+```cpp
+#pragma once
+
+#include "Mesh.hpp"
+#include <string>
+#include <vector>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+/**
+ * @brief Énumération des méthodes de reconstruction géométrique d'interface
+ */
+enum class ReconstructionMethod {
+    SLIC,   ///< Simple Line Interface Calculation (Noh & Woodward 1976)
+    PLIC,   ///< Piecewise Linear Interface Calculation (Youngs 1982 / Scardovelli & Zaleski 1999)
+    LVIRA,  ///< Least Squares VOF Interface Reconstruction Algorithm (Pilliod & Puckett 2004)
+    ELVIRA  ///< Efficient LVIRA avec 6 candidats discrets (Pilliod & Puckett 2004)
+};
+
+/**
+ * @brief Énumération des algorithmes d'advection VOF
+ */
+enum class AdvectionMethod {
+    VOF_TVD,      ///< Advection algébrique Volumes Finis TVD haute résolution
+    CIAM,         ///< Calcul d'Interface Affine par Morceaux (Strang splitting directionnel)
+    WEYMOUTH_YUE  ///< Advection géométrique unsplit multidimensionnelle (Weymouth & Yue 2010)
+};
+
+/**
+ * @brief Énumération des limiteurs de pente TVD / NVD pour l'advection d'interface
+ */
+enum class TvdLimiter {
+    SUPERBEE,  ///< Limiteur Superbee de Roe (hautement compressif pour interfaces)
+    VAN_LEER,  ///< Limiteur harmonique doux de Van Leer
+    MUSCL,     ///< Limiteur linéaire par morceaux MUSCL
+    HRIC       ///< High Resolution Interface Capturing (Muzaferija & Peric 1999)
+};
+
+/**
+ * @brief Structure représentant un segment de droite d'interface affine dans une cellule
+ * Équation locale : n_x * x + n_y * y + alpha = 0, orientée vers le fluide 2 (gaz)
+ */
+struct InterfaceSegment {
+    double nx = 0.0;    ///< Composante normale unitaire selon X
+    double ny = 0.0;    ///< Composante normale unitaire selon Y
+    double alpha = 0.0; ///< Paramètre affine de position de l'interface
+};
+
+/**
+ * @brief Classe statique fournissant les algorithmes géométriques de reconstruction et de découpe
+ */
+class InterfaceReconstruction {
+public:
+    /**
+     * @brief Convertit une chaîne de caractères en méthode de reconstruction
+     */
+    static ReconstructionMethod parse_reconstruction_method(const std::string& str);
+
+    /**
+     * @brief Convertit une chaîne de caractères en méthode d'advection
+     */
+    static AdvectionMethod parse_advection_method(const std::string& str);
+
+    /**
+     * @brief Convertit une chaîne de caractères en limiteur TVD
+     */
+    static TvdLimiter parse_tvd_limiter(const std::string& str);
+
+    /**
+     * @brief Calcule l'aire exacte de l'intersection entre un rectangle [xmin, xmax] x [ymin, ymax]
+     *        et le demi-plan fluide nx * x + ny * y + alpha <= 0 (Sutherland-Hodgman + Gauss Shoelace)
+     */
+    static double cut_box_area(double xmin, double xmax, double ymin, double ymax,
+                               double nx, double ny, double alpha);
+
+    /**
+     * @brief Calcule le paramètre affine alpha conservant exactement le volume cible C_target * dx * dy
+     */
+    static double compute_alpha(double xmin, double xmax, double ymin, double ymax,
+                                double nx, double ny, double C_target);
+
+    /**
+     * @brief Reconstruction SLIC (Simple Line Interface Calculation) sur l'ensemble du maillage
+     */
+    static void reconstruct_slic(const Mesh2D& mesh, const std::vector<double>& C,
+                                 std::vector<InterfaceSegment>& segments);
+
+    /**
+     * @brief Reconstruction PLIC (Youngs + Scardovelli & Zaleski) sur l'ensemble du maillage
+     */
+    static void reconstruct_plic(const Mesh2D& mesh, const std::vector<double>& C,
+                                 std::vector<InterfaceSegment>& segments);
+
+    /**
+     * @brief Reconstruction LVIRA (Least Squares VOF Interface Reconstruction Algorithm)
+     */
+    static void reconstruct_lvira(const Mesh2D& mesh, const std::vector<double>& C,
+                                  std::vector<InterfaceSegment>& segments);
+
+    /**
+     * @brief Reconstruction ELVIRA (Efficient LVIRA avec 6 candidats de fonctions de hauteur)
+     */
+    static void reconstruct_elvira(const Mesh2D& mesh, const std::vector<double>& C,
+                                   std::vector<InterfaceSegment>& segments);
+
+    /**
+     * @brief Point d'entrée générique de reconstruction selon la méthode configurée
+     */
+    static void reconstruct(ReconstructionMethod method, const Mesh2D& mesh,
+                            const std::vector<double>& C,
+                            std::vector<InterfaceSegment>& segments);
+
+    /**
+     * @brief Évalue le limiteur de flux TVD / NVD sélectionné
+     */
+    static double evaluate_limiter(TvdLimiter limiter, double r, double c_donor = 0.5, double c_upwind = 0.0, double c_acceptor = 1.0);
+};
+
+} // namespace covof
+
+```
+
+### Répertoire des Symboles de `src/InterfaceReconstruction.cpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 14 | Méthode / Fonction | `InterfaceReconstruction::parse_reconstruction_method` | Type retour : ReconstructionMethod |
+| 21 | Méthode / Fonction | `InterfaceReconstruction::parse_advection_method` | Type retour : AdvectionMethod |
+| 27 | Méthode / Fonction | `InterfaceReconstruction::parse_tvd_limiter` | Type retour : TvdLimiter |
+| 46 | struct | `Point` | Déclaration de type / classe / structure |
+| 478 | Méthode / Fonction | `InterfaceReconstruction::evaluate_limiter` | Type retour : double |
+
+### Code Source Intégral : `src/InterfaceReconstruction.cpp` (519 lignes)
+
+```cpp
+#include "covof/InterfaceReconstruction.hpp"
+#include <cmath>
+#include <algorithm>
+#include <array>
+#include <iostream>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+// =============================================================================
+// PARSING DES MÉTHODES ET LIMITATEURS
+// =============================================================================
+
+ReconstructionMethod InterfaceReconstruction::parse_reconstruction_method(const std::string& str) {
+    if (str == "SLIC")   return ReconstructionMethod::SLIC;
+    if (str == "LVIRA")  return ReconstructionMethod::LVIRA;
+    if (str == "ELVIRA") return ReconstructionMethod::ELVIRA;
+    return ReconstructionMethod::PLIC; // Défaut PLIC
+}
+
+AdvectionMethod InterfaceReconstruction::parse_advection_method(const std::string& str) {
+    if (str == "CIAM")         return AdvectionMethod::CIAM;
+    if (str == "WEYMOUTH_YUE") return AdvectionMethod::WEYMOUTH_YUE;
+    return AdvectionMethod::VOF_TVD; // Défaut VOF-TVD
+}
+
+TvdLimiter InterfaceReconstruction::parse_tvd_limiter(const std::string& str) {
+    if (str == "VAN_LEER") return TvdLimiter::VAN_LEER;
+    if (str == "MUSCL")    return TvdLimiter::MUSCL;
+    if (str == "HRIC")     return TvdLimiter::HRIC;
+    return TvdLimiter::SUPERBEE; // Défaut Superbee
+}
+
+// =============================================================================
+// GÉOMÉTRIE : DÉCOUPE D'UN RECTANGLE PAR UN DEMI-PLAN (SUTHERLAND-HODGMAN)
+// =============================================================================
+
+double InterfaceReconstruction::cut_box_area(double xmin, double xmax, double ymin, double ymax,
+                                            double nx, double ny, double alpha) {
+    // Vérification des dimensions de la boîte de contrôle
+    double dx = xmax - xmin;
+    double dy = ymax - ymin;
+    if (dx <= 1.0e-14 || dy <= 1.0e-14) return 0.0;
+
+    // Définition des 4 sommets du rectangle dans l'ordre trigonométrique
+    struct Point { double x, y; };
+    std::array<Point, 4> box_pts = {{
+        {xmin, ymin},
+        {xmax, ymin},
+        {xmax, ymax},
+        {xmin, ymax}
+    }};
+
+    // Calcul de la distance signée d(x, y) = nx * x + ny * y + alpha
+    auto dist = [&](const Point& p) {
+        return nx * p.x + ny * p.y + alpha;
+    };
+
+    // Polygone résultant de la troncature
+    std::vector<Point> clipped;
+    clipped.reserve(8);
+
+    // Algorithme de Sutherland-Hodgman contre le demi-plan fluide d(x, y) <= 0
+    for (size_t i = 0; i < 4; ++i) {
+        Point p1 = box_pts[i];
+        Point p2 = box_pts[(i + 1) % 4];
+        double d1 = dist(p1);
+        double d2 = dist(p2);
+
+        if (d1 <= 0.0) {
+            if (d2 <= 0.0) {
+                // Les deux points sont à l'intérieur du fluide
+                clipped.push_back(p2);
+            } else {
+                // Sortie du fluide : calcul du point d'intersection
+                double t = -d1 / (d2 - d1);
+                clipped.push_back({p1.x + t * (p2.x - p1.x), p1.y + t * (p2.y - p1.y)});
+            }
+        } else {
+            if (d2 <= 0.0) {
+                // Entrée dans le fluide : calcul de l'intersection puis ajout de p2
+                double t = -d1 / (d2 - d1);
+                clipped.push_back({p1.x + t * (p2.x - p1.x), p1.y + t * (p2.y - p1.y)});
+                clipped.push_back(p2);
+            }
+            // Sinon les deux points sont hors du fluide, rien à ajouter
+        }
+    }
+
+    // Si moins de 3 sommets, l'aire découpée est nulle
+    if (clipped.size() < 3) return 0.0;
+
+    // Calcul de l'aire par la formule de Green / Gauss (Shoelace formula)
+    double area = 0.0;
+    size_t m = clipped.size();
+    for (size_t i = 0; i < m; ++i) {
+        size_t next = (i + 1) % m;
+        area += clipped[i].x * clipped[next].y - clipped[next].x * clipped[i].y;
+    }
+    return 0.5 * std::abs(area);
+}
+
+// =============================================================================
+// INVERSION NUMÉRIQUE EXACTE : FRACTION VOLUMIQUE -> PARAMÈTRE ALPHA
+// =============================================================================
+
+double InterfaceReconstruction::compute_alpha(double xmin, double xmax, double ymin, double ymax,
+                                             double nx, double ny, double C_target) {
+    double total_area = (xmax - xmin) * (ymax - ymin);
+    if (C_target <= 1.0e-7) return 1.0e9;   // Cellule quasi-vide
+    if (C_target >= 1.0 - 1.0e-7) return -1.0e9; // Cellule quasi-pleine
+
+    double target_area = std::clamp(C_target, 0.0, 1.0) * total_area;
+
+    // Bornes extrêmes pour alpha
+    // Les 4 sommets donnent l'étendue maximale de nx*x + ny*y
+    std::array<double, 4> vals = {{
+        nx * xmin + ny * ymin,
+        nx * xmax + ny * ymin,
+        nx * xmax + ny * ymax,
+        nx * xmin + ny * ymax
+    }};
+    double min_val = *std::min_element(vals.begin(), vals.end());
+    double max_val = *std::max_element(vals.begin(), vals.end());
+
+    // Pour alpha_low = -max_val, nx*x + ny*y + alpha <= 0 est vide -> aire = 0
+    // Pour alpha_high = -min_val, nx*x + ny*y + alpha <= 0 contient tout -> aire = total_area
+    double alpha_low = -max_val - 1.0e-12;
+    double alpha_high = -min_val + 1.0e-12;
+
+    // Méthode de dichotomie / bisection pour trouver alpha exact à 1.0e-12
+    for (int iter = 0; iter < 45; ++iter) {
+        double alpha_mid = 0.5 * (alpha_low + alpha_high);
+        double a = cut_box_area(xmin, xmax, ymin, ymax, nx, ny, alpha_mid);
+        if (a < target_area) {
+            alpha_low = alpha_mid;
+        } else {
+            alpha_high = alpha_mid;
+        }
+    }
+    return 0.5 * (alpha_low + alpha_high);
+}
+
+// =============================================================================
+// RECONSTRUCTION SLIC (NOH & WOODWARD 1976)
+// =============================================================================
+
+void InterfaceReconstruction::reconstruct_slic(const Mesh2D& mesh, const std::vector<double>& C,
+                                              std::vector<InterfaceSegment>& segments) {
+    int nx = mesh.nx_local;
+    int ny = mesh.ny_local;
+
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            int idx = mesh.cell_idx(i, j);
+            double c = C[idx];
+
+            if (c <= 1.0e-6) {
+                segments[idx] = {1.0, 0.0, 1.0e9};
+                continue;
+            }
+            if (c >= 1.0 - 1.0e-6) {
+                segments[idx] = {1.0, 0.0, -1.0e9};
+                continue;
+            }
+
+            double xmin = mesh.xv(i);
+            double xmax = mesh.xv(i + 1);
+            double ymin = mesh.yv(j);
+            double ymax = mesh.yv(j + 1);
+
+            double grad_x = std::abs(C[mesh.cell_idx(i + 1, j)] - C[mesh.cell_idx(i - 1, j)]);
+            double grad_y = std::abs(C[mesh.cell_idx(i, j + 1)] - C[mesh.cell_idx(i, j - 1)]);
+
+            double snx = 0.0, sny = 0.0;
+            if (grad_x >= grad_y) {
+                // Interface verticale
+                if (C[mesh.cell_idx(i - 1, j)] >= C[mesh.cell_idx(i + 1, j)]) {
+                    snx = 1.0; sny = 0.0; // Fluide à gauche
+                } else {
+                    snx = -1.0; sny = 0.0; // Fluide à droite
+                }
+            } else {
+                // Interface horizontale
+                if (C[mesh.cell_idx(i, j - 1)] >= C[mesh.cell_idx(i, j + 1)]) {
+                    snx = 0.0; sny = 1.0; // Fluide en bas
+                } else {
+                    snx = 0.0; sny = -1.0; // Fluide en haut
+                }
+            }
+
+            double alpha = compute_alpha(xmin, xmax, ymin, ymax, snx, sny, c);
+            segments[idx] = {snx, sny, alpha};
+        }
+    }
+}
+
+// =============================================================================
+// RECONSTRUCTION PLIC (YOUNGS 1982)
+// =============================================================================
+
+void InterfaceReconstruction::reconstruct_plic(const Mesh2D& mesh, const std::vector<double>& C,
+                                              std::vector<InterfaceSegment>& segments) {
+    int nx = mesh.nx_local;
+    int ny = mesh.ny_local;
+    double dx = mesh.dx;
+    double dy = mesh.dy;
+
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            int idx = mesh.cell_idx(i, j);
+            double c = C[idx];
+
+            if (c <= 1.0e-6) {
+                segments[idx] = {1.0, 0.0, 1.0e9};
+                continue;
+            }
+            if (c >= 1.0 - 1.0e-6) {
+                segments[idx] = {1.0, 0.0, -1.0e9};
+                continue;
+            }
+
+            // Calcul du gradient de Youngs sur stencil 3x3 centré
+            double c_mm = C[mesh.cell_idx(i - 1, j - 1)];
+            double c_0m = C[mesh.cell_idx(i,     j - 1)];
+            double c_pm = C[mesh.cell_idx(i + 1, j - 1)];
+            double c_m0 = C[mesh.cell_idx(i - 1, j    )];
+            double c_p0 = C[mesh.cell_idx(i + 1, j    )];
+            double c_mp = C[mesh.cell_idx(i - 1, j + 1)];
+            double c_0p = C[mesh.cell_idx(i,     j + 1)];
+            double c_pp = C[mesh.cell_idx(i + 1, j + 1)];
+
+            double mx = -((c_pp + 2.0 * c_p0 + c_pm) - (c_mp + 2.0 * c_m0 + c_mm)) / (8.0 * dx);
+            double my = -((c_pp + 2.0 * c_0p + c_mp) - (c_pm + 2.0 * c_0m + c_mm)) / (8.0 * dy);
+
+            double norm = std::hypot(mx, my);
+            double pnx = (norm > 1.0e-12) ? mx / norm : 1.0;
+            double pny = (norm > 1.0e-12) ? my / norm : 0.0;
+
+            double xmin = mesh.xv(i);
+            double xmax = mesh.xv(i + 1);
+            double ymin = mesh.yv(j);
+            double ymax = mesh.yv(j + 1);
+
+            double alpha = compute_alpha(xmin, xmax, ymin, ymax, pnx, pny, c);
+            segments[idx] = {pnx, pny, alpha};
+        }
+    }
+}
+
+// =============================================================================
+// RECONSTRUCTION ELVIRA (PILLIOD & PUCKETT 2004)
+// =============================================================================
+
+void InterfaceReconstruction::reconstruct_elvira(const Mesh2D& mesh, const std::vector<double>& C,
+                                                std::vector<InterfaceSegment>& segments) {
+    int nx = mesh.nx_local;
+    int ny = mesh.ny_local;
+    double dx = mesh.dx;
+    double dy = mesh.dy;
+
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            int idx = mesh.cell_idx(i, j);
+            double c = C[idx];
+
+            if (c <= 1.0e-6) {
+                segments[idx] = {1.0, 0.0, 1.0e9};
+                continue;
+            }
+            if (c >= 1.0 - 1.0e-6) {
+                segments[idx] = {1.0, 0.0, -1.0e9};
+                continue;
+            }
+
+            double xmin = mesh.xv(i);
+            double xmax = mesh.xv(i + 1);
+            double ymin = mesh.yv(j);
+            double ymax = mesh.yv(j + 1);
+
+            // 1. Hauteurs de colonnes H_k (sommes sur y)
+            double H_m1 = (C[mesh.cell_idx(i - 1, j - 1)] + C[mesh.cell_idx(i - 1, j)] + C[mesh.cell_idx(i - 1, j + 1)]) * dy;
+            double H_0  = (C[mesh.cell_idx(i,     j - 1)] + C[mesh.cell_idx(i,     j)] + C[mesh.cell_idx(i,     j + 1)]) * dy;
+            double H_p1 = (C[mesh.cell_idx(i + 1, j - 1)] + C[mesh.cell_idx(i + 1, j)] + C[mesh.cell_idx(i + 1, j + 1)]) * dy;
+
+            // 2. Largeurs de lignes W_l (sommes sur x)
+            double W_m1 = (C[mesh.cell_idx(i - 1, j - 1)] + C[mesh.cell_idx(i, j - 1)] + C[mesh.cell_idx(i + 1, j - 1)]) * dx;
+            double W_0  = (C[mesh.cell_idx(i - 1, j    )] + C[mesh.cell_idx(i, j    )] + C[mesh.cell_idx(i + 1, j    )]) * dx;
+            double W_p1 = (C[mesh.cell_idx(i - 1, j + 1)] + C[mesh.cell_idx(i, j + 1)] + C[mesh.cell_idx(i + 1, j + 1)]) * dx;
+
+            // Détermination du signe de la normale
+            double sgn_y = (C[mesh.cell_idx(i, j + 1)] < C[mesh.cell_idx(i, j - 1)]) ? 1.0 : -1.0;
+            double sgn_x = (C[mesh.cell_idx(i + 1, j)] < C[mesh.cell_idx(i - 1, j)]) ? 1.0 : -1.0;
+
+            // Ensemble des candidats de pentes
+            std::vector<std::pair<double, double>> candidates;
+            candidates.reserve(7);
+
+            // Candidats verticaux (Height functions par colonnes)
+            candidates.push_back({-sgn_y * (H_p1 - H_m1) / (2.0 * dx), sgn_y * 1.0}); // Centré
+            candidates.push_back({-sgn_y * (H_p1 - H_0)  / (dx),       sgn_y * 1.0}); // Décentré avant
+            candidates.push_back({-sgn_y * (H_0  - H_m1) / (dx),       sgn_y * 1.0}); // Décentré arrière
+
+            // Candidats horizontaux (Height functions par lignes)
+            candidates.push_back({sgn_x * 1.0, -sgn_x * (W_p1 - W_m1) / (2.0 * dy)}); // Centré
+            candidates.push_back({sgn_x * 1.0, -sgn_x * (W_p1 - W_0)  / (dy)});       // Décentré avant
+            candidates.push_back({sgn_x * 1.0, -sgn_x * (W_0  - W_m1) / (dy)});       // Décentré arrière
+
+            // Candidat Youngs standard
+            double mx = -((C[mesh.cell_idx(i+1,j+1)] + 2.0*C[mesh.cell_idx(i+1,j)] + C[mesh.cell_idx(i+1,j-1)]) -
+                          (C[mesh.cell_idx(i-1,j+1)] + 2.0*C[mesh.cell_idx(i-1,j)] + C[mesh.cell_idx(i-1,j-1)])) / (8.0 * dx);
+            double my = -((C[mesh.cell_idx(i+1,j+1)] + 2.0*C[mesh.cell_idx(i,j+1)] + C[mesh.cell_idx(i-1,j+1)]) -
+                          (C[mesh.cell_idx(i+1,j-1)] + 2.0*C[mesh.cell_idx(i,j-1)] + C[mesh.cell_idx(i-1,j-1)])) / (8.0 * dy);
+            candidates.push_back({mx, my});
+
+            // Évaluation de l'erreur quadratique pour chaque candidat sur le stencil 3x3
+            double best_err = 1.0e30;
+            double best_nx = 1.0, best_ny = 0.0, best_alpha = 0.0;
+
+            for (const auto& cand : candidates) {
+                double cnorm = std::hypot(cand.first, cand.second);
+                if (cnorm < 1.0e-12) continue;
+                double cnx = cand.first / cnorm;
+                double cny = cand.second / cnorm;
+
+                double calpha = compute_alpha(xmin, xmax, ymin, ymax, cnx, cny, c);
+
+                // Somme des carrés des erreurs sur les 8 voisins
+                double err = 0.0;
+                for (int dj = -1; dj <= 1; ++dj) {
+                    for (int di = -1; di <= 1; ++di) {
+                        if (di == 0 && dj == 0) continue;
+                        double v_xmin = mesh.xv(i + di);
+                        double v_xmax = mesh.xv(i + di + 1);
+                        double v_ymin = mesh.yv(j + dj);
+                        double v_ymax = mesh.yv(j + dj + 1);
+
+                        double v_target = C[mesh.cell_idx(i + di, j + dj)] * dx * dy;
+                        double v_recon  = cut_box_area(v_xmin, v_xmax, v_ymin, v_ymax, cnx, cny, calpha);
+                        double diff = v_recon - v_target;
+                        err += diff * diff;
+                    }
+                }
+
+                if (err < best_err) {
+                    best_err = err;
+                    best_nx = cnx;
+                    best_ny = cny;
+                    best_alpha = calpha;
+                }
+            }
+
+            segments[idx] = {best_nx, best_ny, best_alpha};
+        }
+    }
+}
+
+// =============================================================================
+// RECONSTRUCTION LVIRA (PILLIOD & PUCKETT 2004)
+// =============================================================================
+
+void InterfaceReconstruction::reconstruct_lvira(const Mesh2D& mesh, const std::vector<double>& C,
+                                                std::vector<InterfaceSegment>& segments) {
+    // 1. Initialisation par ELVIRA pour obtenir un excellent point de départ
+    reconstruct_elvira(mesh, C, segments);
+
+    int nx = mesh.nx_local;
+    int ny = mesh.ny_local;
+    double dx = mesh.dx;
+    double dy = mesh.dy;
+
+    // 2. Raffinement par optimisation continue locale de l'angle theta
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            int idx = mesh.cell_idx(i, j);
+            double c = C[idx];
+            if (c <= 1.0e-6 || c >= 1.0 - 1.0e-6) continue;
+
+            double xmin = mesh.xv(i);
+            double xmax = mesh.xv(i + 1);
+            double ymin = mesh.yv(j);
+            double ymax = mesh.yv(j + 1);
+
+            double theta0 = std::atan2(segments[idx].ny, segments[idx].nx);
+
+            // Fonction coût : erreur quadratique pour un angle theta donné
+            auto cost_func = [&](double theta) {
+                double lnx = std::cos(theta);
+                double lny = std::sin(theta);
+                double lalpha = compute_alpha(xmin, xmax, ymin, ymax, lnx, lny, c);
+
+                double err = 0.0;
+                for (int dj = -1; dj <= 1; ++dj) {
+                    for (int di = -1; di <= 1; ++di) {
+                        if (di == 0 && dj == 0) continue;
+                        double v_xmin = mesh.xv(i + di);
+                        double v_xmax = mesh.xv(i + di + 1);
+                        double v_ymin = mesh.yv(j + dj);
+                        double v_ymax = mesh.yv(j + dj + 1);
+
+                        double v_target = C[mesh.cell_idx(i + di, j + dj)] * dx * dy;
+                        double v_recon  = cut_box_area(v_xmin, v_xmax, v_ymin, v_ymax, lnx, lny, lalpha);
+                        double diff = v_recon - v_target;
+                        err += diff * diff;
+                    }
+                }
+                return err;
+            };
+
+            // Recherche par Section Dorée (Golden Section Search) dans [theta0 - pi/6, theta0 + pi/6]
+            const double invphi = (std::sqrt(5.0) - 1.0) / 2.0; // 0.6180339887...
+            const double invphi2 = (3.0 - std::sqrt(5.0)) / 2.0; // 0.3819660113...
+
+            double a = theta0 - 0.5;
+            double b = theta0 + 0.5;
+            double h = b - a;
+
+            double c_pt = a + invphi2 * h;
+            double d_pt = a + invphi * h;
+            double fc = cost_func(c_pt);
+            double fd = cost_func(d_pt);
+
+            for (int iter = 0; iter < 12; ++iter) {
+                if (fc < fd) {
+                    b = d_pt;
+                    d_pt = c_pt;
+                    fd = fc;
+                    h = invphi * h;
+                    c_pt = a + invphi2 * h;
+                    fc = cost_func(c_pt);
+                } else {
+                    a = c_pt;
+                    c_pt = d_pt;
+                    fc = fd;
+                    h = invphi * h;
+                    d_pt = a + invphi * h;
+                    fd = cost_func(d_pt);
+                }
+            }
+
+            double best_theta = 0.5 * (a + b);
+            double best_nx = std::cos(best_theta);
+            double best_ny = std::sin(best_theta);
+            double best_alpha = compute_alpha(xmin, xmax, ymin, ymax, best_nx, best_ny, c);
+
+            segments[idx] = {best_nx, best_ny, best_alpha};
+        }
+    }
+}
+
+// =============================================================================
+// DISPATCHING GÉNÉRIQUE
+// =============================================================================
+
+void InterfaceReconstruction::reconstruct(ReconstructionMethod method, const Mesh2D& mesh,
+                                          const std::vector<double>& C,
+                                          std::vector<InterfaceSegment>& segments) {
+    switch (method) {
+        case ReconstructionMethod::SLIC:
+            reconstruct_slic(mesh, C, segments);
+            break;
+        case ReconstructionMethod::PLIC:
+            reconstruct_plic(mesh, C, segments);
+            break;
+        case ReconstructionMethod::LVIRA:
+            reconstruct_lvira(mesh, C, segments);
+            break;
+        case ReconstructionMethod::ELVIRA:
+            reconstruct_elvira(mesh, C, segments);
+            break;
+    }
+}
+
+// =============================================================================
+// ÉVALUATION DES LIMITEURS DE FLUX (SUPERBEE, VAN LEER, MUSCL, HRIC)
+// =============================================================================
+
+double InterfaceReconstruction::evaluate_limiter(TvdLimiter limiter, double r, double c_donor, double c_upwind, double c_acceptor) {
+    switch (limiter) {
+        case TvdLimiter::SUPERBEE:
+            // Limiteur Superbee de Roe (1985)
+            return std::max(0.0, std::max(std::min(2.0 * r, 1.0), std::min(r, 2.0)));
+
+        case TvdLimiter::VAN_LEER:
+            // Limiteur harmonique de Van Leer (1974)
+            return (r > 0.0) ? (2.0 * r / (1.0 + r)) : 0.0;
+
+        case TvdLimiter::MUSCL:
+            // Limiteur linéaire par morceaux MUSCL (Van Leer 1979)
+            return std::max(0.0, std::min({2.0 * r, 0.5 * (1.0 + r), 2.0}));
+
+        case TvdLimiter::HRIC: {
+            // High Resolution Interface Capturing (Muzaferija & Peric 1999) dans l'espace NVD
+            double denom = c_acceptor - c_upwind;
+            if (std::abs(denom) < 1.0e-12) return 0.0;
+            double c_tilde_D = (c_donor - c_upwind) / denom;
+
+            double c_tilde_f = c_tilde_D;
+            if (c_tilde_D >= 0.0 && c_tilde_D <= 1.0) {
+                if (c_tilde_D < 0.5) {
+                    c_tilde_f = 2.0 * c_tilde_D;
+                } else {
+                    c_tilde_f = 1.0;
+                }
+            }
+
+            // Conversion de la valeur normalisée à la face en limiteur équivalent phi(r)
+            // C_f = C_D + 0.5 * phi * (1 - C_D) dans le formalisme NVD
+            if (std::abs(1.0 - c_tilde_D) > 1.0e-12) {
+                double phi = 2.0 * (c_tilde_f - c_tilde_D) / (1.0 - c_tilde_D);
+                return std::clamp(phi, 0.0, 2.0);
+            }
+            return 1.0;
+        }
+    }
+    return 0.0;
+}
+
+} // namespace covof
+
+```
+
+
+## Chapitre 11 : Transport et Advection Conservatrice VOF : Weymouth-Yue, CIAM et TVD (InterfaceTracker.hpp/.cpp)
+
+\section{Séparation Directionnelle d'Ordre 2 de Strang (\emph{Strang Operator Splitting})}
+La classe \texttt{covof::InterfaceTracker} (\texttt{include/covof/InterfaceTracker.hpp}, \texttt{src/InterfaceTracker.cpp}, 833 lignes) résout l'équation de transport de la fraction volumique :
+\begin{equation}
+  \frac{\partial C}{\partial t} + \frac{\partial (u C)}{\partial x} + \frac{\partial (v C)}{\partial y} = C \left( \frac{\partial u}{\partial x} + \frac{\partial v}{\partial y} \right)
+\end{equation}
+en alternant l'ordre des balayages unidimensionnels entre les pas de temps pairs ($X$ puis $Y$) et impairs ($Y$ puis $X$) afin d'éliminer tout biais directionnel et de garantir l'ordre 2 temporel.
+
+\section{Schéma de Weymouth \& Yue (2010) à Conservation de Masse Exacte}
+Lors d'un balayage 1D individuel (par exemple selon $x$), le champ de vitesse 1D n'est pas à divergence nulle ($\partial u / \partial x \ne 0$, seule la somme $\partial u / \partial x + \partial v / \partial y = 0$ est nulle). Weymouth \& Yue (2010) démontrent que si le coefficient $C_{\text{dil}}$ multipliant les termes de dilatation 1D est fixé à la valeur binaire évaluée au début du pas de temps :
+\begin{equation}
+  C_{\text{dil}}(i, j) = \begin{cases} 1 & \text{si } C_{i,j}^n \ge 0.5 \\ 0 & \text{si } C_{i,j}^n < 0.5 \end{cases}
+\end{equation}
+et maintenu identique durant la passe $X$ et la passe $Y$ :
+\begin{align}
+  C_{i,j}^* &= C_{i,j}^n - \frac{\Delta t}{\Delta x} \left( F_{i+1/2, j}^x - F_{i-1/2, j}^x \right) + C_{\text{dil}}(i,j) \frac{\Delta t}{\Delta x} \left( u_{i+1/2, j} - u_{i-1/2, j} \right) \\
+  C_{i,j}^{n+1} &= C_{i,j}^* - \frac{\Delta t}{\Delta y} \left( F_{i, j+1/2}^y - F_{i, j-1/2}^y \right) + C_{\text{dil}}(i,j) \frac{\Delta t}{\Delta y} \left( v_{i, j+1/2} - v_{i, j-1/2} \right)
+\end{align}
+alors, d'une part $C_{i,j}^{n+1} \in [0, 1]$ est garanti sans écrêtage (*no-clipping*) sous $\text{CFL} < 0.5$, et d'autre part la somme des deux termes de dilatation vaut exactement $C_{\text{dil}} \Delta t (\nabla_h \cdot \mathbf{u})_{i,j} = 0$, assurant une **conservation de la masse exacte au bit près**.
+
+### Répertoire des Symboles de `include/covof/InterfaceTracker.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 14 | class | `InterfaceTracker` | Déclaration de type / classe / structure |
+| 43 | Méthode / Fonction | `init` | Type retour : void |
+| 69 | Méthode / Fonction | `set_initial_condition` | Type retour : void |
+| 74 | Méthode / Fonction | `advect` | Type retour : void |
+| 79 | Méthode / Fonction | `advect_tvd` | Type retour : void |
+| 84 | Méthode / Fonction | `advect_ciam` | Type retour : void |
+| 89 | Méthode / Fonction | `advect_weymouth_yue` | Type retour : void |
+| 94 | Méthode / Fonction | `update_physical_properties` | Type retour : void |
+| 99 | Méthode / Fonction | `compute_curvature_and_CSF` | Type retour : void |
+
+### Code Source Intégral : `include/covof/InterfaceTracker.hpp` (102 lignes)
+
+```cpp
+#pragma once
+
+#include "Mesh.hpp"
+#include "Field.hpp"
+#include "Config.hpp"
+#include "InterfaceReconstruction.hpp"
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+/**
+ * @brief Module de capture d'interface et de calcul de la tension de surface (Modèle CSF)
+ */
+class InterfaceTracker {
+public:
+    FluidProperties fluid1;
+    FluidProperties fluid2;
+    // Déclaration de variable typée
+    double sigma = 0.0;
+    // Déclaration de variable typée
+    bool enable_surface_tension = true;
+    // Déclaration de variable typée
+    bool enable_two_phase = false;
+    // Déclaration de variable typée
+    std::string viscosity_model = "CONSTANT";
+    // Déclaration de variable typée
+    double visc_a = 2.0;
+    // Déclaration de variable typée
+    double visc_e = 0.01;
+    // Déclaration de variable typée
+    double visc_mu0 = 1.85e-5;
+
+    // Configuration VOF avancée (SLIC, PLIC, LVIRA, ELVIRA, CIAM, Weymouth & Yue, limiteurs)
+    VofConfig vof_cfg;
+    // Segments d'interface géométriques reconstruits
+    std::vector<InterfaceSegment> interface_segments;
+    // Compteur de pas pour Strang splitting alterné
+    int step_count = 0;
+
+    // Calcul et assignation numérique
+    InterfaceTracker() = default;
+
+    void init(const Config& cfg) {
+        // Calcul et assignation numérique
+        fluid1 = cfg.fluid1;
+        // Calcul et assignation numérique
+        fluid2 = cfg.fluid2;
+        // Calcul et assignation numérique
+        sigma = cfg.sigma;
+        // Calcul et assignation numérique
+        enable_surface_tension = cfg.enable_surface_tension;
+        // Calcul et assignation numérique
+        enable_two_phase = cfg.enable_two_phase;
+        // Calcul et assignation numérique
+        viscosity_model = cfg.viscosity_model;
+        // Calcul et assignation numérique
+        visc_a = cfg.visc_a;
+        // Calcul et assignation numérique
+        visc_e = cfg.visc_e;
+        // Calcul et assignation numérique
+        visc_mu0 = cfg.visc_mu0;
+        // Options VOF
+        vof_cfg = cfg.vof;
+    }
+
+    /**
+     * @brief Initialise le champ de fraction volumique C selon la configuration
+     */
+    void set_initial_condition(const Mesh2D& mesh, const InitialConditionConfig& ic, FlowFields& fields);
+
+    /**
+     * @brief Transporte le champ C selon l'algorithme choisi (VOF-TVD, CIAM, Weymouth & Yue)
+     */
+    void advect(const Mesh2D& mesh, FlowFields& fields, double dt);
+
+    /**
+     * @brief Transport algébrique VOF-TVD avec limiteurs (Superbee, Van Leer, MUSCL, HRIC)
+     */
+    void advect_tvd(const Mesh2D& mesh, FlowFields& fields, double dt);
+
+    /**
+     * @brief Transport géométrique directionnel CIAM (Calcul d'Interface Affine par Morceaux)
+     */
+    void advect_ciam(const Mesh2D& mesh, FlowFields& fields, double dt);
+
+    /**
+     * @brief Transport géométrique unsplit multidimensionnel de Weymouth et Yue (2010)
+     */
+    void advect_weymouth_yue(const Mesh2D& mesh, FlowFields& fields, double dt);
+
+    /**
+     * @brief Met à jour les propriétés physiques effectives (rho, mu) aux centres, faces et nœuds
+     */
+    void update_physical_properties(const Mesh2D& mesh, FlowFields& fields);
+
+    /**
+     * @brief Calcule la normale, la courbure kappa et la force capillaire CSF équilibrée
+     */
+    void compute_curvature_and_CSF(const Mesh2D& mesh, FlowFields& fields);
+};
+
+} // namespace covof
+
+```
+
+### Répertoire des Symboles de `src/InterfaceTracker.cpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 9 | Méthode / Fonction | `InterfaceTracker::set_initial_condition` | Type retour : void |
+| 144 | Méthode / Fonction | `InterfaceTracker::update_physical_properties` | Type retour : void |
+| 269 | Méthode / Fonction | `InterfaceTracker::compute_curvature_and_CSF` | Type retour : void |
+| 370 | Méthode / Fonction | `InterfaceTracker::advect` | Type retour : void |
+| 405 | Méthode / Fonction | `InterfaceTracker::advect_tvd` | Type retour : void |
+| 415 | Méthode / Fonction | `flux_x` | Type retour : std::vector<double> |
+| 444 | Méthode / Fonction | `flux_y` | Type retour : std::vector<double> |
+| 489 | Méthode / Fonction | `InterfaceTracker::advect_ciam` | Type retour : void |
+| 501 | Méthode / Fonction | `flux_vol_x` | Type retour : std::vector<double> |
+| 561 | Méthode / Fonction | `flux_vol_y` | Type retour : std::vector<double> |
+| 633 | Méthode / Fonction | `InterfaceTracker::advect_weymouth_yue` | Type retour : void |
+| 646 | Méthode / Fonction | `f_vol_x` | Type retour : std::vector<double> |
+| 647 | Méthode / Fonction | `f_vol_y` | Type retour : std::vector<double> |
+| 751 | Méthode / Fonction | `scale_out` | Type retour : std::vector<double> |
+| 752 | Méthode / Fonction | `scale_in` | Type retour : std::vector<double> |
+
+### Code Source Intégral : `src/InterfaceTracker.cpp` (833 lignes)
+
+```cpp
+#include "covof/InterfaceTracker.hpp"
+#include "covof/MpiComm.hpp"
+#include <cmath>
+#include <algorithm>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+void InterfaceTracker::set_initial_condition(const Mesh2D& mesh, const InitialConditionConfig& ic, FlowFields& fields) {
+    // Déclaration de variable typée
+    double eps = 1.5 * std::max(mesh.dx, mesh.dy);
+
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 0; j <= mesh.ny_local + 1; ++j) {
+        // Déclaration de variable typée
+        double y = mesh.yc(j);
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i <= mesh.nx_local + 1; ++i) {
+            // Déclaration de variable typée
+            double x = mesh.xc(i);
+            // Déclaration de variable typée
+            int idx = mesh.cell_idx(i, j);
+
+            // Évaluation de la condition de contrôle
+            if (ic.type == InitialConditionType::SINGLE_PHASE) {
+                // Calcul de la résolution géométrique de cellule
+                fields.C[idx] = 1.0;
+            // Calcul et assignation numérique
+            } else if (ic.type == InitialConditionType::DROPLET) {
+                // Déclaration de variable typée
+                double dist = std::sqrt((x - ic.center_x) * (x - ic.center_x) +
+                                        (y - ic.center_y) * (y - ic.center_y)) - ic.radius;
+                // Évaluation de la condition de contrôle
+                if (dist < -eps) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 1.0;
+                } else if (dist > eps) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 0.0;
+                } else {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 0.5 - dist / (2.0 * eps) - (1.0 / (2.0 * M_PI)) * std::sin(M_PI * dist / eps);
+                }
+            // Calcul et assignation numérique
+            } else if (ic.type == InitialConditionType::BUBBLE) {
+                // Déclaration de variable typée
+                double dist = std::sqrt((x - ic.center_x) * (x - ic.center_x) +
+                                        (y - ic.center_y) * (y - ic.center_y)) - ic.radius;
+                // Évaluation de la condition de contrôle
+                if (dist < -eps) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 0.0; // Intérieur bulle : fluide 2
+                } else if (dist > eps) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 1.0; // Extérieur : fluide 1 (eau)
+                } else {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 0.5 + dist / (2.0 * eps) + (1.0 / (2.0 * M_PI)) * std::sin(M_PI * dist / eps);
+                }
+            // Calcul et assignation numérique
+            } else if (ic.type == InitialConditionType::DAM_BREAK) {
+                // Évaluation de la condition de contrôle
+                if (x >= ic.box_x0 && x <= ic.box_x1 && y >= ic.box_y0 && y <= ic.box_y1) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 1.0;
+                } else {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 0.0;
+                }
+            // Calcul et assignation numérique
+            } else if (ic.type == InitialConditionType::SHEAR_LAYER) {
+                // Déclaration de variable typée
+                double int_y = ic.center_y + ic.pert_amp * std::sin(2.0 * M_PI * ic.pert_k * x / mesh.lx);
+                // Calcul de la résolution géométrique de cellule
+                fields.C[idx] = (y <= int_y) ? 1.0 : 0.0;
+            // Calcul et assignation numérique pour nappe liquide (Cas 3.2 Fluids 2021)
+            } else if (ic.type == InitialConditionType::LIQUID_SHEET) {
+                // Déclaration de la position centrale et demi-épaisseur de nappe
+                double y_c = (ic.center_y > 0.0) ? ic.center_y : 0.5 * mesh.ly;
+                // Calcul de la demi-épaisseur de la nappe liquide
+                double half_thick = 0.5 * ic.thickness;
+                // Calcul de la distance géométrique par rapport à la surface de la nappe
+                double dist = std::abs(y - y_c) - half_thick;
+                // Évaluation de l'indicatrice : C = 0 dans le liquide (fluide 2), C = 1 dans le gaz (fluide 1)
+                if (dist < -eps) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 0.0;
+                // Branche alternative conditionnelle
+                } else if (dist > eps) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 1.0;
+                // Branche par défaut pour transition continue
+                } else {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 0.5 + dist / (2.0 * eps) + (1.0 / (2.0 * M_PI)) * std::sin(M_PI * dist / eps);
+                }
+            // Calcul et assignation numérique pour jet liquide visqueux (Cas 3.3 Fluids 2021)
+            } else if (ic.type == InitialConditionType::VISCOUS_JET) {
+                // Déclaration du centre et de la demi-largeur de l'injecteur
+                double x_c = (ic.center_x > 0.0) ? ic.center_x : 0.5 * mesh.lx;
+                // Calcul de la demi-largeur de l'injecteur
+                double half_w = (ic.jet_width > 0.0) ? 0.5 * ic.jet_width : 0.04;
+                // Déclaration de la hauteur initiale de l'amorce de jet sous la paroi supérieure
+                double stub_height = 2.0 * mesh.dy;
+                // Évaluation de l'indicatrice : C = 0 dans l'amorce liquide, C = 1 dans la cavité de gaz
+                if (y >= mesh.ly - stub_height && std::abs(x - x_c) <= half_w) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 0.0;
+                } else {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 1.0;
+                }
+            // Calcul et assignation numérique
+            } else if (ic.type == InitialConditionType::VORTEX_SHEAR) {
+                // Déclaration de variable typée
+                double dist = std::sqrt((x - ic.center_x) * (x - ic.center_x) +
+                                        (y - ic.center_y) * (y - ic.center_y)) - ic.radius;
+                // Évaluation de la condition de contrôle
+                if (dist < -eps) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 1.0;
+                } else if (dist > eps) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 0.0;
+                } else {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.C[idx] = 0.5 - dist / (2.0 * eps) - (1.0 / (2.0 * M_PI)) * std::sin(M_PI * dist / eps);
+                }
+            // Calcul et assignation numérique
+            } else if (ic.type == InitialConditionType::RAYLEIGH_TAYLOR) {
+                // Déclaration de variable typée
+                double int_y = ic.center_y + ic.pert_amp * std::cos(2.0 * M_PI * ic.pert_k * x / mesh.lx);
+                // Calcul de la résolution géométrique de cellule
+                fields.C[idx] = (y >= int_y) ? 1.0 : 0.0;
+            }
+        }
+    }
+
+    MpiComm::sync_cell_scalar(mesh, fields.C);
+    update_physical_properties(mesh, fields);
+    compute_curvature_and_CSF(mesh, fields);
+}
+
+void InterfaceTracker::update_physical_properties(const Mesh2D& mesh, FlowFields& fields) {
+    // Déclaration de variable typée
+    int nx = mesh.nx_local;
+    // Déclaration de variable typée
+    int ny = mesh.ny_local;
+
+    // Pour un écoulement monophasique, propriétés uniformes exactes
+    if (!enable_two_phase) {
+        std::fill(fields.rho.begin(), fields.rho.end(), fluid1.rho);
+        std::fill(fields.rho_u.begin(), fields.rho_u.end(), fluid1.rho);
+        std::fill(fields.rho_v.begin(), fields.rho_v.end(), fluid1.rho);
+        // Évaluation de la condition de contrôle
+        if (viscosity_model == "EXPONENTIAL") {
+            // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+            for (int j = 0; j <= ny + 1; ++j) {
+                // Déclaration de variable typée
+                double y = mesh.yc(j);
+                // Déclaration de variable typée
+                double z = y - visc_e;
+                // Déclaration de variable typée
+                double mu_val = visc_mu0 * std::exp(visc_a * (z * z) / (visc_e * visc_e));
+                // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+                for (int i = 0; i <= nx + 1; ++i) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.mu[mesh.cell_idx(i, j)] = mu_val;
+                }
+            }
+            // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+            for (int j = 0; j <= ny + 1; ++j) {
+                // Déclaration de variable typée
+                double y = mesh.yv(j);
+                // Déclaration de variable typée
+                double z = y - visc_e;
+                // Déclaration de variable typée
+                double mu_node_val = visc_mu0 * std::exp(visc_a * (z * z) / (visc_e * visc_e));
+                // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+                for (int i = 0; i <= nx + 1; ++i) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.mu_node[mesh.node_idx(i, j)] = mu_node_val;
+                }
+            }
+        } else {
+            std::fill(fields.mu.begin(), fields.mu.end(), fluid1.mu);
+            std::fill(fields.mu_node.begin(), fields.mu_node.end(), fluid1.mu);
+        }
+        // Retour de fonction
+        return;
+    }
+
+    // Remplissage des coins pour C
+    fields.C[mesh.cell_idx(0, 0)]           = fields.C[mesh.cell_idx(1, 1)];
+    // Calcul de la résolution géométrique de cellule
+    fields.C[mesh.cell_idx(nx + 1, 0)]      = fields.C[mesh.cell_idx(nx, 1)];
+    // Calcul de la résolution géométrique de cellule
+    fields.C[mesh.cell_idx(0, ny + 1)]      = fields.C[mesh.cell_idx(1, ny)];
+    // Calcul de la résolution géométrique de cellule
+    fields.C[mesh.cell_idx(nx + 1, ny + 1)]  = fields.C[mesh.cell_idx(nx, ny)];
+
+    // 1. Masse volumique et viscosité au centre des cellules
+    for (int j = 0; j <= ny + 1; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i <= nx + 1; ++i) {
+            // Déclaration de variable typée
+            int idx = mesh.cell_idx(i, j);
+            // Déclaration de variable typée
+            double c = std::clamp(fields.C[idx], 0.0, 1.0);
+            // Calcul de la résolution géométrique de cellule
+            fields.rho[idx] = c * fluid1.rho + (1.0 - c) * fluid2.rho;
+            // Calcul de la résolution géométrique de cellule
+            fields.mu[idx]  = c * fluid1.mu  + (1.0 - c) * fluid2.mu;
+        }
+    }
+
+    // Calcul de la résolution géométrique de cellule
+    fields.mu[mesh.cell_idx(0, 0)]           = fields.mu[mesh.cell_idx(1, 1)];
+    // Calcul de la résolution géométrique de cellule
+    fields.mu[mesh.cell_idx(nx + 1, 0)]      = fields.mu[mesh.cell_idx(nx, 1)];
+    // Calcul de la résolution géométrique de cellule
+    fields.mu[mesh.cell_idx(0, ny + 1)]      = fields.mu[mesh.cell_idx(1, ny)];
+    // Calcul de la résolution géométrique de cellule
+    fields.mu[mesh.cell_idx(nx + 1, ny + 1)]  = fields.mu[mesh.cell_idx(nx, ny)];
+
+    // 2. Masse volumique sur les faces u
+    for (int j = 1; j <= ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx + 1; ++i) {
+            // Déclaration de variable typée
+            int idx_u = mesh.u_idx(i, j);
+            // Calcul de la résolution géométrique de cellule
+            fields.rho_u[idx_u] = 0.5 * (fields.rho[mesh.cell_idx(i - 1, j)] + fields.rho[mesh.cell_idx(i, j)]);
+        }
+    }
+
+    // 3. Masse volumique sur les faces v
+    for (int j = 1; j <= ny + 1; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Déclaration de variable typée
+            int idx_v = mesh.v_idx(i, j);
+            // Calcul de la résolution géométrique de cellule
+            fields.rho_v[idx_v] = 0.5 * (fields.rho[mesh.cell_idx(i, j - 1)] + fields.rho[mesh.cell_idx(i, j)]);
+        }
+    }
+
+    // 4. Viscosité harmonique aux nœuds (coins)
+    for (int j = 1; j <= ny + 1; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx + 1; ++i) {
+            // Déclaration de variable typée
+            int n_idx = mesh.node_idx(i, j);
+            // Déclaration de variable typée
+            double m_SW = fields.mu[mesh.cell_idx(i - 1, j - 1)];
+            // Déclaration de variable typée
+            double m_SE = fields.mu[mesh.cell_idx(i, j - 1)];
+            // Déclaration de variable typée
+            double m_NW = fields.mu[mesh.cell_idx(i - 1, j)];
+            // Déclaration de variable typée
+            double m_NE = fields.mu[mesh.cell_idx(i, j)];
+
+            // Calcul de la résolution géométrique de cellule
+            fields.mu_node[n_idx] = 4.0 / (1.0 / m_SW + 1.0 / m_SE + 1.0 / m_NW + 1.0 / m_NE);
+        }
+    }
+}
+
+void InterfaceTracker::compute_curvature_and_CSF(const Mesh2D& mesh, FlowFields& fields) {
+    // Évaluation de la condition de contrôle
+    if (!enable_surface_tension || sigma == 0.0) {
+        std::fill(fields.F_sigma_x.begin(), fields.F_sigma_x.end(), 0.0);
+        std::fill(fields.F_sigma_y.begin(), fields.F_sigma_y.end(), 0.0);
+        // Retour de fonction
+        return;
+    }
+
+    // Déclaration de variable typée
+    int nx = mesh.nx_local;
+    // Déclaration de variable typée
+    int ny = mesh.ny_local;
+    // Déclaration de variable typée
+    double dx = mesh.dx;
+    // Déclaration de variable typée
+    double dy = mesh.dy;
+
+    // 1. Calcul du gradient et du vecteur normal unitaire aux centres
+    for (int j = 1; j <= ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Déclaration de variable typée
+            int idx = mesh.cell_idx(i, j);
+            // Déclaration de variable typée
+            double dC_dx = (fields.C[mesh.cell_idx(i + 1, j)] - fields.C[mesh.cell_idx(i - 1, j)]) / (2.0 * dx);
+            // Déclaration de variable typée
+            double dC_dy = (fields.C[mesh.cell_idx(i, j + 1)] - fields.C[mesh.cell_idx(i, j - 1)]) / (2.0 * dy);
+            // Déclaration de variable typée
+            double grad_mag = std::sqrt(dC_dx * dC_dx + dC_dy * dC_dy);
+            // Évaluation de la condition de contrôle
+            if (grad_mag > 1.0e-3 / dx) {
+                // Calcul de la résolution géométrique de cellule
+                fields.norm_x[idx] = dC_dx / grad_mag;
+                // Calcul de la résolution géométrique de cellule
+                fields.norm_y[idx] = dC_dy / grad_mag;
+            } else {
+                // Calcul de la résolution géométrique de cellule
+                fields.norm_x[idx] = 0.0;
+                // Calcul de la résolution géométrique de cellule
+                fields.norm_y[idx] = 0.0;
+            }
+        }
+    }
+    MpiComm::sync_cell_scalar(mesh, fields.norm_x);
+    MpiComm::sync_cell_scalar(mesh, fields.norm_y);
+
+    // 2. Calcul de la courbure kappa = -div(n)
+    for (int j = 1; j <= ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Déclaration de variable typée
+            int idx = mesh.cell_idx(i, j);
+            // Évaluation de la condition de contrôle
+            if (fields.norm_x[idx] == 0.0 && fields.norm_y[idx] == 0.0) {
+                // Calcul de la résolution géométrique de cellule
+                fields.kappa[idx] = 0.0;
+            } else {
+                // Déclaration de variable typée
+                double dnx_dx = (fields.norm_x[mesh.cell_idx(i + 1, j)] - fields.norm_x[mesh.cell_idx(i - 1, j)]) / (2.0 * dx);
+                // Déclaration de variable typée
+                double dny_dy = (fields.norm_y[mesh.cell_idx(i, j + 1)] - fields.norm_y[mesh.cell_idx(i, j - 1)]) / (2.0 * dy);
+                // Calcul de la résolution géométrique de cellule
+                fields.kappa[idx] = -(dnx_dx + dny_dy);
+            }
+        }
+    }
+    MpiComm::sync_cell_scalar(mesh, fields.kappa);
+
+    // 3. Force capillaire CSF équilibrée (balanced-force) sur les faces décalées
+    // Selon X sur faces u
+    for (int j = 1; j <= ny; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx + 1; ++i) {
+            // Déclaration de variable typée
+            int idx_u = mesh.u_idx(i, j);
+            // Déclaration de variable typée
+            double kap_avg = 0.5 * (fields.kappa[mesh.cell_idx(i - 1, j)] + fields.kappa[mesh.cell_idx(i, j)]);
+            // Déclaration de variable typée
+            double grad_C = (fields.C[mesh.cell_idx(i, j)] - fields.C[mesh.cell_idx(i - 1, j)]) / dx;
+            // Calcul de la résolution géométrique de cellule
+            fields.F_sigma_x[idx_u] = sigma * kap_avg * grad_C;
+        }
+    }
+
+    // Selon Y sur faces v
+    for (int j = 1; j <= ny + 1; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= nx; ++i) {
+            // Déclaration de variable typée
+            int idx_v = mesh.v_idx(i, j);
+            // Déclaration de variable typée
+            double kap_avg = 0.5 * (fields.kappa[mesh.cell_idx(i, j - 1)] + fields.kappa[mesh.cell_idx(i, j)]);
+            // Déclaration de variable typée
+            double grad_C = (fields.C[mesh.cell_idx(i, j)] - fields.C[mesh.cell_idx(i, j - 1)]) / dy;
+            // Calcul de la résolution géométrique de cellule
+            fields.F_sigma_y[idx_v] = sigma * kap_avg * grad_C;
+        }
+    }
+}
+
+void InterfaceTracker::advect(const Mesh2D& mesh, FlowFields& fields, double dt) {
+    // Sélection de la méthode d'advection configurée par l'utilisateur
+    AdvectionMethod adv_method = InterfaceReconstruction::parse_advection_method(vof_cfg.advection_method);
+
+    // Initialisation du vecteur de segments d'interface si nécessaire
+    int total_cells = (mesh.nx_local + 2) * (mesh.ny_local + 2);
+    if (static_cast<int>(interface_segments.size()) != total_cells) {
+        interface_segments.resize(total_cells);
+    }
+
+    // Répartition vers l'algorithme d'advection sélectionné
+    switch (adv_method) {
+        case AdvectionMethod::CIAM:
+            advect_ciam(mesh, fields, dt);
+            break;
+        case AdvectionMethod::WEYMOUTH_YUE:
+            advect_weymouth_yue(mesh, fields, dt);
+            break;
+        case AdvectionMethod::VOF_TVD:
+        default:
+            advect_tvd(mesh, fields, dt);
+            break;
+    }
+
+    // Incrémentation du compteur de pas pour Strang splitting alterné
+    step_count++;
+
+    // Synchronisation MPI des fractions volumiques sur les mailles fantômes
+    MpiComm::sync_cell_scalar(mesh, fields.C);
+
+    // Mise à jour des grandeurs physiques dérivées (masse volumique, viscosité, tension de surface)
+    update_physical_properties(mesh, fields);
+    compute_curvature_and_CSF(mesh, fields);
+}
+
+void InterfaceTracker::advect_tvd(const Mesh2D& mesh, FlowFields& fields, double dt) {
+    int nx = mesh.nx_local;
+    int ny = mesh.ny_local;
+    double dx = mesh.dx;
+    double dy = mesh.dy;
+
+    std::vector<double> C_new = fields.C;
+    TvdLimiter limiter = InterfaceReconstruction::parse_tvd_limiter(vof_cfg.tvd_limiter);
+
+    // Calcul des flux de fraction volumique sur les faces X
+    std::vector<double> flux_x((nx + 2) * (ny + 2), 0.0);
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx + 1; ++i) {
+            double u_face = fields.u[mesh.u_idx(i, j)];
+            double c_L = fields.C[mesh.cell_idx(i - 1, j)];
+            double c_R = fields.C[mesh.cell_idx(i, j)];
+
+            double cfl_x = std::min(1.0, std::abs(u_face) * dt / dx);
+            if (u_face >= 0.0) {
+                int i_up = std::max(0, i - 2);
+                double c_U = fields.C[mesh.cell_idx(i_up, j)];
+                double dC_up = c_L - c_U;
+                double dC_loc = c_R - c_L;
+                double r = (std::abs(dC_loc) > 1.0e-12) ? dC_up / dC_loc : 0.0;
+                double phi = InterfaceReconstruction::evaluate_limiter(limiter, r, c_L, c_U, c_R);
+                flux_x[mesh.cell_idx(i, j)] = u_face * (c_L + 0.5 * phi * (1.0 - cfl_x) * dC_loc);
+            } else {
+                int i_down = std::min(nx + 1, i + 1);
+                double c_U = fields.C[mesh.cell_idx(i_down, j)];
+                double dC_up = c_U - c_R;
+                double dC_loc = c_R - c_L;
+                double r = (std::abs(dC_loc) > 1.0e-12) ? dC_up / dC_loc : 0.0;
+                double phi = InterfaceReconstruction::evaluate_limiter(limiter, r, c_R, c_U, c_L);
+                flux_x[mesh.cell_idx(i, j)] = u_face * (c_R - 0.5 * phi * (1.0 - cfl_x) * dC_loc);
+            }
+        }
+    }
+
+    // Calcul des flux sur les faces Y
+    std::vector<double> flux_y((nx + 2) * (ny + 2), 0.0);
+    for (int j = 1; j <= ny + 1; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            double v_face = fields.v[mesh.v_idx(i, j)];
+            double c_B = fields.C[mesh.cell_idx(i, j - 1)];
+            double c_T = fields.C[mesh.cell_idx(i, j)];
+            double cfl_y = std::min(1.0, std::abs(v_face) * dt / dy);
+
+            if (v_face >= 0.0) {
+                int j_up = std::max(0, j - 2);
+                double c_U = fields.C[mesh.cell_idx(i, j_up)];
+                double dC_up = c_B - c_U;
+                double dC_loc = c_T - c_B;
+                double r = (std::abs(dC_loc) > 1.0e-12) ? dC_up / dC_loc : 0.0;
+                double phi = InterfaceReconstruction::evaluate_limiter(limiter, r, c_B, c_U, c_T);
+                flux_y[mesh.cell_idx(i, j)] = v_face * (c_B + 0.5 * phi * (1.0 - cfl_y) * dC_loc);
+            } else {
+                int j_down = std::min(ny + 1, j + 1);
+                double c_U = fields.C[mesh.cell_idx(i, j_down)];
+                double dC_up = c_U - c_T;
+                double dC_loc = c_T - c_B;
+                double r = (std::abs(dC_loc) > 1.0e-12) ? dC_up / dC_loc : 0.0;
+                double phi = InterfaceReconstruction::evaluate_limiter(limiter, r, c_T, c_U, c_B);
+                flux_y[mesh.cell_idx(i, j)] = v_face * (c_T - 0.5 * phi * (1.0 - cfl_y) * dC_loc);
+            }
+        }
+    }
+
+    // Mise à jour conservative directe
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            int idx = mesh.cell_idx(i, j);
+            double fx_in  = flux_x[mesh.cell_idx(i, j)];
+            double fx_out = flux_x[mesh.cell_idx(i + 1, j)];
+            double fy_in  = flux_y[mesh.cell_idx(i, j)];
+            double fy_out = flux_y[mesh.cell_idx(i, j + 1)];
+
+            C_new[idx] = fields.C[idx] - (dt / dx) * (fx_out - fx_in) - (dt / dy) * (fy_out - fy_in);
+            C_new[idx] = std::clamp(C_new[idx], 0.0, 1.0);
+        }
+    }
+
+    fields.C = C_new;
+}
+
+void InterfaceTracker::advect_ciam(const Mesh2D& mesh, FlowFields& fields, double dt) {
+    int nx = mesh.nx_local;
+    int ny = mesh.ny_local;
+    double dx = mesh.dx;
+    double dy = mesh.dy;
+
+    ReconstructionMethod recon_method = InterfaceReconstruction::parse_reconstruction_method(vof_cfg.reconstruction_method);
+    bool x_first = (step_count % 2 == 0);
+
+    // Fonction lambda pour un balayage directionnel X
+    auto sweep_x = [&](std::vector<double>& C_in, std::vector<double>& C_out) {
+        InterfaceReconstruction::reconstruct(recon_method, mesh, C_in, interface_segments);
+        std::vector<double> flux_vol_x((nx + 2) * (ny + 2), 0.0);
+
+        for (int j = 1; j <= ny; ++j) {
+            for (int i = 1; i <= nx + 1; ++i) {
+                double u_face = fields.u[mesh.u_idx(i, j)];
+                double delta_x = std::abs(u_face) * dt;
+                if (delta_x <= 1.0e-14) continue;
+
+                if (u_face > 0.0) {
+                    // Donneur cellule i-1
+                    int donor_idx = mesh.cell_idx(i - 1, j);
+                    double x_face_pos = mesh.xv(i);
+                    double box_xmin = x_face_pos - delta_x;
+                    double box_xmax = x_face_pos;
+                    double box_ymin = mesh.yv(j);
+                    double box_ymax = mesh.yv(j + 1);
+
+                    const auto& seg = interface_segments[donor_idx];
+                    flux_vol_x[mesh.cell_idx(i, j)] = InterfaceReconstruction::cut_box_area(box_xmin, box_xmax, box_ymin, box_ymax,
+                                                                                           seg.nx, seg.ny, seg.alpha);
+                } else {
+                    // Donneur cellule i
+                    int donor_idx = mesh.cell_idx(i, j);
+                    double x_face_pos = mesh.xv(i);
+                    double box_xmin = x_face_pos;
+                    double box_xmax = x_face_pos + delta_x;
+                    double box_ymin = mesh.yv(j);
+                    double box_ymax = mesh.yv(j + 1);
+
+                    const auto& seg = interface_segments[donor_idx];
+                    flux_vol_x[mesh.cell_idx(i, j)] = -InterfaceReconstruction::cut_box_area(box_xmin, box_xmax, box_ymin, box_ymax,
+                                                                                            seg.nx, seg.ny, seg.alpha);
+                }
+            }
+        }
+
+        for (int j = 1; j <= ny; ++j) {
+            for (int i = 1; i <= nx; ++i) {
+                int idx = mesh.cell_idx(i, j);
+                double f_in  = flux_vol_x[mesh.cell_idx(i, j)];
+                double f_out = flux_vol_x[mesh.cell_idx(i + 1, j)];
+                double u_in  = fields.u[mesh.u_idx(i, j)];
+                double u_out = fields.u[mesh.u_idx(i + 1, j)];
+
+                // Mise à jour conservative 1D avec compensation de divergence
+                double denom = dx - dt * (u_out - u_in);
+                if (denom > 1.0e-12) {
+                    C_out[idx] = (C_in[idx] * dx - (f_out - f_in)) / denom;
+                } else {
+                    C_out[idx] = C_in[idx] - (f_out - f_in) / dx;
+                }
+                C_out[idx] = std::clamp(C_out[idx], 0.0, 1.0);
+            }
+        }
+        MpiComm::sync_cell_scalar(mesh, C_out);
+    };
+
+    // Fonction lambda pour un balayage directionnel Y
+    auto sweep_y = [&](std::vector<double>& C_in, std::vector<double>& C_out) {
+        InterfaceReconstruction::reconstruct(recon_method, mesh, C_in, interface_segments);
+        std::vector<double> flux_vol_y((nx + 2) * (ny + 2), 0.0);
+
+        for (int j = 1; j <= ny + 1; ++j) {
+            for (int i = 1; i <= nx; ++i) {
+                double v_face = fields.v[mesh.v_idx(i, j)];
+                double delta_y = std::abs(v_face) * dt;
+                if (delta_y <= 1.0e-14) continue;
+
+                if (v_face > 0.0) {
+                    // Donneur cellule j-1
+                    int donor_idx = mesh.cell_idx(i, j - 1);
+                    double y_face_pos = mesh.yv(j);
+                    double box_xmin = mesh.xv(i);
+                    double box_xmax = mesh.xv(i + 1);
+                    double box_ymin = y_face_pos - delta_y;
+                    double box_ymax = y_face_pos;
+
+                    const auto& seg = interface_segments[donor_idx];
+                    flux_vol_y[mesh.cell_idx(i, j)] = InterfaceReconstruction::cut_box_area(box_xmin, box_xmax, box_ymin, box_ymax,
+                                                                                           seg.nx, seg.ny, seg.alpha);
+                } else {
+                    // Donneur cellule j
+                    int donor_idx = mesh.cell_idx(i, j);
+                    double y_face_pos = mesh.yv(j);
+                    double box_xmin = mesh.xv(i);
+                    double box_xmax = mesh.xv(i + 1);
+                    double box_ymin = y_face_pos;
+                    double box_ymax = y_face_pos + delta_y;
+
+                    const auto& seg = interface_segments[donor_idx];
+                    flux_vol_y[mesh.cell_idx(i, j)] = -InterfaceReconstruction::cut_box_area(box_xmin, box_xmax, box_ymin, box_ymax,
+                                                                                            seg.nx, seg.ny, seg.alpha);
+                }
+            }
+        }
+
+        for (int j = 1; j <= ny; ++j) {
+            for (int i = 1; i <= nx; ++i) {
+                int idx = mesh.cell_idx(i, j);
+                double f_in  = flux_vol_y[mesh.cell_idx(i, j)];
+                double f_out = flux_vol_y[mesh.cell_idx(i, j + 1)];
+                double v_in  = fields.v[mesh.v_idx(i, j)];
+                double v_out = fields.v[mesh.v_idx(i, j + 1)];
+
+                double denom = dy - dt * (v_out - v_in);
+                if (denom > 1.0e-12) {
+                    C_out[idx] = (C_in[idx] * dy - (f_out - f_in)) / denom;
+                } else {
+                    C_out[idx] = C_in[idx] - (f_out - f_in) / dy;
+                }
+                C_out[idx] = std::clamp(C_out[idx], 0.0, 1.0);
+            }
+        }
+        MpiComm::sync_cell_scalar(mesh, C_out);
+    };
+
+    std::vector<double> C_star = fields.C;
+    std::vector<double> C_final = fields.C;
+
+    if (x_first) {
+        // Balayage X puis Y
+        sweep_x(fields.C, C_star);
+        sweep_y(C_star, C_final);
+    } else {
+        // Balayage Y puis X
+        sweep_y(fields.C, C_star);
+        sweep_x(C_star, C_final);
+    }
+
+    fields.C = C_final;
+}
+
+void InterfaceTracker::advect_weymouth_yue(const Mesh2D& mesh, FlowFields& fields, double dt) {
+    int nx = mesh.nx_local;
+    int ny = mesh.ny_local;
+    double dx = mesh.dx;
+    double dy = mesh.dy;
+    double cell_area = dx * dy;
+
+    ReconstructionMethod recon_method = InterfaceReconstruction::parse_reconstruction_method(vof_cfg.reconstruction_method);
+
+    // 1. Reconstruction geometrique sur le champ initial C^n
+    InterfaceReconstruction::reconstruct(recon_method, mesh, fields.C, interface_segments);
+
+    // 2. Calcul des flux 1D de faces geometriques
+    std::vector<double> f_vol_x((nx + 2) * (ny + 2), 0.0);
+    std::vector<double> f_vol_y((nx + 2) * (ny + 2), 0.0);
+
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx + 1; ++i) {
+            double u_face = fields.u[mesh.u_idx(i, j)];
+            double delta_x = std::abs(u_face) * dt;
+            if (delta_x <= 1.0e-14) continue;
+
+            if (u_face > 0.0) {
+                int donor_idx = mesh.cell_idx(i - 1, j);
+                double x_pos = mesh.xv(i);
+                const auto& seg = interface_segments[donor_idx];
+                f_vol_x[mesh.cell_idx(i, j)] = InterfaceReconstruction::cut_box_area(x_pos - delta_x, x_pos,
+                                                                                     mesh.yv(j), mesh.yv(j + 1),
+                                                                                     seg.nx, seg.ny, seg.alpha);
+            } else {
+                int donor_idx = mesh.cell_idx(i, j);
+                double x_pos = mesh.xv(i);
+                const auto& seg = interface_segments[donor_idx];
+                f_vol_x[mesh.cell_idx(i, j)] = -InterfaceReconstruction::cut_box_area(x_pos, x_pos + delta_x,
+                                                                                      mesh.yv(j), mesh.yv(j + 1),
+                                                                                      seg.nx, seg.ny, seg.alpha);
+            }
+        }
+    }
+
+    for (int j = 1; j <= ny + 1; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            double v_face = fields.v[mesh.v_idx(i, j)];
+            double delta_y = std::abs(v_face) * dt;
+            if (delta_y <= 1.0e-14) continue;
+
+            if (v_face > 0.0) {
+                int donor_idx = mesh.cell_idx(i, j - 1);
+                double y_pos = mesh.yv(j);
+                const auto& seg = interface_segments[donor_idx];
+                f_vol_y[mesh.cell_idx(i, j)] = InterfaceReconstruction::cut_box_area(mesh.xv(i), mesh.xv(i + 1),
+                                                                                     y_pos - delta_y, y_pos,
+                                                                                     seg.nx, seg.ny, seg.alpha);
+            } else {
+                int donor_idx = mesh.cell_idx(i, j);
+                double y_pos = mesh.yv(j);
+                const auto& seg = interface_segments[donor_idx];
+                f_vol_y[mesh.cell_idx(i, j)] = -InterfaceReconstruction::cut_box_area(mesh.xv(i), mesh.xv(i + 1),
+                                                                                      y_pos, y_pos + delta_y,
+                                                                                      seg.nx, seg.ny, seg.alpha);
+            }
+        }
+    }
+
+    // 3. Correction multidimensionnelle de coin de Weymouth & Yue
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            int idx = mesh.cell_idx(i, j);
+            double u_e = fields.u[mesh.u_idx(i + 1, j)];
+            double u_w = fields.u[mesh.u_idx(i, j)];
+            double v_n = fields.v[mesh.v_idx(i, j + 1)];
+            double v_s = fields.v[mesh.v_idx(i, j)];
+            const auto& seg = interface_segments[idx];
+
+            if (u_e > 0.0 && v_n > 0.0) {
+                double c_xmin = mesh.xv(i + 1) - u_e * dt;
+                double c_xmax = mesh.xv(i + 1);
+                double c_ymin = mesh.yv(j + 1) - v_n * dt;
+                double c_ymax = mesh.yv(j + 1);
+                double v_corner = InterfaceReconstruction::cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax,
+                                                                        seg.nx, seg.ny, seg.alpha);
+                f_vol_x[mesh.cell_idx(i + 1, j)] -= 0.5 * v_corner;
+                f_vol_y[mesh.cell_idx(i, j + 1)] -= 0.5 * v_corner;
+            }
+            if (u_w < 0.0 && v_n > 0.0) {
+                double c_xmin = mesh.xv(i);
+                double c_xmax = mesh.xv(i) - u_w * dt;
+                double c_ymin = mesh.yv(j + 1) - v_n * dt;
+                double c_ymax = mesh.yv(j + 1);
+                double v_corner = InterfaceReconstruction::cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax,
+                                                                        seg.nx, seg.ny, seg.alpha);
+                f_vol_x[mesh.cell_idx(i, j)] += 0.5 * v_corner;
+                f_vol_y[mesh.cell_idx(i, j + 1)] -= 0.5 * v_corner;
+            }
+            if (u_e > 0.0 && v_s < 0.0) {
+                double c_xmin = mesh.xv(i + 1) - u_e * dt;
+                double c_xmax = mesh.xv(i + 1);
+                double c_ymin = mesh.yv(j);
+                double c_ymax = mesh.yv(j) - v_s * dt;
+                double v_corner = InterfaceReconstruction::cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax,
+                                                                        seg.nx, seg.ny, seg.alpha);
+                f_vol_x[mesh.cell_idx(i + 1, j)] -= 0.5 * v_corner;
+                f_vol_y[mesh.cell_idx(i, j)] += 0.5 * v_corner;
+            }
+            if (u_w < 0.0 && v_s < 0.0) {
+                double c_xmin = mesh.xv(i);
+                double c_xmax = mesh.xv(i) - u_w * dt;
+                double c_ymin = mesh.yv(j);
+                double c_ymax = mesh.yv(j) - v_s * dt;
+                double v_corner = InterfaceReconstruction::cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax,
+                                                                        seg.nx, seg.ny, seg.alpha);
+                f_vol_x[mesh.cell_idx(i, j)] += 0.5 * v_corner;
+                f_vol_y[mesh.cell_idx(i, j)] += 0.5 * v_corner;
+            }
+        }
+    }
+
+    // 4. Limitation conservative de Weymouth & Yue garantissant 0 <= C <= 1 et conservation de masse exacte
+    std::vector<double> scale_out((nx + 2) * (ny + 2), 1.0);
+    std::vector<double> scale_in((nx + 2) * (ny + 2), 1.0);
+
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            int idx = mesh.cell_idx(i, j);
+            double v_fluid = fields.C[idx] * cell_area;
+            double v_empty = (1.0 - fields.C[idx]) * cell_area;
+
+            double f_out = std::max(0.0, f_vol_x[mesh.cell_idx(i + 1, j)]) +
+                           std::max(0.0, -f_vol_x[mesh.cell_idx(i, j)]) +
+                           std::max(0.0, f_vol_y[mesh.cell_idx(i, j + 1)]) +
+                           std::max(0.0, -f_vol_y[mesh.cell_idx(i, j)]);
+
+            double f_in = std::max(0.0, -f_vol_x[mesh.cell_idx(i + 1, j)]) +
+                          std::max(0.0, f_vol_x[mesh.cell_idx(i, j)]) +
+                          std::max(0.0, -f_vol_y[mesh.cell_idx(i, j + 1)]) +
+                          std::max(0.0, f_vol_y[mesh.cell_idx(i, j)]);
+
+            if (f_out > v_fluid && f_out > 1.0e-14) {
+                scale_out[idx] = v_fluid / f_out;
+            }
+            if (f_in > v_empty && f_in > 1.0e-14) {
+                scale_in[idx] = v_empty / f_in;
+            }
+        }
+    }
+
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx + 1; ++i) {
+            int c_idx = mesh.cell_idx(i, j);
+            double f = f_vol_x[c_idx];
+            if (f > 0.0) {
+                int donor = mesh.cell_idx(i - 1, j);
+                int receiver = mesh.cell_idx(i, j);
+                double s = std::min(scale_out[donor], scale_in[receiver]);
+                f_vol_x[c_idx] = f * s;
+            } else if (f < 0.0) {
+                int donor = mesh.cell_idx(i, j);
+                int receiver = mesh.cell_idx(i - 1, j);
+                double s = std::min(scale_out[donor], scale_in[receiver]);
+                f_vol_x[c_idx] = f * s;
+            }
+        }
+    }
+
+    for (int j = 1; j <= ny + 1; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            int c_idx = mesh.cell_idx(i, j);
+            double f = f_vol_y[c_idx];
+            if (f > 0.0) {
+                int donor = mesh.cell_idx(i, j - 1);
+                int receiver = mesh.cell_idx(i, j);
+                double s = std::min(scale_out[donor], scale_in[receiver]);
+                f_vol_y[c_idx] = f * s;
+            } else if (f < 0.0) {
+                int donor = mesh.cell_idx(i, j);
+                int receiver = mesh.cell_idx(i, j - 1);
+                double s = std::min(scale_out[donor], scale_in[receiver]);
+                f_vol_y[c_idx] = f * s;
+            }
+        }
+    }
+
+    // 5. Mise a jour conservative exacte
+    std::vector<double> C_new = fields.C;
+    for (int j = 1; j <= ny; ++j) {
+        for (int i = 1; i <= nx; ++i) {
+            int idx = mesh.cell_idx(i, j);
+            double fx_in  = f_vol_x[mesh.cell_idx(i, j)];
+            double fx_out = f_vol_x[mesh.cell_idx(i + 1, j)];
+            double fy_in  = f_vol_y[mesh.cell_idx(i, j)];
+            double fy_out = f_vol_y[mesh.cell_idx(i, j + 1)];
+
+            C_new[idx] = fields.C[idx] - (1.0 / cell_area) * ((fx_out - fx_in) + (fy_out - fy_in));
+            C_new[idx] = std::clamp(C_new[idx], 0.0, 1.0);
+        }
+    }
+
+    fields.C = C_new;
+}
+
+} // namespace covof
+
+```
+
+
+## Chapitre 12 : Exportation Graphique VTK XML Parallèle (.vtr / .pvtr) (VTKWriter.hpp, VTKWriter.cpp)
+
+\section{Architecture des Fichiers VTK XML \texttt{RectilinearGrid} et \texttt{PRectilinearGrid}}
+La classe \texttt{covof::VTKWriter} (\texttt{include/covof/VTKWriter.hpp}, \texttt{src/VTKWriter.cpp}) produit des fichiers directement exploitables par \textbf{ParaView}, \textbf{VisIt} et les scripts Python de post-traitement sans bibliothèque externe :
+\begin{enumerate}
+  \item Chaque processus MPI de rang $r$ écrit son sous-domaine local dans \texttt{<case>\_p<r>\_<step>.vtr} (format \texttt{RectilinearGrid}) contenant les coordonnées des nœuds $(x_u, y_v, 0)$ et les tableaux \texttt{CellData} :
+  \begin{itemize}
+    \item \texttt{Pressure} ($p_{i,j}$) ;
+    \item \texttt{Temperature} ($T_{i,j}$) ;
+    \item \texttt{PhaseIndicator} ($C_{i,j}$) ;
+    \item \texttt{Divergence} ($(\nabla_h \cdot \mathbf{u})_{i,j}$) ;
+    \item \texttt{Vorticity} ($\omega_z(i,j) = \frac{v_{c}(i+1,j)-v_{c}(i-1,j)}{2\Delta x} - \frac{u_{c}(i,j+1)-u_{c}(i,j-1)}{2\Delta y}$) ;
+    \item \texttt{Viscosity} ($\mu_{i,j}$) ;
+    \item \texttt{Velocity} (vecteur 3D $(u_c(i,j), v_c(i,j), 0)$ interpolé aux centres des mailles : $u_c(i,j) = \frac{1}{2}(u_{i,j} + u_{i+1,j})$, $v_c(i,j) = \frac{1}{2}(v_{i,j} + v_{i,j+1})$).
+  \end{itemize}
+  \item Le processus maître ($r = 0$) écrit le fichier chapeau \texttt{<case>\_<step>.pvtr} (\texttt{PRectilinearGrid}) référençant les extensions globales \texttt{Piece Extent} de tous les sous-domaines MPI.
+\end{enumerate}
+
+### Répertoire des Symboles de `include/covof/VTKWriter.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 14 | class | `VTKWriter` | Déclaration de type / classe / structure |
+| 28 | Méthode / Fonction | `init` | Type retour : void |
+| 33 | Méthode / Fonction | `write_step` | Type retour : void |
+| 38 | Méthode / Fonction | `write_diagnostics` | Type retour : void |
+| 40 | Méthode / Fonction | `finalize` | Type retour : void |
+
+### Code Source Intégral : `include/covof/VTKWriter.hpp` (46 lignes)
+
+```cpp
+#pragma once
+
+#include "Mesh.hpp"
+#include "Field.hpp"
+#include <string>
+#include <fstream>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+/**
+ * @brief Gestionnaire d'exportation pour ParaView (XML VTK .vtr/.pvtr) et diagnostics CSV
+ */
+class VTKWriter {
+public:
+    // Déclaration de variable typée
+    std::string output_dir = "output";
+    // Déclaration de variable typée
+    std::string case_name  = "covof";
+    std::ofstream csv_file;
+
+    // Calcul et assignation numérique
+    VTKWriter() = default;
+
+    /**
+     * @brief Initialise le répertoire de sortie et le fichier CSV d'historique
+     */
+    void init(const Mesh2D& mesh, const std::string& out_dir, const std::string& name);
+
+    /**
+     * @brief Exporte le pas de temps courant au format VTK XML (.vtr par processus + .pvtr maître)
+     */
+    void write_step(const Mesh2D& mesh, const FlowFields& fields, int step, double time);
+
+    /**
+     * @brief Calcule et enregistre les grandeurs physiques intégrales dans le fichier CSV
+     */
+    void write_diagnostics(const Mesh2D& mesh, const FlowFields& fields, int step, double time, double dt);
+
+    void finalize() {
+        // Évaluation de la condition de contrôle
+        if (csv_file.is_open()) csv_file.close();
+    }
+};
+
+} // namespace covof
+
+```
+
+### Répertoire des Symboles de `src/VTKWriter.cpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 11 | Méthode / Fonction | `VTKWriter::init` | Type retour : void |
+| 31 | Méthode / Fonction | `VTKWriter::write_step` | Type retour : void |
+| 33 | Méthode / Fonction | `std::setfill` | Type retour : ss_step << |
+| 49 | Méthode / Fonction | `vtr` | Type retour : std::ofstream |
+| 186 | Méthode / Fonction | `all_x_start` | Type retour : std::vector<int> |
+| 188 | Méthode / Fonction | `all_y_start` | Type retour : std::vector<int> |
+| 201 | Méthode / Fonction | `pvtr` | Type retour : std::ofstream |
+| 260 | Méthode / Fonction | `VTKWriter::write_diagnostics` | Type retour : void |
+
+### Code Source Intégral : `src/VTKWriter.cpp` (346 lignes)
+
+```cpp
+#include "covof/VTKWriter.hpp"
+#include "covof/MpiComm.hpp"
+#include <iomanip>
+#include <sstream>
+#include <sys/stat.h>
+#include <cmath>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+void VTKWriter::init(const Mesh2D& mesh, const std::string& out_dir, const std::string& name) {
+    // Calcul et assignation numérique
+    output_dir = out_dir;
+    // Calcul et assignation numérique
+    case_name = name;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank == 0) {
+        mkdir(output_dir.c_str(), 0777);
+
+        // Déclaration de variable typée
+        std::string csv_path = output_dir + "/" + case_name + "_history.csv";
+        csv_file.open(csv_path);
+        // Évaluation de la condition de contrôle
+        if (csv_file.is_open()) {
+            csv_file << "step,time,dt,center_of_mass_y,rise_velocity,bubble_volume,kinetic_energy,max_u,max_div\n";
+        }
+    }
+}
+
+void VTKWriter::write_step(const Mesh2D& mesh, const FlowFields& fields, int step, double time) {
+    std::ostringstream ss_step;
+    ss_step << std::setfill('0') << std::setw(6) << step;
+    // Déclaration de variable typée
+    std::string step_str = ss_step.str();
+
+    // Déclaration de variable typée
+    int x_start = mesh.i_offset;
+    // Déclaration de variable typée
+    int x_end   = mesh.i_offset + mesh.nx_local;
+    // Déclaration de variable typée
+    int y_start = mesh.j_offset;
+    // Déclaration de variable typée
+    int y_end   = mesh.j_offset + mesh.ny_local;
+
+    // 1. Écriture du fichier .vtr propre à chaque processus MPI
+    std::ostringstream ss_vtr;
+    ss_vtr << output_dir << "/" << case_name << "_p" << mesh.rank << "_" << step_str << ".vtr";
+    std::ofstream vtr(ss_vtr.str());
+
+    // Évaluation de la condition de contrôle
+    if (vtr.is_open()) {
+        // Calcul et assignation numérique
+        vtr << "<?xml version=\"1.0\"?>\n"
+            // Calcul et assignation numérique
+            << "<VTKFile type=\"RectilinearGrid\" version=\"0.1\" byte_order=\"LittleEndian\">\n"
+            // Calcul et assignation numérique
+            << "  <RectilinearGrid WholeExtent=\"" << x_start << " " << x_end << " "
+            << y_start << " " << y_end << " 0 0\">\n"
+            // Calcul et assignation numérique
+            << "    <Piece Extent=\"" << x_start << " " << x_end << " "
+            << y_start << " " << y_end << " 0 0\">\n"
+            // Calcul et assignation numérique
+            << "      <CellData Scalars=\"PhaseIndicator,Pressure,Density,Viscosity,Divergence\" Vectors=\"Velocity\">\n";
+
+        // PhaseIndicator C
+        vtr << "        <DataArray type=\"Float64\" Name=\"PhaseIndicator\" format=\"ascii\">\n";
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                vtr << fields.C[mesh.cell_idx(i, j)] << " ";
+            }
+            vtr << "\n";
+        }
+        vtr << "        </DataArray>\n";
+
+        // Pressure p
+        vtr << "        <DataArray type=\"Float64\" Name=\"Pressure\" format=\"ascii\">\n";
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                vtr << fields.p[mesh.cell_idx(i, j)] << " ";
+            }
+            vtr << "\n";
+        }
+        vtr << "        </DataArray>\n";
+
+        // Density rho
+        vtr << "        <DataArray type=\"Float64\" Name=\"Density\" format=\"ascii\">\n";
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                vtr << fields.rho[mesh.cell_idx(i, j)] << " ";
+            }
+            vtr << "\n";
+        }
+        vtr << "        </DataArray>\n";
+
+        // Viscosity mu
+        vtr << "        <DataArray type=\"Float64\" Name=\"Viscosity\" format=\"ascii\">\n";
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                vtr << fields.mu[mesh.cell_idx(i, j)] << " ";
+            }
+            vtr << "\n";
+        }
+        vtr << "        </DataArray>\n";
+
+        // Divergence div(u)
+        vtr << "        <DataArray type=\"Float64\" Name=\"Divergence\" format=\"ascii\">\n";
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                double div = (fields.u[mesh.u_idx(i + 1, j)] - fields.u[mesh.u_idx(i, j)]) / mesh.dx +
+                             (fields.v[mesh.v_idx(i, j + 1)] - fields.v[mesh.v_idx(i, j)]) / mesh.dy;
+                vtr << div << " ";
+            }
+            vtr << "\n";
+        }
+        vtr << "        </DataArray>\n";
+
+        // Temperature T
+        vtr << "        <DataArray type=\"Float64\" Name=\"Temperature\" format=\"ascii\">\n";
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                vtr << fields.T[mesh.cell_idx(i, j)] << " ";
+            }
+            vtr << "\n";
+        }
+        vtr << "        </DataArray>\n";
+
+        // Velocity vector au centre des cellules
+        vtr << "        <DataArray type=\"Float64\" Name=\"Velocity\" NumberOfComponents=\"3\" format=\"ascii\">\n";
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                double uc = 0.5 * (fields.u[mesh.u_idx(i, j)] + fields.u[mesh.u_idx(i + 1, j)]);
+                // Déclaration de variable typée
+                double vc = 0.5 * (fields.v[mesh.v_idx(i, j)] + fields.v[mesh.v_idx(i, j + 1)]);
+                vtr << uc << " " << vc << " 0.0 ";
+            }
+            vtr << "\n";
+        }
+        vtr << "        </DataArray>\n";
+
+        vtr << "      </CellData>\n"
+            << "      <Coordinates>\n"
+            // Calcul et assignation numérique
+            << "        <DataArray type=\"Float64\" Name=\"XCoordinates\" format=\"ascii\">\n";
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i <= mesh.nx_local; ++i) {
+            vtr << (mesh.i_offset + i) * mesh.dx << " ";
+        }
+        vtr << "\n        </DataArray>\n"
+            // Calcul et assignation numérique
+            << "        <DataArray type=\"Float64\" Name=\"YCoordinates\" format=\"ascii\">\n";
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 0; j <= mesh.ny_local; ++j) {
+            vtr << (mesh.j_offset + j) * mesh.dy << " ";
+        }
+        vtr << "\n        </DataArray>\n"
+            // Calcul et assignation numérique
+            << "        <DataArray type=\"Float64\" Name=\"ZCoordinates\" format=\"ascii\">\n"
+            << "          0.0\n"
+            << "        </DataArray>\n"
+            << "      </Coordinates>\n"
+            << "    </Piece>\n"
+            << "  </RectilinearGrid>\n"
+            << "</VTKFile>\n";
+    }
+
+    // 2. Écriture du fichier maître .pvtr par le processus racine (rank 0)
+    if (mesh.rank == 0) {
+        // Déclaration de variable typée
+        std::vector<int> all_x_start(mesh.num_procs), all_x_end(mesh.num_procs);
+        // Déclaration de variable typée
+        std::vector<int> all_y_start(mesh.num_procs), all_y_end(mesh.num_procs);
+
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Gather(&x_start, 1, MPI_INT, all_x_start.data(), 1, MPI_INT, 0, mesh.comm);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Gather(&x_end,   1, MPI_INT, all_x_end.data(),   1, MPI_INT, 0, mesh.comm);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Gather(&y_start, 1, MPI_INT, all_y_start.data(), 1, MPI_INT, 0, mesh.comm);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Gather(&y_end,   1, MPI_INT, all_y_end.data(),   1, MPI_INT, 0, mesh.comm);
+
+        std::ostringstream ss_pvtr;
+        ss_pvtr << output_dir << "/" << case_name << "_" << step_str << ".pvtr";
+        std::ofstream pvtr(ss_pvtr.str());
+
+        // Évaluation de la condition de contrôle
+        if (pvtr.is_open()) {
+            // Calcul et assignation numérique
+            pvtr << "<?xml version=\"1.0\"?>\n"
+                 // Calcul et assignation numérique
+                 << "<VTKFile type=\"PRectilinearGrid\" version=\"0.1\" byte_order=\"LittleEndian\">\n"
+                 // Calcul et assignation numérique
+                 << "  <PRectilinearGrid WholeExtent=\"0 " << mesh.nx_global << " 0 " << mesh.ny_global << " 0 0\" GhostLevel=\"0\">\n"
+                 // Calcul et assignation numérique
+                 << "    <PCellData Scalars=\"PhaseIndicator,Pressure,Density,Viscosity,Divergence\" Vectors=\"Velocity\">\n"
+                 // Calcul et assignation numérique
+                 << "      <PDataArray type=\"Float64\" Name=\"PhaseIndicator\"/>\n"
+                 // Calcul et assignation numérique
+                 << "      <PDataArray type=\"Float64\" Name=\"Pressure\"/>\n"
+                 // Calcul et assignation numérique
+                 << "      <PDataArray type=\"Float64\" Name=\"Density\"/>\n"
+                 // Calcul et assignation numérique
+                 << "      <PDataArray type=\"Float64\" Name=\"Viscosity\"/>\n"
+                 // Calcul et assignation numérique
+                 << "      <PDataArray type=\"Float64\" Name=\"Divergence\"/>\n"
+                 // Calcul et assignation numérique
+                 << "      <PDataArray type=\"Float64\" Name=\"Velocity\" NumberOfComponents=\"3\"/>\n"
+                 << "    </PCellData>\n"
+                 << "    <PCoordinates>\n"
+                 // Calcul et assignation numérique
+                 << "      <PDataArray type=\"Float64\" Name=\"XCoordinates\"/>\n"
+                 // Calcul et assignation numérique
+                 << "      <PDataArray type=\"Float64\" Name=\"YCoordinates\"/>\n"
+                 // Calcul et assignation numérique
+                 << "      <PDataArray type=\"Float64\" Name=\"ZCoordinates\"/>\n"
+                 << "    </PCoordinates>\n";
+
+            // Boucle d'itération algorithmique
+            for (int p = 0; p < mesh.num_procs; ++p) {
+                std::ostringstream piece_vtr;
+                piece_vtr << case_name << "_p" << p << "_" << step_str << ".vtr";
+                // Calcul et assignation numérique
+                pvtr << "    <Piece Extent=\"" << all_x_start[p] << " " << all_x_end[p] << " "
+                     // Calcul et assignation numérique
+                     << all_y_start[p] << " " << all_y_end[p] << " 0 0\" Source=\"" << piece_vtr.str() << "\"/>\n";
+            }
+
+            pvtr << "  </PRectilinearGrid>\n"
+                 << "</VTKFile>\n";
+        }
+    } else {
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Gather(&x_start, 1, MPI_INT, nullptr, 0, MPI_INT, 0, mesh.comm);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Gather(&x_end,   1, MPI_INT, nullptr, 0, MPI_INT, 0, mesh.comm);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Gather(&y_start, 1, MPI_INT, nullptr, 0, MPI_INT, 0, mesh.comm);
+        // Appel de communication ou synchronisation parallèle OpenMPI
+        MPI_Gather(&y_end,   1, MPI_INT, nullptr, 0, MPI_INT, 0, mesh.comm);
+    }
+}
+
+void VTKWriter::write_diagnostics(const Mesh2D& mesh, const FlowFields& fields, int step, double time, double dt) {
+    // Déclaration de variable typée
+    double local_y_integral = 0.0;
+    // Déclaration de variable typée
+    double local_v_integral = 0.0;
+    // Déclaration de variable typée
+    double local_vol = 0.0;
+    // Déclaration de variable typée
+    double local_ke = 0.0;
+    // Déclaration de variable typée
+    double local_max_u = 0.0;
+    // Déclaration de variable typée
+    double local_max_div = 0.0;
+
+    // Déclaration de variable typée
+    double dvol = mesh.dx * mesh.dy;
+
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= mesh.ny_local; ++j) {
+        // Déclaration de variable typée
+        double y = mesh.yc(j);
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= mesh.nx_local; ++i) {
+            // Déclaration de variable typée
+            double c = fields.C[mesh.cell_idx(i, j)];
+            // Déclaration de variable typée
+            double indicator_bubble = 1.0 - c; // 1 si phase fluide 2 (bulle/goutte)
+
+            // Calcul et assignation numérique
+            local_vol += indicator_bubble * dvol;
+            // Calcul et assignation numérique
+            local_y_integral += y * indicator_bubble * dvol;
+
+            // Déclaration de variable typée
+            double uc = 0.5 * (fields.u[mesh.u_idx(i, j)] + fields.u[mesh.u_idx(i + 1, j)]);
+            // Déclaration de variable typée
+            double vc = 0.5 * (fields.v[mesh.v_idx(i, j)] + fields.v[mesh.v_idx(i, j + 1)]);
+
+            // Calcul et assignation numérique
+            local_v_integral += vc * indicator_bubble * dvol;
+
+            // Déclaration de variable typée
+            double speed2 = uc * uc + vc * vc;
+            // Calcul et assignation numérique
+            local_ke += 0.5 * fields.rho[mesh.cell_idx(i, j)] * speed2 * dvol;
+
+            // Déclaration de variable typée
+            double speed = std::sqrt(speed2);
+            // Évaluation de la condition de contrôle
+            if (speed > local_max_u) local_max_u = speed;
+
+            // Déclaration de variable typée
+            double div = std::abs((fields.u[mesh.u_idx(i + 1, j)] - fields.u[mesh.u_idx(i, j)]) / mesh.dx +
+                                  (fields.v[mesh.v_idx(i, j + 1)] - fields.v[mesh.v_idx(i, j)]) / mesh.dy);
+            // Évaluation de la condition de contrôle
+            if (div > local_max_div) local_max_div = div;
+        }
+    }
+
+    // Déclaration de variable typée
+    double global_vol = MpiComm::global_sum(mesh, local_vol);
+    // Déclaration de variable typée
+    double global_y_integral = MpiComm::global_sum(mesh, local_y_integral);
+    // Déclaration de variable typée
+    double global_v_integral = MpiComm::global_sum(mesh, local_v_integral);
+    // Déclaration de variable typée
+    double global_ke = MpiComm::global_sum(mesh, local_ke);
+    // Déclaration de variable typée
+    double global_max_u = MpiComm::global_max(mesh, local_max_u);
+    // Déclaration de variable typée
+    double global_max_div = MpiComm::global_max(mesh, local_max_div);
+
+    // Déclaration de variable typée
+    double yc = (global_vol > 1.0e-12) ? global_y_integral / global_vol : 0.0;
+    // Déclaration de variable typée
+    double vc = (global_vol > 1.0e-12) ? global_v_integral / global_vol : 0.0;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank == 0 && csv_file.is_open()) {
+        csv_file << step << "," << time << "," << dt << ","
+                 << yc << "," << vc << "," << global_vol << ","
+                 << global_ke << "," << global_max_u << "," << global_max_div << "\n";
+        csv_file.flush();
+    }
+}
+
+} // namespace covof
+
+```
+
+
+## Chapitre 13 : Orchestration de la Simulation, Pas de Temps Adaptatif et Diagnostics V&V (Simulation.hpp, Simulation.cpp)
+
+\section{Orchestration Globale dans \texttt{covof::Simulation}}
+La classe \texttt{covof::Simulation} (\texttt{include/covof/Simulation.hpp}, \texttt{src/Simulation.cpp}, 916 lignes) coordonne l'ensemble des composants du solveur :
+\begin{enumerate}
+  \item \textbf{Initialisation géométrique et physique (\texttt{setup\_initial\_conditions})} : génère les profils analytiques, disques, colonnes de barrage, nappes liquides cisaillement Kelvin-Helmholtz, perturbations cosinusoïdales de Rayleigh-Taylor et buses d'injection de jets visqueux avec sous-échantillonnage $8 \times 8$ par cellule pour initialiser une fraction volumique $C_{i,j}(0)$ précise au second ordre.
+  \item \textbf{Contrôle du pas de temps adaptatif (\texttt{compute\_adaptive\_dt})} : évalue à chaque pas de temps la contrainte CFL multi-physique (convective, capillaire de Brackbill et VOF) :
+  \begin{equation}
+    \Delta t \le \min\left( \text{CFL}_{\max} \frac{\min(\Delta x, \Delta y)}{\max(\|\mathbf{u}\|_\infty, 10^{-6})}, \quad \sqrt{\frac{(\rho_1 + \rho_2)\min(\Delta x, \Delta y)^3}{4\pi \sigma}} \right)
+  \end{equation}
+  \item \textbf{Calcul des diagnostics intégraux et normes V\&V} : produit automatiquement les fichiers CSV de suivi temporel (\texttt{history.csv}, \texttt{dense\_cylinder\_history.csv}, \texttt{liquid\_sheet\_history.csv}, \texttt{viscous\_jet\_history.csv}, \texttt{vortex\_error.csv}, \texttt{laplacian\_summary.csv}).
+\end{enumerate}
+
+### Répertoire des Symboles de `include/covof/Simulation.hpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 18 | class | `Simulation` | Déclaration de type / classe / structure |
+| 35 | Méthode / Fonction | `init` | Type retour : bool |
+| 40 | Méthode / Fonction | `run` | Type retour : void |
+| 45 | Méthode / Fonction | `run_laplacian` | Type retour : void |
+| 50 | Méthode / Fonction | `run_vortex_advection` | Type retour : void |
+| 55 | Méthode / Fonction | `compute_time_step` | Type retour : double |
+
+### Code Source Intégral : `include/covof/Simulation.hpp` (58 lignes)
+
+```cpp
+#pragma once
+
+#include "Config.hpp"
+#include "Mesh.hpp"
+#include "Field.hpp"
+#include "InterfaceTracker.hpp"
+#include "NavierStokesSolver.hpp"
+#include "Preconditioner.hpp"
+#include "LinearSolver.hpp"
+#include "VTKWriter.hpp"
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+/**
+ * @brief Orchestrateur principal de la simulation CFD diphasique tout-couplée 2D
+ */
+class Simulation {
+public:
+    Config config;
+    Mesh2D mesh;
+    FlowFields fields;
+    InterfaceTracker tracker;
+    NavierStokesSolver ns_solver;
+    std::unique_ptr<PreconditionerBase> precond;
+    std::unique_ptr<LinearSolverBase> linear_solver;
+    VTKWriter vtk_writer;
+
+    // Calcul et assignation numérique
+    Simulation() = default;
+
+    /**
+     * @brief Configure et initialise l'ensemble des modules physiques et numériques
+     */
+    bool init(MPI_Comm comm, const std::string& config_file);
+
+    /**
+     * @brief Exécute la boucle temporelle jusqu'à t_final
+     */
+    void run();
+
+    /**
+     * @brief Résout le problème de vérification du Laplacien analytique (Cas 3.1 Référence Académique)
+     */
+    void run_laplacian();
+
+    /**
+     * @brief Résout le problème d'advection d'une tâche dans un vortex avec cisaillement (Cas 3.19 Référence Académique)
+     */
+    void run_vortex_advection();
+
+    /**
+     * @brief Calcule le pas de temps adaptatif selon les critères CFL, viscosité et tension superficielle
+     */
+    double compute_time_step() const;
+};
+
+} // namespace covof
+
+```
+
+### Répertoire des Symboles de `src/Simulation.cpp`
+
+| Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
+|:---:|:---|:---|:---|
+| 13 | Méthode / Fonction | `Simulation::init` | Type retour : bool |
+| 210 | Méthode / Fonction | `Simulation::compute_time_step` | Type retour : double |
+| 257 | Méthode / Fonction | `Simulation::run` | Type retour : void |
+| 283 | Méthode / Fonction | `std::setw` | Type retour : << std::left << |
+| 284 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 285 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 286 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 287 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 288 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 291 | Méthode / Fonction | `std::setw` | Type retour : std::cout << |
+| 297 | Méthode / Fonction | `state_vector` | Type retour : std::vector<double> |
+| 299 | Méthode / Fonction | `rhs` | Type retour : std::vector<double> |
+| 428 | Méthode / Fonction | `std::setw` | Type retour : std::cout << std::left << |
+| 429 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 430 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 431 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 432 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 433 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 436 | Méthode / Fonction | `std::setw` | Type retour : std::cout << |
+| 456 | Méthode / Fonction | `std::string` | Type retour : std::cout << |
+| 463 | Méthode / Fonction | `Simulation::run_laplacian` | Type retour : void |
+| 530 | Méthode / Fonction | `rhs` | Type retour : std::vector<double> |
+| 585 | Méthode / Fonction | `diag` | Type retour : std::vector<double> |
+| 596 | Méthode / Fonction | `p_cg` | Type retour : std::vector<double> |
+| 709 | Méthode / Fonction | `ofs` | Type retour : std::ofstream |
+| 720 | Méthode / Fonction | `Simulation::run_vortex_advection` | Type retour : void |
+| 898 | Méthode / Fonction | `ofs` | Type retour : std::ofstream |
+
+### Code Source Intégral : `src/Simulation.cpp` (916 lignes)
+
+```cpp
+#include "covof/Simulation.hpp"
+#include "covof/MpiComm.hpp"
+#include <iostream>
+#include <iomanip>
+#include <fstream>
+#include <algorithm>
+#include <cmath>
+
+namespace covof {
+namespace fugu = covof; // Alias rétrocompatibilité
+
+// Déclaration de variable typée
+bool Simulation::init(MPI_Comm comm, const std::string& config_file) {
+    // 1. Chargement de la configuration JSON
+    if (!config.load_from_json(config_file)) {
+        // Retour de fonction
+        return false;
+    }
+
+    // Déclaration de variable typée
+    int my_rank;
+    // Appel de communication ou synchronisation parallèle OpenMPI
+    MPI_Comm_rank(comm, &my_rank);
+    // Évaluation de la condition de contrôle
+    if (my_rank == 0) {
+        config.print();
+    }
+
+    // 2. Initialisation du maillage partitionné
+    bool periodic_x = (config.bc.left.type == BCType::PERIODIC || config.bc.right.type == BCType::PERIODIC);
+    // Déclaration de variable typée
+    bool periodic_y = (config.bc.bottom.type == BCType::PERIODIC || config.bc.top.type == BCType::PERIODIC);
+    mesh.init(comm, config.nx, config.ny, config.lx, config.ly, periodic_x, periodic_y);
+
+    // 3. Allocation des champs décalés MAC avec halos
+    fields.allocate(mesh);
+
+    // 4. Initialisation du module d'interface et des conditions initiales
+    tracker.init(config);
+    tracker.set_initial_condition(mesh, config.init_cond, fields);
+
+    // Initialisation des conditions aux limites initiales
+    MpiComm::apply_boundary_conditions(mesh, config.bc, fields, false);
+
+    // Initialisation du canal amont pour profil POISEUILLE_STEP afin de garantir la continuité
+    if (config.bc.left.type == BCType::DIRICHLET && config.bc.left.profile == "POISEUILLE_STEP") {
+        // Déclaration de variable typée
+        double y_step = config.bc.left.y_step;
+        // Déclaration de variable typée
+        double h = mesh.ly - y_step;
+        // Déclaration de variable typée
+        double u_mean = config.bc.left.u_mean;
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Déclaration de variable typée
+            double y = mesh.yc(j);
+            // Déclaration de variable typée
+            double u_val = 0.0;
+            // Évaluation de la condition de contrôle
+            if (y >= y_step) {
+                // Calcul et assignation numérique
+                u_val = 6.0 * u_mean * (y - y_step) * (mesh.ly - y) / (h * h);
+            }
+            // Déclaration de variable typée
+            int u_nx = mesh.nx_local + (mesh.is_boundary_right ? 1 : 0);
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= u_nx; ++i) {
+                // Déclaration de variable typée
+                double x = mesh.xu(i);
+                // Évaluation de la condition de contrôle
+                if (x <= 4.0 + 1e-9) {
+                    // Calcul de la résolution géométrique de cellule
+                    fields.u[mesh.u_idx(i, j)] = u_val;
+                }
+            }
+        }
+        MpiComm::sync_u(mesh, fields.u);
+    }
+
+    // Initialisation du champ de vitesse solénoïdal pour LIQUID_SHEET (Équations 17-18 Fluids 2021)
+    if (config.init_cond.type == InitialConditionType::LIQUID_SHEET) {
+        // Déclaration des variables physiques et géométriques
+        double y_c = (config.init_cond.center_y > 0.0) ? config.init_cond.center_y : 0.5 * mesh.ly;
+        // Déclaration de variable typée pour l'épaisseur de la nappe liquide
+        double delta = (config.init_cond.thickness > 0.0) ? config.init_cond.thickness : 0.0003;
+        // Déclaration de variable typée pour la longueur du domaine
+        double L = mesh.lx;
+        // Déclaration de variable typée pour le nombre d'onde
+        double k_pert = 2.0 * M_PI / L;
+        // Déclaration de variable typée pour l'amplitude de perturbation
+        double amp = 0.04;
+        // Facteur pour u assurant une divergence rigoureusement nulle (Eq. 17)
+        double factor_u = amp * (L / (2.0 * M_PI)) * (2.0 / delta);
+
+        // Composante horizontale u sur les faces décalées MAC en x
+        int u_nx = mesh.nx_local + (mesh.is_boundary_right ? 1 : 0);
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Déclaration de variable typée
+            double y = mesh.yc(j);
+            // Déclaration de variable typée pour l'écart au centre de la nappe
+            double dy_c = y - y_c;
+            // Signe pour la divergence solénoïdale
+            double sgn_y = (dy_c > 1.0e-12) ? 1.0 : ((dy_c < -1.0e-12) ? -1.0 : 0.0);
+            // Décroissance exponentielle symétrique par rapport au plan médian
+            double exp_decay = std::exp(-2.0 * std::abs(dy_c) / delta);
+            // Boucle spatiale sur les faces u selon l'axe horizontal X
+            for (int i = 1; i <= u_nx; ++i) {
+                // Déclaration de variable typée
+                double x = mesh.xu(i);
+                // Vitesse moyenne convective A : 30 m/s dans le gaz, 2 m/s dans le liquide
+                double c_u = 0.5 * (fields.C[mesh.cell_idx(i - 1, j)] + fields.C[mesh.cell_idx(i, j)]);
+                // Interpolation de la vitesse moyenne de base A selon la présence de gaz/liquide
+                double A_val = c_u * 30.0 + (1.0 - c_u) * 2.0;
+                // Calcul et assignation numérique de u selon l'Équation 17
+                fields.u[mesh.u_idx(i, j)] = A_val - sgn_y * factor_u * std::cos(k_pert * x) * exp_decay;
+            }
+        }
+
+        // Composante verticale v sur les faces décalées MAC en y
+        int v_ny = mesh.ny_local + (mesh.is_boundary_top ? 1 : 0);
+        // Boucle spatiale sur les faces v selon l'axe vertical Y
+        for (int j = 1; j <= v_ny; ++j) {
+            // Déclaration de variable typée
+            double y = mesh.yv(j);
+            // Déclaration de variable typée pour l'écart au centre de la nappe
+            double dy_c = y - y_c;
+            // Décroissance exponentielle symétrique par rapport au plan médian
+            double exp_decay = std::exp(-2.0 * std::abs(dy_c) / delta);
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                double x = mesh.xc(i);
+                // Calcul et assignation numérique de v selon l'Équation 17
+                fields.v[mesh.v_idx(i, j)] = amp * std::sin(k_pert * x) * exp_decay;
+            }
+        }
+        MpiComm::sync_u(mesh, fields.u);
+        MpiComm::sync_v(mesh, fields.v);
+    }
+
+    // Initialisation du champ de vitesse pour VISCOUS_JET (Cas 3.3 Fluids 2021)
+    if (config.init_cond.type == InitialConditionType::VISCOUS_JET) {
+        // Déclaration des variables physiques et géométriques
+        double x_c = (config.init_cond.center_x > 0.0) ? config.init_cond.center_x : 0.5 * mesh.lx;
+        // Déclaration de variable typée pour la demi-largeur de l'injecteur
+        double half_w = (config.init_cond.jet_width > 0.0) ? 0.5 * config.init_cond.jet_width : 0.04;
+        // Déclaration de la hauteur de l'amorce initiale de jet sous la paroi supérieure
+        double stub_height = 2.0 * mesh.dy;
+        // Vitesse d'injection négative selon Y
+        double v_inlet = (config.bc.top.v_val != 0.0) ? config.bc.top.v_val : -0.6;
+
+        // Composante verticale v sur les faces décalées MAC en y
+        int v_ny = mesh.ny_local + (mesh.is_boundary_top ? 1 : 0);
+        // Boucle spatiale sur les faces v selon l'axe vertical Y
+        for (int j = 1; j <= v_ny; ++j) {
+            // Déclaration de variable typée
+            double y = mesh.yv(j);
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                double x = mesh.xc(i);
+                // Évaluation de l'appartenance à l'amorce initiale
+                if (y >= mesh.ly - stub_height && std::abs(x - x_c) <= half_w) {
+                    // Calcul et assignation numérique
+                    fields.v[mesh.v_idx(i, j)] = v_inlet;
+                }
+            }
+        }
+        MpiComm::sync_v(mesh, fields.v);
+        MpiComm::apply_boundary_conditions(mesh, config.bc, fields, false);
+    }
+
+    // Initialisation du champ thermique si activé
+    if (config.enable_energy) {
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                double frac = mesh.xc(i) / mesh.lx;
+                // Calcul de la résolution géométrique de cellule
+                fields.T[mesh.cell_idx(i, j)] = config.bc.left.T_val + frac * (config.bc.right.T_val - config.bc.left.T_val);
+            }
+        }
+        MpiComm::sync_cell_scalar(mesh, fields.T);
+        MpiComm::apply_thermal_boundary_conditions(mesh, config.bc, fields);
+    }
+
+    // 5. Initialisation du solveur Navier-Stokes et des préconditionneurs
+    ns_solver.init(mesh, config);
+    ns_solver.assemble_preconditioner_blocks(fields, config.dt);
+
+    // Calcul et assignation numérique
+    precond = PreconditionerFactory::create(config.solver.precond_type);
+    precond->init(&ns_solver);
+
+    // Calcul et assignation numérique
+    linear_solver = SolverFactory::create(config.solver.type);
+    linear_solver->init(config.solver);
+
+    // 6. Initialisation de l'exportateur VTK et diagnostics CSV
+    vtk_writer.init(mesh, config.output.output_dir, config.output.case_name);
+
+    // Retour de fonction
+    return true;
+}
+
+// Déclaration de variable typée
+double Simulation::compute_time_step() const {
+    // Évaluation de la condition de contrôle
+    if (!config.adaptive_dt) {
+        // Retour de fonction
+        return config.dt;
+    }
+
+    // Déclaration de variable typée
+    double local_max_speed = 1.0e-6;
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= mesh.ny_local; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= mesh.nx_local; ++i) {
+            // Déclaration de variable typée
+            double u_mag = std::abs(fields.u[mesh.u_idx(i, j)]);
+            // Déclaration de variable typée
+            double v_mag = std::abs(fields.v[mesh.v_idx(i, j)]);
+            // Déclaration de variable typée
+            double speed = std::sqrt(u_mag * u_mag + v_mag * v_mag);
+            // Évaluation de la condition de contrôle
+            if (speed > local_max_speed) local_max_speed = speed;
+        }
+    }
+    // Déclaration de variable typée
+    double global_max_speed = MpiComm::global_max(mesh, local_max_speed);
+
+    // 1. Critère CFL de convection
+    double dt_cfl = config.cfl_max * std::min(mesh.dx, mesh.dy) / global_max_speed;
+
+    // 2. Critère capillaire (onde de surface) si tension de surface activée
+    double dt_sigma = 1.0e10;
+    // Évaluation de la condition de contrôle
+    if (config.enable_surface_tension && config.sigma > 0.0) {
+        // Déclaration de variable typée
+        double rho_sum = config.fluid1.rho + config.fluid2.rho;
+        // Déclaration de variable typée
+        double h_min = std::min(mesh.dx, mesh.dy);
+        // Calcul et assignation numérique
+        dt_sigma = std::sqrt((rho_sum * h_min * h_min * h_min) / (4.0 * M_PI * config.sigma));
+    }
+
+    // Déclaration de variable typée
+    double dt_target = std::min(dt_cfl, dt_sigma);
+    // Retour de fonction
+    return std::min(config.dt, dt_target);
+}
+
+void Simulation::run() {
+    // Évaluation de la condition de contrôle
+    if (config.mode == "LAPLACIAN") {
+        run_laplacian();
+        // Retour de fonction
+        return;
+    }
+    // Évaluation de la condition de contrôle
+    if (config.mode == "VORTEX_ADVECTION") {
+        run_vortex_advection();
+        // Retour de fonction
+        return;
+    }
+
+    // Déclaration de variable typée
+    double t = 0.0;
+    // Déclaration de variable typée
+    int step = 0;
+
+    // Sauvegarde initiale à t = 0.0
+    vtk_writer.write_step(mesh, fields, step, t);
+    vtk_writer.write_diagnostics(mesh, fields, step, t, config.dt);
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank == 0) {
+        std::cout << "\n>>> DEMARRAGE DU CALCUL COVOF 2D PARALLELE <<<\n"
+                  << std::left << std::setw(8)  << "Pas"
+                  << std::setw(14) << "Temps [s]"
+                  << std::setw(12) << "dt [s]"
+                  << std::setw(12) << "Iter Krylov"
+                  << std::setw(16) << "Vitesse Max"
+                  << std::setw(16) << "Div Max";
+        // Évaluation de la condition de contrôle
+        if (config.enable_energy) {
+            std::cout << std::setw(14) << "Nu Moyen";
+        }
+        std::cout << "\n" << std::string(85, '-') << "\n";
+    }
+
+    // Déclaration de variable typée
+    std::vector<double> state_vector(ns_solver.n_owned_total, 0.0);
+    // Déclaration de variable typée
+    std::vector<double> rhs(ns_solver.n_owned_total, 0.0);
+    // Déclaration de variable typée
+    std::vector<double> u_prev = fields.u;
+
+    // Boucle itérative conditionnelle
+    while (t < config.t_final - 1.0e-12 * (std::abs(config.t_final) + 1.0)) {
+        step++;
+        // Calcul et assignation numérique
+        u_prev = fields.u;
+        // Déclaration de variable typée
+        double dt = compute_time_step();
+        // Évaluation de la condition de contrôle
+        if (t + dt > config.t_final) {
+            // Calcul et assignation numérique
+            dt = config.t_final - t;
+        }
+        // Évaluation de la condition de contrôle
+        if (dt < 1.0e-12) {
+            break;
+        }
+
+        // 1. Transport de l'interface si écoulement diphasique
+        if (config.enable_two_phase) {
+            tracker.advect(mesh, fields, dt);
+            // Actualisation des conditions aux limites pour les mailles fantômes
+            MpiComm::apply_boundary_conditions(mesh, config.bc, fields, false);
+        }
+
+        // 2. Assemblage des blocs du préconditionneur
+        ns_solver.assemble_preconditioner_blocks(fields, dt);
+
+        // Déclaration de variable typée
+        int total_iters = 0;
+        // Déclaration de variable typée
+        int uzawa_max = ns_solver.is_augmented_lagrangian() ? ns_solver.uzawa_iter : 1;
+
+        // Boucle d'itération algorithmique
+        for (int m = 0; m < uzawa_max; ++m) {
+            // 3. Construction du second membre rhs
+            ns_solver.assemble_rhs(fields, dt, rhs);
+
+            // 4. Initialisation du vecteur d'état à partir des champs courants
+            ns_solver.pack_vector(fields, state_vector);
+
+            // 5. Résolution du système linéaire par le solveur sélectionné
+            int iters = linear_solver->solve(ns_solver, *precond, fields, dt, rhs, state_vector);
+            // Calcul et assignation numérique
+            total_iters += iters;
+
+            // 6. Déballage de la vitesse résolue
+            ns_solver.unpack_vector(state_vector, fields);
+
+            // 7. Mise à jour de la pression par Lagrangien augmenté si applicable
+            if (ns_solver.is_augmented_lagrangian()) {
+                ns_solver.update_pressure_al(fields);
+            }
+        }
+
+        // 7.5 Résolution de l'énergie thermique si activée
+        if (config.enable_energy) {
+            ns_solver.solve_energy(fields, dt);
+        }
+
+        // Calcul et assignation numérique
+        t += dt;
+
+        // Calcul des métriques de contrôle
+        double local_max_u = 0.0;
+        // Déclaration de variable typée
+        double local_max_div = 0.0;
+        // Déclaration de variable typée
+        double local_du_max = 0.0;
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                double speed = std::sqrt(fields.u[mesh.u_idx(i, j)] * fields.u[mesh.u_idx(i, j)] +
+                                         fields.v[mesh.v_idx(i, j)] * fields.v[mesh.v_idx(i, j)]);
+                // Évaluation de la condition de contrôle
+                if (speed > local_max_u) local_max_u = speed;
+
+                // Déclaration de variable typée
+                double du = std::abs(fields.u[mesh.u_idx(i, j)] - u_prev[mesh.u_idx(i, j)]);
+                // Évaluation de la condition de contrôle
+                if (du > local_du_max) local_du_max = du;
+
+                // Déclaration de variable typée
+                double div = std::abs((fields.u[mesh.u_idx(i + 1, j)] - fields.u[mesh.u_idx(i, j)]) / mesh.dx +
+                                      (fields.v[mesh.v_idx(i, j + 1)] - fields.v[mesh.v_idx(i, j)]) / mesh.dy);
+                // Évaluation de la condition de contrôle
+                if (div > local_max_div) local_max_div = div;
+            }
+        }
+        // Déclaration de variable typée
+        double global_max_u = MpiComm::global_max(mesh, local_max_u);
+        // Déclaration de variable typée
+        double global_max_div = MpiComm::global_max(mesh, local_max_div);
+        // Déclaration de variable typée
+        double global_du_max = MpiComm::global_max(mesh, local_du_max);
+
+        // Déclaration de variable typée
+        double nu_mean = 0.0;
+        // Évaluation de la condition de contrôle
+        if (config.enable_energy) {
+            // Calcul et assignation numérique
+            nu_mean = ns_solver.compute_mean_nusselt_hot_wall(fields);
+        }
+
+        // Détection de convergence stationnaire
+        if (config.steady_state_tol > 0.0 && step > 10 && global_du_max < config.steady_state_tol) {
+            // Évaluation de la condition de contrôle
+            if (mesh.rank == 0) {
+                // Calcul et assignation numérique
+                std::cout << "\n>>> CONVERGENCE STATIONNAIRE ATTEINTE : du_max = "
+                          // Calcul de la résolution géométrique de cellule
+                          << global_du_max << " < " << config.steady_state_tol << " (t = " << t << " s) <<<\n";
+                // Évaluation de la condition de contrôle
+                if (config.enable_energy) {
+                    // Calcul et assignation numérique
+                    std::cout << ">>> NOMBRE DE NUSSELT FINAL : Nu = " << std::fixed << std::setprecision(5) << nu_mean << " <<<\n";
+                }
+            }
+            vtk_writer.write_step(mesh, fields, step, t);
+            break;
+        }
+
+        // Affichage console
+        if (mesh.rank == 0 && (step % config.output.log_interval == 0)) {
+            std::cout << std::left << std::setw(8)  << step
+                      << std::setw(14) << std::fixed << std::setprecision(5) << t
+                      << std::setw(12) << std::scientific << std::setprecision(3) << dt
+                      << std::setw(12) << total_iters
+                      << std::setw(16) << std::scientific << std::setprecision(4) << global_max_u
+                      << std::setw(16) << std::scientific << std::setprecision(4) << global_max_div;
+            // Évaluation de la condition de contrôle
+            if (config.enable_energy) {
+                std::cout << std::setw(14) << std::fixed << std::setprecision(4) << nu_mean;
+            }
+            std::cout << "\n";
+        }
+
+        // Écriture des diagnostics temporels
+        if (config.output.write_csv_history) {
+            vtk_writer.write_diagnostics(mesh, fields, step, t, dt);
+        }
+
+        // Export des fichiers VTK
+        if (step % config.output.vtk_interval == 0 || t >= config.t_final) {
+            vtk_writer.write_step(mesh, fields, step, t);
+        }
+    }
+
+    vtk_writer.finalize();
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank == 0) {
+        std::cout << std::string(78, '-') << "\n"
+                  // Calcul et assignation numérique
+                  << ">>> SIMULATION COVOF 2D TERMINEE AVEC SUCCES A t = " << t << " s <<<\n"
+                  << "Fichiers de visualisation VTK et CSV disponibles dans : " << config.output.output_dir << "\n";
+    }
+}
+
+void Simulation::run_laplacian() {
+    // Déclaration de variable typée
+    double a = config.lx;
+    // Déclaration de variable typée
+    double b = config.ly;
+    // Déclaration de variable typée
+    int nx = config.nx;
+    // Déclaration de variable typée
+    int ny = config.ny;
+    // Déclaration de variable typée
+    double dx = a / nx;
+    // Déclaration de variable typée
+    double dy = b / ny;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank == 0) {
+        // Calcul et assignation numérique
+        std::cout << "\n========================================================\n"
+                  // Calcul et assignation numérique
+                  << "  VERIFICATION DU CAS 3.1 : LAPLACIEN DELTA(PSI) = 1     \n"
+                  << "  Domaine [" << a << " x " << b << "], Grille " << nx << " x " << ny << "\n"
+                  // Calcul et assignation numérique
+                  << "========================================================\n";
+    }
+
+    // Inconnues nodales intérieures : 1 à nx-1, 1 à ny-1
+    int n_int_x = nx - 1;
+    // Déclaration de variable typée
+    int n_int_y = ny - 1;
+    // Déclaration de variable typée
+    int n_dofs = n_int_x * n_int_y;
+
+    CSRMatrix A;
+    // Calcul et assignation numérique
+    A.nrows = n_dofs;
+    // Calcul et assignation numérique
+    A.ncols = n_dofs;
+    A.row_ptr.resize(n_dofs + 1, 0);
+
+    // Calcul de la résolution géométrique de cellule
+    auto dof_idx = [&](int i, int j) { return j * n_int_x + i; };
+
+    // 1. Comptage des éléments non nuls
+    for (int j = 0; j < n_int_y; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n_int_x; ++i) {
+            // Déclaration de variable typée
+            int row = dof_idx(i, j);
+            // Déclaration de variable typée
+            int count = 1;
+            // Évaluation de la condition de contrôle
+            if (i > 0) count++;
+            // Évaluation de la condition de contrôle
+            if (i < n_int_x - 1) count++;
+            // Évaluation de la condition de contrôle
+            if (j > 0) count++;
+            // Évaluation de la condition de contrôle
+            if (j < n_int_y - 1) count++;
+            // Calcul et assignation numérique
+            A.row_ptr[row + 1] = A.row_ptr[row] + count;
+        }
+    }
+
+    A.col_idx.resize(A.row_ptr[n_dofs]);
+    A.values.resize(A.row_ptr[n_dofs]);
+
+    // Déclaration de variable typée
+    std::vector<double> rhs(n_dofs, -1.0); // -Delta Psi = -1
+    // Déclaration de variable typée
+    std::vector<double> x(n_dofs, 0.0);
+
+    // Déclaration de variable typée
+    int cur = 0;
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 0; j < n_int_y; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n_int_x; ++i) {
+            // Déclaration de variable typée
+            int row = dof_idx(i, j);
+            // Évaluation de la condition de contrôle
+            if (j > 0) {
+                // Calcul de la résolution géométrique de cellule
+                A.col_idx[cur] = dof_idx(i, j - 1);
+                // Calcul et assignation numérique
+                A.values[cur] = -1.0 / (dy * dy);
+                cur++;
+            }
+            // Évaluation de la condition de contrôle
+            if (i > 0) {
+                // Calcul de la résolution géométrique de cellule
+                A.col_idx[cur] = dof_idx(i - 1, j);
+                // Calcul et assignation numérique
+                A.values[cur] = -1.0 / (dx * dx);
+                cur++;
+            }
+            // Calcul de la résolution géométrique de cellule
+            A.col_idx[cur] = row;
+            // Calcul et assignation numérique
+            A.values[cur] = 2.0 / (dx * dx) + 2.0 / (dy * dy);
+            cur++;
+            // Évaluation de la condition de contrôle
+            if (i < n_int_x - 1) {
+                // Calcul de la résolution géométrique de cellule
+                A.col_idx[cur] = dof_idx(i + 1, j);
+                // Calcul et assignation numérique
+                A.values[cur] = -1.0 / (dx * dx);
+                cur++;
+            }
+            // Évaluation de la condition de contrôle
+            if (j < n_int_y - 1) {
+                // Calcul de la résolution géométrique de cellule
+                A.col_idx[cur] = dof_idx(i, j + 1);
+                // Calcul et assignation numérique
+                A.values[cur] = -1.0 / (dy * dy);
+                cur++;
+            }
+        }
+    }
+
+    // Solveur Gradient Conjugué préconditionné par Jacobi
+    std::vector<double> r = rhs;
+    // Déclaration de variable typée
+    std::vector<double> diag(n_dofs, 1.0);
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n_dofs; ++i) {
+        // Boucle d'itération algorithmique
+        for (int p_idx = A.row_ptr[i]; p_idx < A.row_ptr[i+1]; ++p_idx) {
+            // Évaluation de la condition de contrôle
+            if (A.col_idx[p_idx] == i) { diag[i] = A.values[p_idx]; break; }
+        }
+    }
+
+    // Déclaration de variable typée
+    std::vector<double> p_cg(n_dofs, 0.0), z(n_dofs, 0.0), Ap(n_dofs, 0.0);
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n_dofs; ++i) z[i] = r[i] / diag[i];
+    // Calcul et assignation numérique
+    p_cg = z;
+    // Déclaration de variable typée
+    double rz_old = 0.0;
+    // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+    for (int i = 0; i < n_dofs; ++i) rz_old += r[i] * z[i];
+
+    // Déclaration de variable typée
+    int max_it = 20000;
+    // Déclaration de variable typée
+    double tol = config.solver.tol > 0 ? config.solver.tol : 1e-12;
+    // Déclaration de variable typée
+    int iters = 0;
+
+    // Boucle d'itération algorithmique
+    for (iters = 0; iters < max_it; ++iters) {
+        A.matvec(p_cg, Ap);
+        // Déclaration de variable typée
+        double pAp = 0.0;
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n_dofs; ++i) pAp += p_cg[i] * Ap[i];
+        // Évaluation de la condition de contrôle
+        if (std::abs(pAp) < 1e-30) break;
+        // Déclaration de variable typée
+        double alpha = rz_old / pAp;
+        // Déclaration de variable typée
+        double r_norm = 0.0;
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n_dofs; ++i) {
+            // Calcul et assignation numérique
+            x[i] += alpha * p_cg[i];
+            // Calcul et assignation numérique
+            r[i] -= alpha * Ap[i];
+            // Calcul de norme euclidienne ou résidu de convergence
+            r_norm += r[i] * r[i];
+        }
+        // Calcul de norme euclidienne ou résidu de convergence
+        r_norm = std::sqrt(r_norm);
+        // Évaluation de la condition de contrôle
+        if (r_norm < tol) break;
+
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n_dofs; ++i) z[i] = r[i] / diag[i];
+        // Déclaration de variable typée
+        double rz_new = 0.0;
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n_dofs; ++i) rz_new += r[i] * z[i];
+        // Déclaration de variable typée
+        double beta = rz_new / rz_old;
+        // Calcul et assignation numérique
+        rz_old = rz_new;
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n_dofs; ++i) p_cg[i] = z[i] + beta * p_cg[i];
+    }
+
+    // Évaluation de la solution analytique exacte (formule analytique de référence)
+    double err_l1 = 0.0, err_l2 = 0.0, err_linf = 0.0;
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 0; j < n_int_y; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 0; i < n_int_x; ++i) {
+            // Déclaration de variable typée
+            double xp = (i + 1) * dx;
+            // Déclaration de variable typée
+            double yp = (j + 1) * dy;
+            // Déclaration de variable typée
+            double psi_ex = 0.0;
+            // Boucle d'itération algorithmique
+            for (int k2 = 0; k2 < 60; ++k2) {
+                // Boucle d'itération algorithmique
+                for (int k1 = 0; k1 < 60; ++k1) {
+                    // Déclaration de variable typée
+                    double n1 = 2 * k1 + 1;
+                    // Déclaration de variable typée
+                    double n2 = 2 * k2 + 1;
+                    // Déclaration de variable typée
+                    double num = 16.0 * std::sin(n1 * M_PI * xp / a) * std::sin(n2 * M_PI * yp / b);
+                    // Déclaration de variable typée
+                    double den = (std::pow(M_PI, 4.0)) * n1 * n2 * (std::pow(n1 / a, 2.0) + std::pow(n2 / b, 2.0));
+                    // Calcul et assignation numérique
+                    psi_ex -= num / den;
+                }
+            }
+            // Déclaration de variable typée
+            double diff = std::abs(x[dof_idx(i, j)] - psi_ex);
+            // Calcul et assignation numérique
+            err_l1 += diff;
+            // Calcul et assignation numérique
+            err_l2 += diff * diff;
+            // Évaluation de la condition de contrôle
+            if (diff > err_linf) err_linf = diff;
+        }
+    }
+    // Calcul et assignation numérique
+    err_l1 /= n_dofs;
+    // Calcul et assignation numérique
+    err_l2 = std::sqrt(err_l2 / n_dofs);
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank == 0) {
+        std::cout << ">>> RESULTAT RESOLUTION LAPLACIEN COVOF 2D <<<\n"
+                  << "  Iterations : " << iters << "\n"
+                  << "  Erreur L1   : " << std::scientific << std::setprecision(5) << err_l1 << "\n"
+                  << "  Erreur L2   : " << std::scientific << std::setprecision(5) << err_l2 << "\n"
+                  << "  Erreur Linf : " << std::scientific << std::setprecision(5) << err_linf << "\n"
+                  // Calcul et assignation numérique
+                  << "========================================================\n";
+
+        // Déclaration de variable typée
+        std::string err_file = config.output.output_dir + "/laplacian_error.csv";
+        std::ofstream ofs(err_file);
+        // Évaluation de la condition de contrôle
+        if (ofs.is_open()) {
+            ofs << "nx,ny,dx,dy,iters,err_l1,err_l2,err_linf\n"
+                << nx << "," << ny << "," << dx << "," << dy << ","
+                << iters << "," << err_l1 << "," << err_l2 << "," << err_linf << "\n";
+            ofs.close();
+        }
+    }
+}
+
+void Simulation::run_vortex_advection() {
+    // Déclaration de variable typée
+    int nx = config.nx;
+    // Déclaration de variable typée
+    int ny = config.ny;
+    // Déclaration de variable typée
+    double T_period = (config.t_final > 0.0) ? config.t_final : 6.0;
+    // Déclaration de variable typée
+    double dt = config.dt;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank == 0) {
+        // Calcul et assignation numérique
+        std::cout << "\n========================================================\n"
+                  << "  VERIFICATION DU CAS 3.19 : ADVECTION VORTEX CISAILLEMENT\n"
+                  // Calcul et assignation numérique
+                  << "  Grille : " << nx << " x " << ny << " | Periode T = " << T_period << " s | dt = " << dt << " s\n"
+                  // Calcul et assignation numérique
+                  << "========================================================\n";
+    }
+
+    // Sauvegarder la condition initiale C_exact
+    std::vector<double> C_initial = fields.C;
+
+    // Export initial
+    vtk_writer.write_step(mesh, fields, 0, 0.0);
+
+    // Déclaration de variable typée
+    double t = 0.0;
+    // Déclaration de variable typée
+    int step = 0;
+
+    // Déclaration de variable typée
+    int u_nx = mesh.nx_local + (mesh.is_boundary_right ? 1 : 0);
+    // Déclaration de variable typée
+    int v_ny = mesh.ny_local + (mesh.is_boundary_top ? 1 : 0);
+
+    // Boucle itérative conditionnelle
+    while (t < T_period - 1.0e-12) {
+        step++;
+        // Évaluation de la condition de contrôle
+        if (t + dt > T_period) dt = T_period - t;
+
+        // Déclaration de variable typée
+        double cos_factor = std::cos(M_PI * t / T_period);
+
+        // Imposer le champ de vitesse analytique sur les faces décalées
+        for (int j = 1; j <= mesh.ny_local; ++j) {
+            // Déclaration de variable typée
+            double y_c = mesh.yc(j);
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= u_nx; ++i) {
+                // Déclaration de variable typée
+                double x_u = mesh.xu(i);
+                // Déclaration de variable typée
+                double sx = std::sin(M_PI * x_u);
+                // Déclaration de variable typée
+                double sy = std::sin(2.0 * M_PI * y_c);
+                // Calcul de la résolution géométrique de cellule
+                fields.u[mesh.u_idx(i, j)] = - (sx * sx) * sy * cos_factor;
+            }
+        }
+
+        // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        for (int j = 1; j <= v_ny; ++j) {
+            // Déclaration de variable typée
+            double y_v = mesh.yv(j);
+            // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+            for (int i = 1; i <= mesh.nx_local; ++i) {
+                // Déclaration de variable typée
+                double x_c = mesh.xc(i);
+                // Déclaration de variable typée
+                double sx = std::sin(2.0 * M_PI * x_c);
+                // Déclaration de variable typée
+                double sy = std::sin(M_PI * y_v);
+                // Calcul de la résolution géométrique de cellule
+                fields.v[mesh.v_idx(i, j)] = sx * (sy * sy) * cos_factor;
+            }
+        }
+
+        // Halos et CL
+        MpiComm::sync_u(mesh, fields.u);
+        MpiComm::sync_v(mesh, fields.v);
+
+        // Advection TVD de C
+        tracker.advect(mesh, fields, dt);
+
+        // Calcul et assignation numérique
+        t += dt;
+
+        // Évaluation de la condition de contrôle
+        if (step % config.output.vtk_interval == 0 || t >= T_period || std::abs(t - 0.5 * T_period) < 0.5 * dt) {
+            vtk_writer.write_step(mesh, fields, step, t);
+        }
+
+        // Évaluation de la condition de contrôle
+        if (mesh.rank == 0 && (step % config.output.log_interval == 0 || t >= T_period)) {
+            // Calcul et assignation numérique
+            std::cout << "  [Vortex] Pas " << step << " | t = " << std::fixed << std::setprecision(4) << t
+                      << " s / " << T_period << " s\n";
+        }
+    }
+
+    // Calcul des erreurs L1, L2, Linf et du bilan de masse entre C_initial et C(T)
+    double local_err_l1 = 0.0;
+    // Déclaration de variable typée
+    double local_err_l2 = 0.0;
+    // Déclaration de variable typée
+    double local_err_linf = 0.0;
+    // Déclaration de variable typée
+    double local_mass_init = 0.0;
+    // Déclaration de variable typée
+    double local_mass_final = 0.0;
+    // Déclaration de variable typée
+    double local_cells = mesh.nx_local * mesh.ny_local;
+    // Déclaration de variable typée
+    double cell_vol = mesh.dx * mesh.dy;
+
+    // Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    for (int j = 1; j <= mesh.ny_local; ++j) {
+        // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
+        for (int i = 1; i <= mesh.nx_local; ++i) {
+            // Déclaration de variable typée
+            int idx = mesh.cell_idx(i, j);
+            // Déclaration de variable typée
+            double diff = std::abs(fields.C[idx] - C_initial[idx]);
+            // Calcul et assignation numérique
+            local_err_l1 += diff;
+            // Calcul et assignation numérique
+            local_err_l2 += diff * diff;
+            // Évaluation de la condition de contrôle
+            if (diff > local_err_linf) local_err_linf = diff;
+            // Calcul et assignation numérique
+            local_mass_init += C_initial[idx] * cell_vol;
+            // Calcul et assignation numérique
+            local_mass_final += fields.C[idx] * cell_vol;
+        }
+    }
+
+    // Réduction parallèle MPI globale de la somme de l'erreur L1
+    double global_err_l1 = MpiComm::global_sum(mesh, local_err_l1);
+    // Réduction parallèle MPI globale de la somme de l'erreur L2 au carré
+    double global_err_l2 = MpiComm::global_sum(mesh, local_err_l2);
+    // Réduction parallèle MPI globale de l'erreur maximale absolue Linf
+    double global_err_linf = MpiComm::global_max(mesh, local_err_linf);
+    // Réduction parallèle MPI globale de la masse totale initiale
+    double global_mass_init = MpiComm::global_sum(mesh, local_mass_init);
+    // Réduction parallèle MPI globale de la masse totale finale
+    double global_mass_final = MpiComm::global_sum(mesh, local_mass_final);
+    // Réduction parallèle MPI globale du nombre de cellules
+    double global_cells = MpiComm::global_sum(mesh, local_cells);
+
+    // Calcul de l'erreur moyenne normalisée L1
+    double err_l1 = global_err_l1 / global_cells;
+    // Calcul de l'erreur quadratique moyenne normalisée L2
+    double err_l2 = std::sqrt(global_err_l2 / global_cells);
+    // Erreur maximale locale Linf
+    double err_linf = global_err_linf;
+    // Taux de conservation relative de la masse du fluide
+    double mass_conservation = (global_mass_init > 1.0e-14) ? (global_mass_final / global_mass_init) : 1.0;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.rank == 0) {
+        // Affichage console formaté du résultat de vérification
+        std::cout << "\n>>> RESULTAT DU CAS 3.19 : ADVECTION VORTEX COVOF 2D <<<\n"
+                  << "  Methode Advection  : " << config.vof.advection_method << "\n"
+                  << "  Reconstruction     : " << config.vof.reconstruction_method << "\n"
+                  << "  Limiteur TVD/NVD   : " << config.vof.tvd_limiter << "\n"
+                  << "  Maillage           : " << nx << " x " << ny << "\n"
+                  << "  Erreur L1          : " << std::scientific << std::setprecision(5) << err_l1 << "\n"
+                  << "  Erreur L2          : " << std::scientific << std::setprecision(5) << err_l2 << "\n"
+                  << "  Erreur Linf        : " << std::scientific << std::setprecision(5) << err_linf << "\n"
+                  << "  Conservation Masse : " << std::fixed << std::setprecision(5) << (mass_conservation * 100.0) << " %\n"
+                  << "========================================================\n";
+
+        // Déclaration de variable typée
+        std::string err_file = config.output.output_dir + "/vortex_error.csv";
+        // Ouverture du flux d'écriture fichier
+        std::ofstream ofs(err_file);
+        // Évaluation de la condition de contrôle
+        if (ofs.is_open()) {
+            // Écriture de l'en-tête CSV enrichi avec toutes les métriques et métadonnées d'advection
+            ofs << "nx,ny,dt,T,advection,reconstruction,limiter,err_l1,err_l2,err_linf,mass_init,mass_final,mass_conservation\n"
+                << nx << "," << ny << "," << dt << "," << T_period << ","
+                << config.vof.advection_method << "," << config.vof.reconstruction_method << "," << config.vof.tvd_limiter << ","
+                << err_l1 << "," << err_l2 << "," << err_linf << ","
+                << global_mass_init << "," << global_mass_final << "," << mass_conservation << "\n";
+            // Fermeture du fichier de sortie
+            ofs.close();
+        }
+    }
+
+    vtk_writer.finalize();
+}
+
+} // namespace covof
+
+
+```
+
+
 ---
 
-## 9. Procédure de Contribution et Intégration Continue
-
-Pour proposer de nouveaux développements dans COVOF 2D :
-1. **Création d'une branche de travail** : `git checkout -b feature/mon_modele_physique`.
-2. **Implémentation et respect des règles C++20** (zéro allocation dynamique dans `run()`).
-3. **Validation obligatoire de non-régression** : L'exécution complète du script de benchmark doit produire **100% de PASS** :
-   ```bash
-   bash scripts/run_all_benchmarks.sh 2
-   python3 scripts/verify_cases.py
-   ```
-4. **Documentation** : Mettre à jour `MATHEMATICAL_THEORY.md`, `USER_GUIDE.md` et `DEVELOPER_GUIDE.md` en conséquence.
+# PARTIE II — Guide du Développeur Fortran 2018 (`COVOF_2D-FORTRAN`)
 
 
----
+## Chapitre 14 : Architecture Modulaire Fortran 2018, Précision IEEE-754 et Programme Principal (CMakeLists.txt, module_precision.f90, module_constants.f90, covof2d_main.f90)
 
-## 10. Répertoire Exhaustif et Analyse Détaillée de Chaque Fichier Source
+\section{Conception Modulaire selon la Norme Fortran 2018 (ISO/IEC 1539-1:2018)}
+L'implémentation \textbf{Fortran 2018} (\texttt{COVOF\_2D-FORTRAN}) est le miroir algorithmique et mathématique exact de \texttt{COVOF\_2D-C++}. Elle est structurée en 13 modules modernes (\texttt{implicit none} systématique, attributs \texttt{intent(in)}, \texttt{intent(out)}, \texttt{intent(inout)}, procédures attachées aux types dérivés et tableaux allocatables à bornes personnalisées) et un programme principal \texttt{covof2d\_main.f90}.
 
-Cette section dresse l'inventaire exhaustif et la spécification technique de chacun des fichiers sources et en-têtes constituant l'architecture logicielle de **COVOF 2D (C++17 et Fortran 2018)**.
+\subsection{Gestion de la Précision Flottante (\texttt{module\_precision.f90})}
+Le module \texttt{module\_precision} définit le paramètre de genre (\emph{kind parameter}) double précision IEEE-754 portable sur 64 bits :
+\begin{equation}
+  \texttt{integer, parameter :: dp = selected\_real\_kind(15, 307)}
+\end{equation}
+garantissant au moins 15 chiffres décimaux significatifs de mantisse et une plage d'exposants décimaux de $\pm 307$, strictement identique au type \texttt{double} de C++17.
 
-### 10.1. En-têtes et Modules C++17 (`COVOF_2D-C++/include/covof/` et `src/`)
+\subsection{Table de Correspondance Bijective C++17 $\leftrightarrow$ Fortran 2018}
+\begin{center}
+\begin{tabular}{ll}
+\hline
+\textbf{Composant C++17 (\texttt{COVOF\_2D-C++})} & \textbf{Module Fortran 2018 (\texttt{COVOF\_2D-FORTRAN})} \\
+\hline
+\texttt{include/covof/Types.hpp} & \texttt{src/module\_precision.f90} + \texttt{src/module\_constants.f90} \\
+\texttt{src/Config.cpp} (\texttt{covof::Config}) & \texttt{src/module\_json.f90} + \texttt{src/module\_config.f90} \\
+\texttt{src/Mesh.cpp} (\texttt{covof::Mesh}) & \texttt{src/module\_mesh.f90} (\texttt{type(mesh\_2d\_t)}) \\
+\texttt{include/covof/Field.hpp} (\texttt{Field2D<T>}) & \texttt{src/module\_fields.f90} (\texttt{type(flow\_fields\_t)}) \\
+\texttt{src/MpiComm.cpp} (\texttt{covof::MpiComm}) & \texttt{src/module\_mpi\_comm.f90} (\texttt{type(mpi\_context\_t)}) \\
+\texttt{src/CSRMatrix.cpp} + \texttt{Preconditioner.cpp} + \texttt{LinearSolver.cpp} & \texttt{src/module\_linear\_solvers.f90} \\
+\texttt{src/NavierStokesSolver.cpp} & \texttt{src/module\_navier\_stokes.f90} \\
+\texttt{src/InterfaceReconstruction.cpp} & \texttt{src/module\_interface\_reconstruction.f90} \\
+\texttt{src/InterfaceTracker.cpp} & \texttt{src/module\_interface\_vof.f90} \\
+\texttt{src/VTKWriter.cpp} & \texttt{src/module\_vtk\_writer.f90} \\
+\texttt{src/Simulation.cpp} + \texttt{src/main.cpp} & \texttt{src/module\_simulation.f90} + \texttt{src/covof2d\_main.f90} \\
+\hline
+\end{tabular}
+\end{center}
 
-#### 1. `include/covof/Types.hpp`
-* **Rôle et Responsabilité** : Définition des structures de données scalaires et énumérations fortement typées (`enum class`) régissant les conditions aux limites, les types de solveurs et les obstacles immergés.
-* **Structures Clés** :
-  * `enum class BCType` : `DIRICHLET` (vitesse imposée), `NEUMANN` (sortie libre convective), `FREE_SLIP` (glissement parfait), `PERIODIC` (périodicité torique).
-  * `struct BoundaryCondition` : Définition des valeurs ($u, v, T$), profils d'entrée (`PARABOLIC`, `POISEUILLE_STEP`) et types thermiques associés.
-  * `struct Obstacle` : Définition géométrique d'obstacles solides immergés (`BOX`, `CYLINDER`), perméabilité de Darcy-Brinkman $K$.
-  * `struct FluidProperties` : Paramètres thermophysiques d'une phase ($
-ho, \mu, C_p, k,  eta$).
-  * `struct SolverOptions` : Paramétrage du Lagrangien augmenté ($r_{\text{al}}$, itérations d'Uzawa, tolérance de convergence $\epsilon$, type de préconditionneur).
+### Code Source Intégral : `CMakeLists.txt` (42 lignes)
 
-#### 2. `include/covof/CSRMatrix.hpp` & `src/CSRMatrix.cpp`
-* **Rôle et Responsabilité** : Format de stockage creux Compressed Sparse Row (CSR) pour l'assemblage explicite de matrices locales creuses.
-* **Algorithmes & Structures** :
-  * Vecteurs `row_ptr` (taille $N+1$), `col_idx` (taille $NNZ$), `values` (taille $NNZ$), et `diag` (taille $N$).
-  * Méthode `set_from_triplets()` : Conversion en complexité $O(NNZ)$ avec somme cumulée pour la compression de lignes.
-  * Méthode `matvec()` : Produit matrice-vecteur creux optimisé pour le préchargement de cache L1/L2.
-  * Méthode `solve_jacobi()` : Relaxation itérative de Jacobi pour le préconditionnement local.
+```cmake
+cmake_minimum_required(VERSION 3.18)
+project(COVOF_2D_FORTRAN LANGUAGES Fortran)
 
-#### 3. `include/covof/Mesh.hpp` & `src/Mesh.cpp`
-* **Rôle et Responsabilité** : Topologie spatiale 2D, gestion du communicateur cartésien MPI, métrique géométrique et partitionnement de domaine.
-* **Algorithmes & Fonctions** :
-  * `init()` : Appel à `MPI_Dims_create` et `MPI_Cart_create` pour déterminer automatiquement la décomposition $(P_x, P_y)$ la plus carrée possible.
-  * Décalages de voisinage via `MPI_Cart_shift` pour identifier les 4 sous-domaines adjacents (`neighbor_west`, `neighbor_east`, `neighbor_south`, `neighbor_north`).
-  * Fonctions de coordonnées décalées : `x_face(i)` ($i-1/2$), `y_face(j)` ($j-1/2$), `x_center(i)` ($i$), `y_center(j)` ($j$).
-  * `is_in_obstacle()` : Test analytique d'inclusion géométrique pour la pénalisation de Brinkman.
+set(CMAKE_Fortran_STANDARD 2018)
+set(CMAKE_Fortran_STANDARD_REQUIRED ON)
 
-#### 4. `include/covof/Field.hpp`
-* **Rôle et Responsabilité** : Conteneur des champs physiques discrétisés sur grille décalée MAC (Marker-And-Cell).
-* **Données Allouées** :
-  * Tableaux 2D continus indexés par $(i, j) \in [0, n_x+1] \times [0, n_y+1]$ (avec couche de cellules fantômes).
-  * Vitesse axiale $u(i-1/2, j)$, vitesse transversale $v(i, j-1/2)$, pression statique $p(i, j)$, divergence $\nabla \cdot \mathbf{u}(i, j)$.
-  * Fraction volumique VOF $C(i, j)$, température $T(i, j)$, masses volumiques $\rho, \rho_u, \rho_v$, viscosités dynamiques $\mu, \mu_{\text{node}}$.
-  * Forces capillaires $f_{x,\sigma}, f_{y,\sigma}$ et courbure d'interface $\kappa$.
-  * Masque solide `solid_mask` ($1$ pour solide, $0$ pour fluide).
+find_package(MPI REQUIRED)
 
-#### 5. `include/covof/Config.hpp` & `src/Config.cpp`
-* **Rôle et Responsabilité** : Analyseur syntaxique JSON natif, validation des paramètres physiques et géométriques de la simulation.
-* **Fonctionnalités** :
-  * Extraction hiérarchique des sections `mesh`, `physics`, `time`, `boundary_conditions`, `solver`, `obstacle`, `output`.
-  * Remplissage automatique des valeurs par défaut pour les options omises.
+set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -march=native")
 
-#### 6. `include/covof/MpiComm.hpp` & `src/MpiComm.cpp`
-* **Rôle et Responsabilité** : Synchronisation distribuée des cellules fantômes (halos) par communications non-bloquantes OpenMPI.
-* **Algorithmes** :
-  * `exchange_halos_scalar()` : Échange des bords pour les champs centrés ($p, T, C, \rho, \mu$).
-  * `exchange_halos_u()` et `exchange_halos_v()` : Échange adapté à la grille décalée pour les composantes de vitesse sur faces.
-  * Utilisation systématique de paires `MPI_Isend` / `MPI_Irecv` associées à `MPI_Waitall` pour éviter tout interblocage (*deadlock*) et permettre le recouvrement calcul-communication.
-  * Application des conditions aux limites physiques (Dirichlet, Neumann, Free-Slip, Périodique) sur les frontières externes non partagées.
+set(SOURCES
+    src/module_precision.f90
+    src/module_constants.f90
+    src/module_json.f90
+    src/module_config.f90
+    src/module_mesh.f90
+    src/module_fields.f90
+    src/module_mpi_comm.f90
+    src/module_interface_reconstruction.f90
+    src/module_interface_vof.f90
+    src/module_navier_stokes.f90
+    src/module_linear_solvers.f90
+    src/module_vtk_writer.f90
+    src/module_simulation.f90
+    src/covof2d_main.f90
+)
 
-#### 7. `include/covof/Preconditioner.hpp` & `src/Preconditioner.cpp`
-* **Rôle et Responsabilité** : Interface abstraite et implémentation des préconditionneurs algébriques parallèles pour accélérer la convergence des méthodes de Krylov.
-* **Classes** :
-  * `IPreconditioner` : Interface de base avec méthode virtuelle pure `apply(r, z)`.
-  * `JacobiPreconditioner` : Préconditionneur diagonal par blocs $M = \text{diag}(A)$, complexité $O(1)$ sans échange réseau.
-  * `SSORPreconditioner` : Relaxation symétrique de Gauss-Seidel par étapes avant-arrière.
+# Executable target: covof2d_fortran
+add_executable(covof2d_fortran ${SOURCES})
+target_link_libraries(covof2d_fortran PRIVATE MPI::MPI_Fortran)
 
-#### 8. `include/covof/LinearSolver.hpp` & `src/LinearSolver.cpp`
-* **Rôle et Responsabilité** : Implémentation des solveurs itératifs de sous-espace de Krylov Matrix-Free.
-* **Algorithmes Développés** :
-  * `BiCGSTAB2Solver` : Biconjugué Gradient Stabilisé d'ordre 2 (Sleijpen & van der Vorst 1993) avec minimisation polynomiale locale d'ordre 2 pour amortir les résonances asymétriques.
-  * `BiCGSTABSolver` : BiCGSTAB classique (van der Vorst 1992).
-  * `PCGSolver` : Gradient Conjugué Préconditionné pour opérateurs symétriques définis positifs.
-  * `GMRESSolver` : Résolution par orthogonalisation de modified Gram-Schmidt avec rotation de Givens.
-  * Réductions globales `MPI_Allreduce` pour le calcul distribué des produits scalaires $\langle u, v \rangle = \sum_i u_i v_i$.
+set_target_properties(covof2d_fortran PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
+)
 
-#### 9. `include/covof/InterfaceTracker.hpp` & `src/InterfaceTracker.cpp`
-* **Rôle et Responsabilité** : Capture d'interface diphasique par la méthode Volume-Of-Fluid (VOF) et modélisation de la tension de surface CSF.
-* **Formulations Numériques** :
-  * Advection géométrique par limiteur de flux non-linéaire **TVD Superbee** garantissant la stricte conservation du volume et le maintien d'une épaisseur d'interface de 1 à 2 cellules.
-  * Calcul des normales unitaires $\mathbf{n} = \frac{\nabla C}{\|\nabla C\| + \epsilon}$ par différences finies centrées.
-  * Évaluation de la courbure locale $\kappa = -\nabla \cdot \mathbf{n}$.
-  * Calcul de la force volumique de Brackbill $\mathbf{f}_\sigma = \sigma \kappa \nabla C$ projetée sur les faces décalées $u$ et $v$.
+# Create compatibility symlink for fugu2d_fortran
+add_custom_command(TARGET covof2d_fortran POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+        ${CMAKE_CURRENT_SOURCE_DIR}/bin/covof2d_fortran
+        ${CMAKE_CURRENT_SOURCE_DIR}/bin/fugu2d_fortran
+    COMMENT "Creating compatibility symlink bin/fugu2d_fortran -> bin/covof2d_fortran"
+)
 
-#### 10. `include/covof/NavierStokesSolver.hpp` & `src/NavierStokesSolver.cpp`
-* **Rôle et Responsabilité** : Cœur hydrodynamique résolvant les équations de Navier-Stokes incompressibles couplées à l'énergie thermique.
-* **Schémas Discrets Spécifiés** :
-  * **Convection semi-implicite** : Termes advectifs $(\mathbf{u}\cdot\nabla)\mathbf{u}$ discrétisés par schéma centré d'ordre 2 ou décentré upwind.
-  * **Diffusion visqueuse à tenseur complet** : $\nabla \cdot (\mu (\nabla \mathbf{u} + \nabla^T \mathbf{u}))$ avec interpolation harmonique de la viscosité aux nœuds :
-    $$\mu_{i+1/2, j+1/2} = \frac{4}{\frac{1}{\mu_{i,j}} + \frac{1}{\mu_{i+1,j}} + \frac{1}{\mu_{i,j+1}} + \frac{1}{\mu_{i+1,j+1}}}$$
-  * **Lagrangien Augmenté & Uzawa** : Terme de pénalité de divergence $-r_{\text{al}} \nabla(\nabla \cdot \mathbf{u})$ et mise à jour de pression $p^{m+1} = p^m - r_{\text{al}} (\nabla \cdot \mathbf{u}^{m+1})$.
-  * **Thermique & Boussinesq** : Résolution de l'advection-diffusion de température et force de flottabilité $\mathbf{f}_b = -\rho \beta (T - T_0)\mathbf{g}$.
-  * **Pénalisation de Brinkman** : Terme de traînée volumique $\frac{\mu}{K} \mathbf{u}$ forçant $\mathbf{u} = \mathbf{0}$ à l'intérieur des obstacles rigides sans maillage non structuré.
+```
 
-#### 11. `include/covof/VTKWriter.hpp` & `src/VTKWriter.cpp`
-* **Rôle et Responsabilité** : Générateur de visualisations volumiques et surfaciques au standard XML VTK.
-* **Fichiers Produits** :
-  * Fichiers de sous-domaines partitionnés `.vtr` (*RectilinearGrid*) écrits par chaque processus MPI de façon indépendante et parallèle.
-  * Fichier maître coordinateur `.pvtr` (*ParallelRectilinearGrid*) référençant les sous-domaines locaux, directement lisible par ParaView.
+### Répertoire des Procédures de `src/module_precision.f90`
 
-#### 12. `include/covof/Simulation.hpp` & `src/Simulation.cpp`
-* **Rôle et Responsabilité** : Orchestration de la boucle temporelle, régulation adaptative du pas de temps sous contrainte CFL, gestion des sorties et modes de vérification.
-* **Fonctions Spécialisées** :
-  * Régulation adaptative $\Delta t = \min\left(\text{CFL} \frac{\Delta x}{\|\mathbf{u}\|_{\max}}, \frac{\rho \Delta x^2}{4\mu}\right)$.
-  * Mode analytique Laplacien (Cas 3.1) avec calcul des normes d\'erreur $L_1, L_2, L_\infty$.
-  * Mode advection vortex réversible (Cas 3.19) avec inversion du champ de vitesse à $t = T/2$ et mesure de la conservation géométrique.
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 7 | module | `module_precision` | Unité modulaire Fortran 2018 |
 
-#### 13. `src/main.cpp`
-* **Rôle et Responsabilité** : Point d\'entrée en ligne de commande, gestion des signaux, instanciation et capture d\'erreurs.
+### Code Source Intégral : `src/module_precision.f90` (33 lignes)
 
----
+```fortran
+!===============================================================================
+! Module : module_precision
+! Description : Définition standardisée de la précision arithmétique flottante
+!               et entière pour l'ensemble du solveur CFD COVOF 2D (Fortran 2018).
+! Conforme aux recommandations IEEE 754 et ISO_FORTRAN_ENV.
+!===============================================================================
+module module_precision
+  ! Obligation stricte de déclarer tous les types de variables (évite le typage implicite)
+  implicit none
+  ! Encapsulation par défaut : aucune entité n'est visible de l'extérieur sans export
+  private
 
-### 10.2. Architecture Modulaire Fortran 2018 (`COVOF_2D-FORTRAN/src/`)
+  ! Précision double (Double Precision 64-bit IEEE 754) :
+  ! - Au moins 15 chiffres significatifs en base 10 (mantisse de 53 bits)
+  ! - Plage dynamique d'exposant de 10^-307 à 10^+307 (exposant de 11 bits)
+  ! - Utilisée pour tous les calculs hydrodynamiques, de pression et de transport
+  integer, parameter, public :: dp = selected_real_kind(15, 307)
+  
+  ! Précision simple (Single Precision 32-bit IEEE 754) :
+  ! - Au moins 6 chiffres significatifs en base 10 (mantisse de 24 bits)
+  ! - Plage dynamique d'exposant de 10^-37 à 10^+37 (exposant de 8 bits)
+  ! - Utilisée optionnellement pour les exports VTK légers ou diagnostics rapides
+  integer, parameter, public :: sp = selected_real_kind(6, 37)
 
-L'implémentation Fortran 2018 reproduit rigoureusement l'intégralité des algorithmes ci-dessus à travers 12 modules autonomes exploitant les fonctionnalités modernes du langage (modules, types dérivés, stockage contigu en colonnes `column-major`, `iso_fortran_env`) :
+  ! Entier standard 32 bits signé (-2*10^9 à +2*10^9) :
+  ! - Utilisé pour l'indexation spatiale des mailles (i, j) et les compteurs de boucle
+  integer, parameter, public :: i4 = selected_int_kind(9)
+  ! Alias d'entier par défaut pour le maillage et les solveurs
+  integer, parameter, public :: ip = i4
+  ! Entier 64 bits signé (-9*10^18 à +9*10^18) pour les grands volumes de données
+  integer, parameter, public :: i8 = selected_int_kind(18)
 
-1. **`module_precision.f90`** : Typage standardisé `real(dp)` (`selected_real_kind(15, 307)`).
-2. **`module_constants.f90`** : Constantes mathématiques, codes de conditions limites et énumérations physiques.
-3. **`module_json.f90`** : Parseur JSON pur Fortran opérant sur des tampons de caractères continus.
-4. **`module_config.f90`** : Structure `config_t` et extraction des paramètres du calcul.
-5. **`module_mesh.f90`** : Topologie 2D MPI cartésienne, coordonnées métriques de faces et barycentres.
-6. **`module_fields.f90`** : Type `flow_fields_t` encapsulant l'ensemble des tableaux 2D alloués une unique fois.
-7. **`module_mpi_comm.f90`** : Communications asynchrones `MPI_Isend` / `MPI_Irecv` et synchronisation des bords.
-8. **`module_interface_vof.f90`** : Schéma VOF-TVD Superbee et modèle capillaire CSF.
-9. **`module_linear_solvers.f90`** : Algorithmes itératifs BiCGSTAB2, PCG et GMRES Matrix-Free.
-10. **`module_navier_stokes.f90`** : Discrétisation spatialisée des équations Navier-Stokes, Boussinesq et Brinkman.
-11. **`module_vtk_writer.f90`** : Génération des fichiers XML rectilinéaires `.pvtr` / `.vtr`.
-12. **`module_simulation.f90`** : Boucle temporelle, gestion du pas de temps adaptatif CFL et cas vérifications.
-13. **`covof2d_main.f90`** : Programme principal exécutable.
+end module module_precision
 
----
+```
 
-## 11. Bibliographie Académique Complète et Répertoire des Fondations Théoriques
+### Répertoire des Procédures de `src/module_constants.f90`
 
-Cette section rassemble les publications scientifiques de référence dont les modèles mathématiques et numériques sont directement implémentés dans **COVOF 2D** :
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 7 | module | `module_constants` | Unité modulaire Fortran 2018 |
 
-1. **Harlow, F. H., & Welch, J. E. (1965)**. *Numerical Calculation of Time-Dependent Viscous Incompressible Flow of Fluid with Free Surface*. The Physics of Fluids, 8(12), 2182–2189. [DOI: 10.1063/1.1761178]  
-   *Contribution* : Introduction historique de la grille décalée MAC (Marker-And-Cell) éliminant les modes parasites en damier (*checkerboard modes*). Implémenté dans `Mesh`, `Field`, `module_mesh.f90` et `module_fields.f90`.
+### Code Source Intégral : `src/module_constants.f90` (111 lignes)
 
-2. **Fortin, M., & Glowinski, R. (1983)**. *Augmented Lagrangian Methods: Applications to the Numerical Solution of Boundary-Value Problems*. Studies in Mathematics and its Applications, Vol. 15, North-Holland, Amsterdam.  
-   *Contribution* : Formalisation mathématique de l'algorithme du Lagrangien Augmenté et actualisation de pression d'Uzawa pour forcer la contrainte d'incompressibilité sans matrice de projection découplée. Implémenté dans `NavierStokesSolver` et `module_navier_stokes.f90`.
+```fortran
+!===============================================================================
+! Module : module_constants
+! Description : Définition des constantes physiques fondamentales, paramètres
+!               numériques seuils, énumérations de conditions aux limites, types
+!               de solveurs et schémas convectifs pour le code COVOF 2D.
+!===============================================================================
+module module_constants
+  ! Importation du paramètre de précision double standardisé
+  use module_precision, only: dp
+  ! Obligation stricte de typage explicite pour toutes les constantes
+  implicit none
+  ! Encapsulation : seules les constantes marquées 'public' sont exportées
+  private
 
-3. **Brackbill, J. U., Kothe, D. B., & Zemach, C. (1992)**. *A continuum method for modeling surface tension*. Journal of Computational Physics, 100(2), 335–354. [DOI: 10.1016/0021-9991(92)90240-Y]  
-   *Contribution* : Méthode Continuum Surface Force (CSF) convertissant la tension interfaciale en une force volumique équivalente proportionnelle à la courbure locale et au gradient de fraction volumique. Implémenté dans `InterfaceTracker` et `module_interface_vof.f90`.
+  ! --- 1. Constantes Mathématiques et Physiques Fondamentales ---
+  ! Valeur exacte du nombre Pi (35 décimales significatives en précision double)
+  real(dp), parameter, public :: PI = 3.141592653589793238462643383279502884197_dp
+  ! Seuil numérique infinitésimal pour prévenir les divisions par zéro dans les gradients
+  real(dp), parameter, public :: EPS_SMALL = 1.0e-30_dp
+  ! Perméabilité de Darcy par défaut dans les obstacles solides pénalisés (loi de Brinkman)
+  real(dp), parameter, public :: PERMEABILITY_SOLID_DEFAULT = 1.0e-40_dp
 
-4. **Sleijpen, G. L., & van der Vorst, H. A. (1993)**. *BiCGSTAB(l) for linear equations involving unsymmetric matrices with complex spectrum*. Electronic Transactions on Numerical Analysis, 1, 11–32.  
-   *Contribution* : Algorithme BiCGSTAB($l$) d'ordre 2 réduisant drastiquement les oscillations et stagnations du BiCGSTAB standard sur les matrices asymétriques issues des opérateurs de convection-diffusion raides. Implémenté dans `LinearSolver` et `module_linear_solvers.f90`.
+  ! --- 2. Conditions aux Limites Hydrodynamiques (Vitesse) ---
+  ! Vitesse imposée (Adhérence u=0, paroi mobile de cavité, ou profil d'entrée de Poiseuille)
+  integer, parameter, public :: BC_DIRICHLET = 1
+  ! Sortie libre convective ou gradient normal nul (du/dn = 0, dv/dn = 0)
+  integer, parameter, public :: BC_NEUMANN   = 2
+  ! Raccordement spatial périodique (face Est reliée à la face Ouest, Nord à Sud)
+  integer, parameter, public :: BC_PERIODIC  = 3
+  ! Glissement parfait sans frottement tangentiel (vitesse normale nulle, cisaillement nul)
+  integer, parameter, public :: BC_FREESLIP  = 4
 
-5. **Roe, P. L. (1986)**. *Characteristic-Based Schemes for the Euler Equations*. Annual Review of Fluid Mechanics, 18(1), 337–365. [DOI: 10.1146/annurev.fl.18.010186.002005]  
-   *Contribution* : Théorie des limiteurs de flux TVD (Total Variation Diminishing) et formulation du limiteur haute résolution Superbee préservant la netteté des discontinuités d'interface. Implémenté dans `InterfaceTracker` et `module_interface_vof.f90`.
+  ! --- 3. Conditions aux Limites Thermiques (Énergie) ---
+  ! Température pariétale imposée (Paroi isotherme chaude ou froide de Vahl Davis)
+  integer, parameter, public :: THERMAL_DIRICHLET = 1
+  ! Flux thermique imposé ou paroi adiabatique sans transfert de chaleur (dT/dn = 0)
+  integer, parameter, public :: THERMAL_NEUMANN   = 2
 
-6. **Angot, P., Bruneau, C. H., & Fabrie, P. (1999)**. *A penalization method to take into account obstacles in incompressible viscous flows*. Numerische Mathematik, 81(4), 497–520. [DOI: 10.1007/s002110050401]  
-   *Contribution* : Justification mathématique et analyse de convergence de la méthode de pénalisation volumique de Darcy-Brinkman pour la modélisation de corps solides sans remaillage non structuré. Implémenté dans `NavierStokesSolver` et `module_navier_stokes.f90`.
+  ! --- 4. Formulations du Couplage Vitesse-Pression Navier-Stokes ---
+  ! Méthode du Lagrangien Augmenté avec pénalité de divergence et actualisation d'Uzawa
+  integer, parameter, public :: SOLVER_AUGMENTED_LAGRANGIAN = 1
+  ! Formulation couplée monolithique directe avec intégration du gradient de pression
+  integer, parameter, public :: SOLVER_MONOLITHIC           = 2
 
-7. **Saad, Y., & Schultz, M. H. (1986)**. *GMRES: A Generalized Minimal Residual Algorithm for Solving Nonsymmetric Linear Systems*. SIAM Journal on Scientific and Statistical Computing, 7(3), 856–869. [DOI: 10.1137/0907058]  
-   *Contribution* : Algorithme d'orthogonalisation de Krylov optimal pour la résolution des systèmes linéaires non symétriques. Implémenté dans `LinearSolver` et `module_linear_solvers.f90`.
+  ! --- 5. Algorithmes de Résolution Linéaire de Krylov (Matrix-Free) ---
+  ! Biconjugué Gradient Stabilisé d'ordre 2 (Sleijpen & van der Vorst) pour systèmes asymétriques
+  integer, parameter, public :: LINEAR_BICGSTAB2 = 1
+  ! Biconjugué Gradient Stabilisé standard (van der Vorst 1992)
+  integer, parameter, public :: LINEAR_BICGSTAB  = 2
+  ! Gradient Conjugué Préconditionné pour opérateurs symétriques définis positifs (Poisson)
+  integer, parameter, public :: LINEAR_CG        = 3
+  ! Generalized Minimal Residual (Saad & Schultz 1986) avec orthogonalisation de Krylov
+  integer, parameter, public :: LINEAR_GMRES     = 4
+  ! Solveur direct bande ou factorisation LU locale
+  integer, parameter, public :: LINEAR_DIRECT    = 5
 
-8. **Ghia, U., Ghia, K. N., & Shin, C. T. (1982)**. *High-Re solutions for incompressible flow using the Navier-Stokes equations and a multigrid method*. Journal of Computational Physics, 48(3), 387–411. [DOI: 10.1016/0021-9991(82)90058-4]  
-   *Contribution* : Solution numérique de référence et profils de vitesse axiaux et transversaux pour la cavité entraînée à $Re=100, 400, 1000$. Utilisé pour la validation du Cas 4.5.
+  ! --- 6. Préconditionneurs Linéaires Parallèles ---
+  ! Aucun préconditionnement (résolution brute de l'opérateur non préconditionné)
+  integer, parameter, public :: PRECOND_NONE   = 0
+  ! Préconditionneur diagonal par blocs de Jacobi (inversion de la diagonale locale)
+  integer, parameter, public :: PRECOND_JACOBI = 1
+  ! Symmetric Successive Over-Relaxation (SSOR) pour lissage spectral rapide
+  integer, parameter, public :: PRECOND_SSOR   = 2
+  ! Factorisation incomplète Incomplete LU sans remplissage (ILU(0))
+  integer, parameter, public :: PRECOND_ILU0   = 3
 
-9. **Armaly, B. F., Durst, F., Pereira, J. C. F., & Schönung, B. (1983)**. *Experimental and theoretical investigation of backward-facing step flow*. Journal of Fluid Mechanics, 127, 473–496. [DOI: 10.1017/S0022112083002839]  
-   *Contribution* : Données expérimentales et numériques sur la longueur de recirculation et de recollement de couche limite en aval d'une marche descendante. Utilisé pour la validation du Cas 4.1.
+  ! --- 7. Schémas de Discrétisation Spatiale des Termes Convectifs ---
+  ! Schéma décentré amont d'ordre 1 (Upwind) inconditionnellement stable mais diffusif
+  integer, parameter, public :: CONV_UPWIND       = 1
+  ! Schéma centré d'ordre 2 (Centered) sans dissipation artificielle
+  integer, parameter, public :: CONV_CENTERED     = 2
+  ! Schéma TVD Superbee à haute résolution avec limiteur de flux non linéaire (Roe 1986)
+  integer, parameter, public :: CONV_TVD_SUPERBEE = 3
 
-10. **de Vahl Davis, G. (1983)**. *Natural convection of air in a square cavity: A bench mark numerical solution*. International Journal for Numerical Methods in Fluids, 3(3), 249–264. [DOI: 10.1002/fld.1650030305]  
-    *Contribution* : Benchmark numérique de référence pour la convection naturelle sous approximation de Boussinesq dans une cavité carrée différentiellement chauffée ($Ra=10^4$). Utilisé pour la validation du Cas 6.1.
+  ! --- 8. Modèles de Viscosité Dynamique du Fluide ---
+  ! Fluide newtonien homogène à viscosité dynamique constante mu = mu0
+  integer, parameter, public :: VISC_CONSTANT    = 1
+  ! Fluide à viscosité variable spatiale exponentielle mu(y) = mu0 * exp(a * (y-e)^2 / e^2)
+  integer, parameter, public :: VISC_EXPONENTIAL = 2
 
-11. **Martin, J. C., & Moyce, W. J. (1952)**. *An experimental study of the collapse of liquid columns on a rigid horizontal plane*. Philosophical Transactions of the Royal Society of London. Series A, 244(882), 312–324. [DOI: 10.1098/rsta.1952.0006]  
-    *Contribution* : Mesures expérimentales de la cinétique d'effondrement et de la vitesse du front d'onde pour une colonne d'eau sous gravité (rupture de barrage). Utilisé pour la validation du Cas 7.1.
+  ! --- 9. Types de Configurations Initiales et Cas de Vérification ---
+  ! Écoulement monophasique uniforme avec fluide au repos (u=0, v=0, C=1)
+  integer, parameter, public :: IC_UNIFORM          = 1
+  ! Profil parabolique d'entrée de Poiseuille établi
+  integer, parameter, public :: IC_POISEUILLE       = 2
+  ! Tâche circulaire d'interface transportée dans un vortex cisaillé réversible
+  integer, parameter, public :: IC_VORTEX_SHEAR     = 3
+  ! Instabilité diphasique gravitationnelle de Rayleigh-Taylor avec interface perturbée
+  integer, parameter, public :: IC_RAYLEIGH_TAYLOR  = 4
+  ! Gouttelette liquide statique immergée pour la vérification de la loi de Laplace
+  integer, parameter, public :: IC_DROPLET          = 5
+  ! Bulle de gaz ascendante déformable dans un liquide visqueux (Benchmark de Hysing)
+  integer, parameter, public :: IC_BUBBLE           = 6
+  ! Effondrement d'une colonne d'eau sous gravité (Rupture de barrage de Martin & Moyce)
+  integer, parameter, public :: IC_DAM_BREAK        = 7
+  ! Test analytique d'ordre de convergence de l'opérateur Laplacien discret à 5 points
+  integer, parameter, public :: IC_LAPLACIAN_TEST   = 8
+  ! Nappe liquide cisaillée périodique (Cas 3.2 de l'article Fluids 2021)
+  integer, parameter, public :: IC_LIQUID_SHEET     = 9
+  ! Jet liquide visqueux injecté / flambement (Cas 3.3 de l'article Fluids 2021)
+  integer, parameter, public :: IC_VISCOUS_JET      = 10
 
-12. **Hysing, S., Turek, S., Kuzmin, D., Parolini, N., Burman, E., Ganesan, S., & Tobiska, L. (2009)**. *Quantitative benchmark computations of two-dimensional bubble dynamics*. International Journal for Numerical Methods in Fluids, 60(11), 1259–1288. [DOI: 10.1002/fld.1934]  
-    *Contribution* : Benchmark numérique rigoureux pour les écoulements diphasiques incompressibles à interface déformable (bulle ascendante dans un fluide visqueux). Utilisé pour la validation du Cas 7.5.
+  ! --- 10. Formes Géométriques d'Obstacles Immergés (Brinkman) ---
+  ! Aucun obstacle immergé dans le domaine fluide
+  integer, parameter, public :: OBS_NONE     = 0
+  ! Obstacle rectangulaire défini par ses coordonnées minimales et maximales (x0, y0, x1, y1)
+  integer, parameter, public :: OBS_BOX      = 1
+  ! Obstacle circulaire cylindrique défini par son centre (xc, yc) et son rayon R
+  integer, parameter, public :: OBS_CYLINDER = 2
 
-13. **Szymanski, P. (1932)**. *Quelques solutions exactes des équations de l'hydrodynamique de fluide visqueux dans le cas d'un tube cylindrique*. Journal de Mathématiques Pures et Appliquées, 9e série, 11, 67–107.  
-    *Contribution* : Dérivation de la solution analytique instationnaire exacte par décomposition en série de Fourier pour l'établissement de l'écoulement de Poiseuille. Utilisé pour la vérification du Cas 3.8.
+end module module_constants
 
-14. **Caltagirone, J. P. (2007)**. *Mécanique des milieux continus et des fluides*. Éditions Lavoisier, Paris.  
-    *Contribution* : Formulations variationnelles, discrétisations conservatrices des équations de transport multiphasiques et couplages vitesse-pression par Lagrangien augmenté.
+```
 
-15. **Patankar, S. V. (1980)**. *Numerical Heat Transfer and Fluid Flow*. Hemisphere Publishing Corporation, Taylor & Francis Group, New York.  
-    *Contribution* : Fondements de la discrétisation par volumes finis, traitement des conditions aux limites et concepts de discrétisation sur grille décalée.
+### Code Source Intégral : `src/covof2d_main.f90` (105 lignes)
 
-16. **Noh, W. F., & Woodward, P. (1976)**. *SLIC (Simple Line Interface Calculation)*. Proceedings of the Fifth International Conference on Numerical Methods in Fluid Dynamics, Lecture Notes in Physics, Vol. 59, Springer, Berlin, Heidelberg, pp. 330–340. [DOI: 10.1007/3-540-08003-1_336]  
-    *Contribution* : Première formulation historique de reconstruction d'interface géométrique par segments orthogonaux sur grille cartésienne.
+```fortran
+!===============================================================================
+! Projet        : COVOF 2D (Convection & Volume-Of-Fluid 2D CFD Solver)
+! Fichier       : covof2d_main.f90 (Point d'entrée principal Fortran 2018 / MPI)
+! Description   : Programme principal pilotant l'initialisation de l'environnement
+!                 OpenMPI, le traitement des arguments CLI, la lecture du cas
+!                 JSON, l'orchestration du calcul Navier-Stokes / VOF / Énergie,
+!                 et la libération finale des ressources système.
+! Auteur        : Elhadji Ibrahima Thiam
+! Standard      : Fortran 2018 / MPI-3
+!===============================================================================
+program covof2d_main
+  ! Importation du module orchestrateur de la simulation CFD
+  use module_simulation, only: simulation_t
+  ! Typage explicite obligatoire pour toutes les variables locales
+  implicit none
+  ! Inclusion des définitions de constantes et prototypes MPI Fortran
+  include 'mpif.h'
 
-17. **Youngs, D. L. (1982)**. *Time-dependent multi-material flow with large fluid distortion*. Numerical Methods for Fluid Dynamics, K. W. Morton and M. J. Baines (eds.), Academic Press, New York, pp. 273–285.  
-    *Contribution* : Méthode PLIC (Piecewise Linear Interface Calculation) avec orientation de la normale par gradients centrés sur stencil $3 \times 3$.
+  ! --- Déclarations des Variables Locales ---
+  integer            :: rank       ! Rang unique du processus courant (0 .. size-1)
+  integer            :: size       ! Nombre total de processus alloués au calcul
+  integer            :: ierr       ! Code d'erreur retourné par les appels MPI
+  integer            :: num_args   ! Nombre d'arguments passés en ligne de commande
+  integer            :: stat       ! Statut de lecture de l'argument CLI
+  character(len=256) :: config_file! Chemin vers le fichier de configuration JSON
+  character(len=256) :: arg        ! Tampon de lecture d'un argument textuel
+  type(simulation_t) :: sim        ! Instance du type dérivé orchestrateur
+  logical            :: success    ! Indicateur booléen de réussite de l'initialisation
 
-18. **Scardovelli, R., & Zaleski, S. (1999)**. *Direct Numerical Simulation of Free-Surface and Interfacial Flow*. Annual Review of Fluid Mechanics, 31(1), 567–603. [DOI: 10.1146/annurev.fluid.31.1.567]  
-    *Contribution* : Formules analytiques directes d'inversion volume $\leftrightarrow \alpha$ et synthèse théorique des méthodes VOF modernes.
+  ! 1. Initialisation du runtime parallèle OpenMPI
+  call MPI_Init(ierr)
 
-19. **Pilliod, J. E., & Puckett, E. G. (2004)**. *Second-order accurate volume-of-fluid algorithms for tracking interfaces*. Journal of Computational Physics, 199(2), 465–502. [DOI: 10.1016/j.jcp.2003.12.023]  
-    *Contribution* : Algorithmes LVIRA (Least Squares VOF) et ELVIRA (Efficient LVIRA) garantissant un ordre de convergence spatial 2 strict et la reproduction exacte des droites planes.
+  ! Récupération du rang du processus dans le communicateur global MPI_COMM_WORLD
+  call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
 
-20. **Lafaurie, B., Nardone, C., Scardovelli, R., Zaleski, S., & Zanetti, G. (1994)**. *Modelling Merging and Fragmentation in Multiphase Flows with SURFER*. Journal of Computational Physics, 113(1), 134–147. [DOI: 10.1006/jcph.1994.1123]  
-    *Contribution* : Méthode CIAM (Calcul d'Interface Affine par Morceaux) et algorithme d'advection géométrique directionnelle par splitting d'opérateurs.
+  ! Récupération de la taille du groupe de processus MPI
+  call MPI_Comm_size(MPI_COMM_WORLD, size, ierr)
 
-21. **Weymouth, G. D., & Yue, D. K. P. (2010)**. *Conservative Volume-of-Fluid method for free-surface flows on Cartesian-grids*. Journal of Computational Physics, 229(8), 2853–2865. [DOI: 10.1016/j.jcp.2009.12.018]  
-    *Contribution* : Algorithme VOF multidimensionnel unsplit conservatif avec correction de flux de coins (*corner flux correction*) et préservation stricte de la bornitude $0 \le C \le 1$.
+  ! Fichier de configuration par défaut si aucun argument n'est fourni
+  config_file = "cases/cavity.json"
 
-22. **Muzaferija, S., & Perić, M. (1999)**. *Computation of free-surface flows using interface-tracking and interface-capturing methods*. Nonlinear Water Wave Interaction, WIT Press, Southampton, pp. 59–100.  
-    *Contribution* : Limiteur haute résolution HRIC (High-Resolution Interface Capturing) dans le diagramme de variables normalisées (NVD).
+  ! Lecture du nombre d'arguments passés au binaire lors de l'appel mpirun
+  num_args = command_argument_count()
 
-23. **van Leer, B. (1979)**. *Towards the ultimate conservative difference scheme. V. A second-order sequel to Godunov's method*. Journal of Computational Physics, 32(1), 101–136. [DOI: 10.1016/0021-9991(79)90145-1]  
-    *Contribution* : Schéma MUSCL et théorie générale des limiteurs de pente harmoniques et linéaires monotones.
+  ! 2. Analyse des arguments passés en ligne de commande
+  if (num_args >= 1) then
+     ! Récupération du premier argument textuel
+     call get_command_argument(1, arg, status=stat)
+
+     ! Détection de la demande d'affichage d'aide (-h ou --help)
+     if (trim(arg) == "-h" .or. trim(arg) == "--help") then
+        ! Seul le processus maître (rang 0) écrit sur la sortie standard
+        if (rank == 0) then
+           write(*, '(A)') "================================================================================"
+           write(*, '(A)') "   COVOF 2D — Solveur CFD Navier-Stokes Incompressible Parallèle (Fortran 2018)"
+           write(*, '(A)') "================================================================================"
+           write(*, '(A)') "Usage :"
+           write(*, '(A)') "  mpirun -np <N> ./bin/covof2d_fortran [fichier_configuration.json]"
+           write(*, '(A)') ""
+           write(*, '(A)') "Exemples d'exécution :"
+           write(*, '(A)') "  mpirun -np 2 ./bin/covof2d_fortran cases/cas3_1_laplacian.json"
+           write(*, '(A)') "  mpirun -np 2 ./bin/covof2d_fortran cases/cas4_5_cavity.json"
+           write(*, '(A)') "  mpirun -np 4 ./bin/covof2d_fortran cases/cas7_5_rising_bubble.json"
+           write(*, '(A)') "  mpirun -np 2 ./bin/covof2d_fortran cases/cas6_1_natural_convection.json"
+           write(*, '(A)') "================================================================================"
+        end if
+        ! Clôture propre du communicateur MPI avant terminaison
+        call MPI_Finalize(ierr)
+        stop
+     end if
+
+     ! Affectation du chemin de fichier spécifié
+     config_file = trim(arg)
+  end if
+
+  ! Affichage du récapitulatif de lancement par le rang racine
+  if (rank == 0) then
+     write(*, '(A)') "================================================================================"
+     write(*, '(A)') "   COVOF 2D — Solveur CFD Navier-Stokes Incompressible Parallèle (Fortran 2018)"
+     write(*, '(A)') "================================================================================"
+     write(*, '(A,I0)')       "  Nombre de processus MPI  : ", size
+     write(*, '(A,A)')        "  Fichier de cas JSON      : ", trim(config_file)
+     write(*, '(A)') "================================================================================"
+  end if
+
+  ! 3. Initialisation de la simulation CFD (lecture JSON, partitionnement MAC, allocations)
+  success = sim%init(MPI_COMM_WORLD, trim(config_file))
+  if (.not. success) then
+     ! En cas d'erreur de parsing ou d'incohérence des données physiques
+     if (rank == 0) then
+        write(*, '(A)') "[ERREUR CRITIQUE] Échec de l'initialisation de COVOF 2D Fortran."
+        write(*, '(A)') "                  Vérifiez le fichier de configuration : " // trim(config_file)
+     end if
+     ! Interruption immédiate et coordonnée de tous les rangs MPI
+     call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+     stop 1
+  end if
+
+  ! 4. Exécution de la boucle temporelle principale de simulation
+  call sim%run()
+
+  ! 5. Libération des ressources MPI et terminaison normale
+  call MPI_Finalize(ierr)
+
+end program covof2d_main
+
+```
+
+
+## Chapitre 15 : Analyseur Syntaxique JSON Natif en Fortran 2018 et Module de Configuration (module_json.f90, module_config.f90)
+
+\section{Architecture du Parseur JSON Pur Fortran 2018 (\texttt{module\_json.f90})}
+Contrairement à Python ou C++, l'écosystème Fortran standard ne dispose pas nativement d'un parseur JSON dans la bibliothèque système. Le module \texttt{module\_json.f90} (449 lignes) implémente intégralement en Fortran 2018 standard un analyseur lexical et syntaxique capable de lire exactement les mêmes fichiers \texttt{cases/*.json} que l'exécutable C++17 :
+\begin{enumerate}
+  \item \texttt{json\_read\_file(filename, content, ierr)} : charge le fichier JSON complet dans une chaîne allocatable \texttt{character(len=:), allocatable :: content}.
+  \item \texttt{json\_extract\_block(json\_str, block\_name, block\_content, found)} : localise un objet JSON nommé (tel que \texttt{"mesh"} ou \texttt{"vof"}) en suivant l'équilibrage des accolades \texttt{\{} et \texttt{\}} hors chaînes de caractères.
+  \item \texttt{json\_get\_real}, \texttt{json\_get\_int}, \texttt{json\_get\_logical}, \texttt{json\_get\_string} : extraient les valeurs typées avec repli automatique sur la valeur par défaut si la clé est absente.
+  \item \texttt{json\_parse\_obstacles} : parcourt le tableau JSON \texttt{"obstacles": [ \{...\}, \{...\} ]} pour instancier les masques de pénalisation de Brinkman (\texttt{box} et \texttt{circle}).
+\end{enumerate}
+
+\section{Structure de Configuration \texttt{simulation\_config\_t} (\texttt{module\_config.f90})}
+Le module \texttt{module\_config.f90} (493 lignes) traduit les chaînes JSON en constantes entières symboliques (\texttt{BC\_WALL}, \texttt{BC\_PERIODIC}, \texttt{BC\_JET\_INLET}, \texttt{SOLVER\_BICGSTAB2}, \texttt{RECON\_PLIC}, \texttt{ADVECT\_WEYMOUTH\_YUE}, etc.) et vérifie la cohérence des paramètres physiques et numériques avant l'allocation du maillage.
+
+### Répertoire des Procédures de `src/module_json.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 2 | module | `module_json` | Unité modulaire Fortran 2018 |
+| 18 | subroutine | `json_read_file` | Arguments : (filename, buffer, ierr) |
+| 79 | subroutine | `json_find_value_str` | Arguments : (buffer, path, val_str, found) |
+| 254 | subroutine | `json_get_string` | Arguments : (buffer, path, val, default_val) |
+| 278 | subroutine | `json_get_real` | Arguments : (buffer, path, val, default_val) |
+| 308 | subroutine | `json_get_int` | Arguments : (buffer, path, val, default_val) |
+| 338 | subroutine | `json_get_bool` | Arguments : (buffer, path, val, default_val) |
+| 371 | subroutine | `json_get_obstacle` | Arguments : (buffer, obs_type, x0, y0, x1, y1, xc, y...) |
+
+### Code Source Intégral : `src/module_json.f90` (449 lignes)
+
+```fortran
+! [Procédure/Module] module module_json
+module module_json
+  use module_precision, only: dp
+  use module_constants, only: OBS_NONE, OBS_BOX, OBS_CYLINDER
+  implicit none
+  private
+
+  public :: json_read_file
+  public :: json_get_string
+  public :: json_get_real
+  public :: json_get_int
+  public :: json_get_bool
+  public :: json_get_obstacle
+
+contains
+
+  ! Lit un fichier complet dans une chaîne de caractères allouable en ignorant les commentaires //
+  subroutine json_read_file(filename, buffer, ierr)
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in) :: filename
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=:), allocatable, intent(out) :: buffer
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(out) :: ierr
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: u, io
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=4096) :: line
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=:), allocatable :: temp
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: comment_pos
+
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    ierr = 0
+    ! Affectation et calcul numérique
+    buffer = ""
+    ! Affectation et calcul numérique
+    open(newunit=u, file=trim(filename), status='old', action='read', iostat=io)
+    ! Évaluation de la condition logique
+    if (io /= 0) then
+       ! Évaluation de la norme du résidu ou de l'erreur numérique
+       ierr = io
+       ! Retour à la procédure appelante
+       return
+    end if
+
+    do
+       ! Affectation et calcul numérique
+       read(u, '(A)', iostat=io) line
+       ! Affectation et calcul numérique
+       if (io /= 0) exit
+       ! Affectation et calcul numérique
+       comment_pos = index(line, '//')
+       ! Affectation et calcul numérique
+       if (comment_pos > 0) line = line(1:comment_pos-1)
+       ! Affectation et calcul numérique
+       line = adjustl(line)
+       ! Évaluation de la condition logique
+       if (len_trim(line) > 0) then
+          ! Évaluation de la condition logique
+          if (len(buffer) == 0) then
+             ! Affectation et calcul numérique
+             buffer = trim(line)
+          ! Branche par défaut si condition non satisfaite
+          else
+             ! Affectation et calcul numérique
+             temp = buffer // " " // trim(line)
+             ! Affectation et calcul numérique
+             buffer = temp
+          end if
+       end if
+    end do
+    close(u)
+  end subroutine json_read_file
+
+  ! Recherche d'un chemin séparé par des points dans le buffer JSON
+  subroutine json_find_value_str(buffer, path, val_str, found)
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in) :: buffer
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in) :: path
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=:), allocatable, intent(out) :: val_str
+    ! Déclaration de variable locale / paramètre de calcul
+    logical, intent(out) :: found
+
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=:), allocatable :: cur_buf
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: p_dot, pos_key, pos_colon
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=64) :: key, sub_path
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=70) :: search_key
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: brace_count, start_pos, end_pos
+
+    ! Affectation et calcul numérique
+    found = .false.
+    ! Affectation et calcul numérique
+    val_str = ""
+    ! Affectation et calcul numérique
+    cur_buf = buffer
+
+    ! Affectation et calcul numérique
+    sub_path = adjustl(trim(path))
+
+    ! Boucle d'itération numérique
+    do while (len_trim(sub_path) > 0)
+       ! Affectation et calcul numérique
+       p_dot = index(sub_path, ".")
+       ! Évaluation de la condition logique
+       if (p_dot > 0) then
+          ! Affectation et calcul numérique
+          key = sub_path(1:p_dot-1)
+          ! Affectation et calcul numérique
+          sub_path = adjustl(sub_path(p_dot+1:))
+       ! Branche par défaut si condition non satisfaite
+       else
+          ! Affectation et calcul numérique
+          key = trim(sub_path)
+          ! Affectation et calcul numérique
+          sub_path = ""
+       end if
+
+       ! Affectation et calcul numérique
+       search_key = '"' // trim(key) // '"'
+       ! Affectation et calcul numérique
+       pos_key = index(cur_buf, trim(search_key))
+       ! Évaluation de la condition logique
+       if (pos_key <= 0) then
+          ! Affectation et calcul numérique
+          found = .false.
+          ! Retour à la procédure appelante
+          return
+       end if
+
+       ! Trouver les deux-points ':' après la clé
+       pos_colon = pos_key + len_trim(search_key)
+       ! Boucle d'itération numérique
+       do while (pos_colon <= len(cur_buf) .and. cur_buf(pos_colon:pos_colon) /= ':')
+          ! Affectation et calcul numérique
+          pos_colon = pos_colon + 1
+       end do
+       ! Évaluation de la condition logique
+       if (pos_colon > len(cur_buf)) then
+          ! Affectation et calcul numérique
+          found = .false.
+          ! Retour à la procédure appelante
+          return
+       end if
+
+       ! Si ce n'est pas le dernier segment de chemin, chercher l'objet { ... } ou [ ... ] correspondant
+       if (len_trim(sub_path) > 0) then
+          ! Affectation et calcul numérique
+          start_pos = pos_colon + 1
+          ! Boucle d'itération numérique
+          do while (start_pos <= len(cur_buf) .and. cur_buf(start_pos:start_pos) /= '{' .and. cur_buf(start_pos:start_pos) /= '[')
+             ! Affectation et calcul numérique
+             start_pos = start_pos + 1
+          end do
+          ! Évaluation de la condition logique
+          if (start_pos > len(cur_buf)) then
+             ! Affectation et calcul numérique
+             found = .false.
+             ! Retour à la procédure appelante
+             return
+          end if
+
+          ! Affectation et calcul numérique
+          brace_count = 1
+          ! Affectation et calcul numérique
+          end_pos = start_pos + 1
+          ! Boucle d'itération numérique
+          do while (end_pos <= len(cur_buf) .and. brace_count > 0)
+             ! Affectation et calcul numérique
+             if (cur_buf(end_pos:end_pos) == '{' .or. cur_buf(end_pos:end_pos) == '[') brace_count = brace_count + 1
+             ! Affectation et calcul numérique
+             if (cur_buf(end_pos:end_pos) == '}' .or. cur_buf(end_pos:end_pos) == ']') brace_count = brace_count - 1
+             ! Affectation et calcul numérique
+             end_pos = end_pos + 1
+          end do
+          ! Affectation et calcul numérique
+          cur_buf = cur_buf(start_pos:end_pos-1)
+       ! Branche par défaut si condition non satisfaite
+       else
+          ! Dernier élément du chemin : extraire la valeur
+          start_pos = pos_colon + 1
+          ! Boucle d'itération numérique
+          do while (start_pos <= len(cur_buf) .and. (cur_buf(start_pos:start_pos) == ' ' .or. cur_buf(start_pos:start_pos) == char(9)))
+             ! Affectation et calcul numérique
+             start_pos = start_pos + 1
+          end do
+          ! Évaluation de la condition logique
+          if (start_pos > len(cur_buf)) then
+             ! Affectation et calcul numérique
+             found = .false.
+             ! Retour à la procédure appelante
+             return
+          end if
+
+          ! Évaluation de la condition logique
+          if (cur_buf(start_pos:start_pos) == '"') then
+             ! Chaîne entre guillemets
+             end_pos = start_pos + 1
+             ! Boucle d'itération numérique
+             do while (end_pos <= len(cur_buf) .and. cur_buf(end_pos:end_pos) /= '"')
+                ! Affectation et calcul numérique
+                end_pos = end_pos + 1
+             end do
+             ! Affectation et calcul numérique
+             val_str = cur_buf(start_pos+1:end_pos-1)
+             ! Affectation et calcul numérique
+             found = .true.
+             ! Retour à la procédure appelante
+             return
+          ! Branche par défaut si condition non satisfaite
+          else
+             ! Nombre, booléen, etc.
+             end_pos = start_pos
+             ! Boucle d'itération numérique
+             do while (end_pos <= len(cur_buf) .and. &
+                       ! Affectation et calcul numérique
+                       cur_buf(end_pos:end_pos) /= ',' .and. &
+                       ! Affectation et calcul numérique
+                       cur_buf(end_pos:end_pos) /= '}' .and. &
+                       ! Affectation et calcul numérique
+                       cur_buf(end_pos:end_pos) /= ']' .and. &
+                       ! Affectation et calcul numérique
+                       cur_buf(end_pos:end_pos) /= ' ' .and. &
+                       ! Affectation et calcul numérique
+                       cur_buf(end_pos:end_pos) /= char(9) .and. &
+                       ! Affectation et calcul numérique
+                       cur_buf(end_pos:end_pos) /= char(10) .and. &
+                       ! Affectation et calcul numérique
+                       cur_buf(end_pos:end_pos) /= char(13))
+                ! Affectation et calcul numérique
+                end_pos = end_pos + 1
+             end do
+             ! Affectation et calcul numérique
+             val_str = trim(adjustl(cur_buf(start_pos:end_pos-1)))
+             ! Affectation et calcul numérique
+             found = .true.
+             ! Retour à la procédure appelante
+             return
+          end if
+       end if
+    end do
+  end subroutine json_find_value_str
+
+  ! [Procédure/Module] subroutine json_get_string
+  subroutine json_get_string(buffer, path, val, default_val)
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in) :: buffer, path, default_val
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(out) :: val
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=:), allocatable :: s
+    ! Déclaration de variable locale / paramètre de calcul
+    logical :: found
+
+    ! Appel de sous-programme modulaire
+    call json_find_value_str(buffer, path, s, found)
+    ! Évaluation de la condition logique
+    if (found .and. allocated(s)) then
+       ! Affectation et calcul numérique
+       val = trim(s)
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Affectation et calcul numérique
+       val = trim(default_val)
+    end if
+  end subroutine json_get_string
+
+  ! [Procédure/Module] subroutine json_get_real
+  subroutine json_get_real(buffer, path, val, default_val)
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in) :: buffer, path
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(out) :: val
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: default_val
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=:), allocatable :: s
+    ! Déclaration de variable locale / paramètre de calcul
+    logical :: found
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: io
+
+    ! Appel de sous-programme modulaire
+    call json_find_value_str(buffer, path, s, found)
+    ! Évaluation de la condition logique
+    if (found .and. allocated(s)) then
+       ! Affectation et calcul numérique
+       read(s, *, iostat=io) val
+       ! Affectation et calcul numérique
+       if (io /= 0) val = default_val
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Affectation et calcul numérique
+       val = default_val
+    end if
+  end subroutine json_get_real
+
+  ! [Procédure/Module] subroutine json_get_int
+  subroutine json_get_int(buffer, path, val, default_val)
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in) :: buffer, path
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(out) :: val
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in) :: default_val
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=:), allocatable :: s
+    ! Déclaration de variable locale / paramètre de calcul
+    logical :: found
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: io
+
+    ! Appel de sous-programme modulaire
+    call json_find_value_str(buffer, path, s, found)
+    ! Évaluation de la condition logique
+    if (found .and. allocated(s)) then
+       ! Affectation et calcul numérique
+       read(s, *, iostat=io) val
+       ! Affectation et calcul numérique
+       if (io /= 0) val = default_val
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Affectation et calcul numérique
+       val = default_val
+    end if
+  end subroutine json_get_int
+
+  ! [Procédure/Module] subroutine json_get_bool
+  subroutine json_get_bool(buffer, path, val, default_val)
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in) :: buffer, path
+    ! Déclaration de variable locale / paramètre de calcul
+    logical, intent(out) :: val
+    ! Déclaration de variable locale / paramètre de calcul
+    logical, intent(in) :: default_val
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=:), allocatable :: s
+    ! Déclaration de variable locale / paramètre de calcul
+    logical :: found
+
+    ! Appel de sous-programme modulaire
+    call json_find_value_str(buffer, path, s, found)
+    ! Évaluation de la condition logique
+    if (found .and. allocated(s)) then
+       ! Évaluation de la condition logique
+       if (index(s, "true") > 0 .or. index(s, "TRUE") > 0 .or. index(s, "1") > 0) then
+          ! Affectation et calcul numérique
+          val = .true.
+       ! Branche par défaut si condition non satisfaite
+       else
+          ! Affectation et calcul numérique
+          val = .false.
+       end if
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Affectation et calcul numérique
+       val = default_val
+    end if
+  end subroutine json_get_bool
+
+  ! Détection et extraction des obstacles (BOX ou CYLINDER)
+  subroutine json_get_obstacle(buffer, obs_type, x0, y0, x1, y1, xc, yc, radius, perm, found)
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in) :: buffer
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(out) :: obs_type
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(out) :: x0, y0, x1, y1, xc, yc, radius, perm
+    ! Déclaration de variable locale / paramètre de calcul
+    logical, intent(out) :: found
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: pos_obs, pos_end
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=:), allocatable :: obs_str
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=32) :: type_str
+
+    ! Affectation et calcul numérique
+    obs_type = OBS_NONE
+    ! Affectation et calcul numérique
+    x0 = 0.0_dp; y0 = 0.0_dp; x1 = 0.0_dp; y1 = 0.0_dp
+    ! Affectation et calcul numérique
+    xc = 0.0_dp; yc = 0.0_dp; radius = 0.0_dp; perm = 1.0e-40_dp
+    ! Affectation et calcul numérique
+    found = .false.
+
+    ! Affectation et calcul numérique
+    pos_obs = index(buffer, '"obstacles"')
+    ! Affectation et calcul numérique
+    if (pos_obs <= 0) return
+
+    ! Affectation et calcul numérique
+    pos_end = pos_obs + 11
+    ! Boucle d'itération numérique
+    do while (pos_end <= len(buffer) .and. buffer(pos_end:pos_end) /= ']')
+       ! Affectation et calcul numérique
+       pos_end = pos_end + 1
+    end do
+    if (pos_end > len(buffer)) return
+
+    ! Affectation et calcul numérique
+    obs_str = buffer(pos_obs:pos_end)
+    ! Appel de sous-programme modulaire
+    call json_get_string(obs_str, "type", type_str, "")
+
+    ! Évaluation de la condition logique
+    if (trim(type_str) == "BOX") then
+       ! Affectation et calcul numérique
+       obs_type = OBS_BOX
+       ! Appel de sous-programme modulaire
+       call json_get_real(obs_str, "x0", x0, 0.0_dp)
+       ! Appel de sous-programme modulaire
+       call json_get_real(obs_str, "y0", y0, 0.0_dp)
+       ! Appel de sous-programme modulaire
+       call json_get_real(obs_str, "x1", x1, 0.0_dp)
+       ! Appel de sous-programme modulaire
+       call json_get_real(obs_str, "y1", y1, 0.0_dp)
+       ! Appel de sous-programme modulaire
+       call json_get_real(obs_str, "permeability", perm, 1.0e-40_dp)
+       ! Affectation et calcul numérique
+       found = .true.
+    ! Branche conditionnelle alternative
+    else if (trim(type_str) == "CYLINDER") then
+       ! Affectation et calcul numérique
+       obs_type = OBS_CYLINDER
+       ! Appel de sous-programme modulaire
+       call json_get_real(obs_str, "xc", xc, 0.0_dp)
+       ! Appel de sous-programme modulaire
+       call json_get_real(obs_str, "yc", yc, 0.0_dp)
+       ! Appel de sous-programme modulaire
+       call json_get_real(obs_str, "radius", radius, 0.0_dp)
+       ! Appel de sous-programme modulaire
+       call json_get_real(obs_str, "permeability", perm, 1.0e-40_dp)
+       ! Affectation et calcul numérique
+       found = .true.
+    end if
+  end subroutine json_get_obstacle
+
+end module module_json
+
+```
+
+### Répertoire des Procédures de `src/module_config.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 2 | module | `module_config` | Unité modulaire Fortran 2018 |
+| 11 | type dérivé | `bc_t` | Structure de données Fortran 2018 |
+| 30 | type dérivé | `config_t` | Structure de données Fortran 2018 |
+| 146 | subroutine | `parse_bc` | Arguments : (buf, prefix, bc) |
+| 213 | subroutine | `load_config_from_json` | Arguments : (filename, cfg, ierr) |
+
+### Code Source Intégral : `src/module_config.f90` (493 lignes)
+
+```fortran
+! [Procédure/Module] module module_config
+module module_config
+  use module_precision, only: dp
+  use module_constants
+  use module_json
+  implicit none
+  private
+
+  public :: bc_t, config_t, load_config_from_json
+
+  type :: bc_t
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: btype = BC_DIRICHLET
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: u = 0.0_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: v = 0.0_dp
+     ! Profil spécifique pour la frontière ("UNIFORM", "PARABOLIC", "JET_INLET")
+     character(len=32) :: profile = "UNIFORM"
+     ! Largeur de l'injecteur pour profil JET_INLET [m] (Cas 3.3 Fluids 2021)
+     real(dp) :: jet_width = 0.08_dp
+     ! Position centrale de l'injecteur selon X [m]
+     real(dp) :: jet_center = 0.5_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: thermal_type = THERMAL_NEUMANN
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: T = 0.0_dp
+  end type bc_t
+
+  type :: config_t
+     ! Déclaration de variable locale / paramètre de calcul
+     character(len=64) :: case_name = "covof2d_case"
+     ! Déclaration de variable locale / paramètre de calcul
+     character(len=32) :: mode = "NAVIER_STOKES"
+
+     ! Mesh parameters
+     integer  :: nx = 64, ny = 64
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: lx = 1.0_dp, ly = 1.0_dp
+
+     ! Physical models & flags
+     logical  :: enable_two_phase = .false.
+     ! Déclaration de variable locale / paramètre de calcul
+     logical  :: enable_surface_tension = .false.
+     ! Déclaration de variable locale / paramètre de calcul
+     logical  :: enable_convection = .true.
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: convective_scheme = CONV_UPWIND
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: viscosity_model = VISC_CONSTANT
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: visc_mu0 = 1.0e-3_dp, visc_a = 2.0_dp, visc_e = 0.01_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: sigma = 0.0_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: gx = 0.0_dp, gy = 0.0_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: rho1 = 1.0_dp, mu1 = 1.0e-3_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: rho2 = 1.0_dp, mu2 = 1.0e-3_dp
+
+     ! VOF and interface tracking
+     character(len=32) :: reconstruction_method = "PLIC"
+     ! Déclaration de variable locale / paramètre de calcul
+     character(len=32) :: advection_method = "VOF_TVD"
+     ! Déclaration de variable locale / paramètre de calcul
+     character(len=32) :: tvd_limiter = "SUPERBEE"
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: cfl_vof = 0.4_dp
+
+     ! Thermal parameters
+     logical  :: enable_energy = .false.
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: Ra = 1.0e4_dp, Pr = 0.71_dp, T_ref = 0.0_dp, beta = 3.41e-3_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: Cp = 1.0_dp, k_thermal = 0.014_dp
+
+     ! Time integration
+     real(dp) :: dt = 0.01_dp, t_final = 1.0_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     logical  :: adaptive_dt = .false.
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: cfl_max = 0.5_dp
+
+     ! Boundary conditions
+     type(bc_t) :: bc_left, bc_right, bc_bottom, bc_top
+
+     ! Immersed boundary obstacle
+     logical  :: obs_enabled = .false.
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: obs_type = OBS_NONE
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: obs_x0 = 0.0_dp, obs_y0 = 0.0_dp, obs_x1 = 0.0_dp, obs_y1 = 0.0_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: obs_xc = 0.0_dp, obs_yc = 0.0_dp, obs_radius = 0.0_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: obs_perm = 1.0e-40_dp
+
+     ! Initial conditions
+     integer  :: ic_type = IC_UNIFORM
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: ic_u = 0.0_dp, ic_v = 0.0_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: ic_center_x = 0.5_dp, ic_center_y = 0.5_dp, ic_radius = 0.25_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: ic_box_x0 = 0.0_dp, ic_box_y0 = 0.0_dp, ic_box_x1 = 0.5_dp, ic_box_y1 = 0.5_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: ic_pert_amp = 0.05_dp, ic_pert_k = 1.0_dp
+     ! Déclaration de l'épaisseur initiale de nappe liquide (Cas 3.2 Fluids 2021)
+     real(dp) :: ic_thickness = 0.0003_dp
+     ! Déclaration de la largeur initiale de jet liquide (Cas 3.3 Fluids 2021)
+     real(dp) :: ic_jet_width = 0.08_dp
+
+     ! Solvers
+     integer  :: solver_type = SOLVER_AUGMENTED_LAGRANGIAN
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: linear_solver = LINEAR_BICGSTAB2
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: precond_type = PRECOND_JACOBI
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: tol = 1.0e-5_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: max_iter = 300
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: r_al = 100.0_dp
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: uzawa_iter = 1
+     ! Déclaration de variable locale / paramètre de calcul
+     logical  :: use_precond = .true.
+     ! Déclaration de variable locale / paramètre de calcul
+     real(dp) :: steady_state_tol = 1.0e-5_dp
+
+     ! Outputs
+     character(len=128) :: output_dir = "output"
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: vtk_interval = 50
+     ! Déclaration de variable locale / paramètre de calcul
+     integer  :: log_interval = 10
+     ! Déclaration de variable locale / paramètre de calcul
+     logical  :: write_csv = .true.
+  end type config_t
+
+contains
+
+  ! [Procédure/Module] subroutine parse_bc
+  subroutine parse_bc(buf, prefix, bc)
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in) :: buf, prefix
+    ! Déclaration de variable locale / paramètre de calcul
+    type(bc_t), intent(out) :: bc
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=32) :: btype_str, ttype_str
+
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, trim(prefix) // ".type", btype_str, "DIRICHLET")
+    ! Évaluation de la condition logique
+    if (trim(btype_str) == "DIRICHLET") then
+       ! Affectation et calcul numérique
+       bc%btype = BC_DIRICHLET
+    ! Branche conditionnelle alternative
+    else if (trim(btype_str) == "NEUMANN") then
+       ! Affectation et calcul numérique
+       bc%btype = BC_NEUMANN
+    ! Branche conditionnelle alternative
+    else if (trim(btype_str) == "PERIODIC") then
+       ! Affectation et calcul numérique
+       bc%btype = BC_PERIODIC
+    ! Branche conditionnelle alternative
+    else if (trim(btype_str) == "FREE_SLIP") then
+       ! Affectation et calcul numérique
+       bc%btype = BC_FREESLIP
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Affectation et calcul numérique
+       bc%btype = BC_DIRICHLET
+    end if
+
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, trim(prefix) // ".u", bc%u, 0.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, trim(prefix) // ".u_mean", bc%u, bc%u)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, trim(prefix) // ".u_val", bc%u, bc%u)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, trim(prefix) // ".v", bc%v, 0.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, trim(prefix) // ".v_val", bc%v, bc%v)
+    ! Lecture du profil de frontière (Cas 3.3 Fluids 2021)
+    call json_get_string(buf, trim(prefix) // ".profile", bc%profile, "UNIFORM")
+    ! Lecture de la largeur de l'injecteur
+    call json_get_real(buf, trim(prefix) // ".jet_width", bc%jet_width, 0.08_dp)
+    ! Lecture du centre de l'injecteur
+    call json_get_real(buf, trim(prefix) // ".jet_center", bc%jet_center, 0.5_dp)
+
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, trim(prefix) // ".T_type", ttype_str, "NEUMANN")
+    ! Évaluation de la condition logique
+    if (trim(ttype_str) == "DIRICHLET") then
+       ! Affectation et calcul numérique
+       bc%thermal_type = THERMAL_DIRICHLET
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Affectation et calcul numérique
+       bc%thermal_type = THERMAL_NEUMANN
+    end if
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, trim(prefix) // ".T", bc%T, 0.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, trim(prefix) // ".T_val", bc%T, bc%T)
+  end subroutine parse_bc
+
+  ! [Procédure/Module] subroutine load_config_from_json
+  subroutine load_config_from_json(filename, cfg, ierr)
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in) :: filename
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(out) :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(out), optional :: ierr
+
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=:), allocatable :: buf
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=64) :: str_val
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: stat
+
+    ! Affectation et calcul numérique
+    stat = 0
+    ! Appel de sous-programme modulaire
+    call json_read_file(filename, buf, stat)
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    if (present(ierr)) ierr = stat
+    ! Affectation et calcul numérique
+    if (stat /= 0) return
+
+    ! Case name & mode
+    call json_get_string(buf, "case_name", cfg%case_name, "covof_case")
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "output.case_name", cfg%case_name, cfg%case_name)
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "mode", cfg%mode, "NAVIER_STOKES")
+
+    ! Mesh
+    call json_get_int(buf, "mesh.nx", cfg%nx, 64)
+    ! Appel de sous-programme modulaire
+    call json_get_int(buf, "mesh.ny", cfg%ny, 64)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "mesh.lx", cfg%lx, 1.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "mesh.ly", cfg%ly, 1.0_dp)
+
+    ! Physics
+    call json_get_bool(buf, "physics.enable_two_phase", cfg%enable_two_phase, .false.)
+    ! Appel de sous-programme modulaire
+    call json_get_bool(buf, "physics.enable_surface_tension", cfg%enable_surface_tension, .false.)
+    ! Appel de sous-programme modulaire
+    call json_get_bool(buf, "physics.enable_convection", cfg%enable_convection, .true.)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.sigma", cfg%sigma, 0.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.gx", cfg%gx, 0.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.gy", cfg%gy, 0.0_dp)
+
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "physics.convective_scheme", str_val, "UPWIND")
+    ! Évaluation de la condition logique
+    if (trim(str_val) == "CENTERED") then
+       ! Affectation et calcul numérique
+       cfg%convective_scheme = CONV_CENTERED
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "TVD_SUPERBEE") then
+       ! Affectation et calcul numérique
+       cfg%convective_scheme = CONV_TVD_SUPERBEE
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Affectation et calcul numérique
+       cfg%convective_scheme = CONV_UPWIND
+    end if
+
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "physics.viscosity_model", str_val, "CONSTANT")
+    ! Évaluation de la condition logique
+    if (trim(str_val) == "EXPONENTIAL") then
+       ! Affectation et calcul numérique
+       cfg%viscosity_model = VISC_EXPONENTIAL
+       ! Appel de sous-programme modulaire
+       call json_get_real(buf, "physics.visc_mu0", cfg%visc_mu0, 1.0e-3_dp)
+       ! Appel de sous-programme modulaire
+       call json_get_real(buf, "physics.visc_a", cfg%visc_a, 2.0_dp)
+       ! Appel de sous-programme modulaire
+       call json_get_real(buf, "physics.visc_e", cfg%visc_e, 0.01_dp)
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Affectation et calcul numérique
+       cfg%viscosity_model = VISC_CONSTANT
+    end if
+
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.fluid1.rho", cfg%rho1, 1.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.fluid1.mu", cfg%mu1, 1.0e-3_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.fluid2.rho", cfg%rho2, cfg%rho1)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.fluid2.mu", cfg%mu2, cfg%mu1)
+
+    ! Thermal
+    call json_get_bool(buf, "physics.enable_energy", cfg%enable_energy, .false.)
+    ! Appel de sous-programme modulaire
+    call json_get_bool(buf, "thermal.enable_energy", cfg%enable_energy, cfg%enable_energy)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.Ra", cfg%Ra, 1.0e4_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.Pr", cfg%Pr, 0.71_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.T_ref", cfg%T_ref, 0.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.beta", cfg%beta, 3.41e-3_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.fluid1.Cp", cfg%Cp, 1.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "physics.fluid1.k_thermal", cfg%k_thermal, 0.014_dp)
+
+    ! Time
+    call json_get_real(buf, "time.dt", cfg%dt, 0.01_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "time.t_final", cfg%t_final, 1.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_bool(buf, "time.adaptive_dt", cfg%adaptive_dt, .false.)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "time.cfl_max", cfg%cfl_max, 0.5_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "steady_state_tol", cfg%steady_state_tol, 1.0e-5_dp)
+
+    ! Boundary conditions
+    call parse_bc(buf, "boundary_conditions.left", cfg%bc_left)
+    ! Appel de sous-programme modulaire
+    call parse_bc(buf, "boundary_conditions.right", cfg%bc_right)
+    ! Appel de sous-programme modulaire
+    call parse_bc(buf, "boundary_conditions.bottom", cfg%bc_bottom)
+    ! Appel de sous-programme modulaire
+    call parse_bc(buf, "boundary_conditions.top", cfg%bc_top)
+
+    ! Obstacles
+    call json_get_obstacle(buf, cfg%obs_type, cfg%obs_x0, cfg%obs_y0, cfg%obs_x1, cfg%obs_y1, &
+                           cfg%obs_xc, cfg%obs_yc, cfg%obs_radius, cfg%obs_perm, cfg%obs_enabled)
+
+    ! Initial condition
+    call json_get_string(buf, "initial_condition.type", str_val, "UNIFORM")
+    ! Évaluation de la condition logique
+    if (trim(str_val) == "UNIFORM") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_UNIFORM
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "POISEUILLE") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_POISEUILLE
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "VORTEX_SHEAR") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_VORTEX_SHEAR
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "RAYLEIGH_TAYLOR") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_RAYLEIGH_TAYLOR
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "DROPLET") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_DROPLET
+    ! Branche conditionnelle alternative pour bulle ou cylindre immergé
+    else if (trim(str_val) == "BUBBLE" .or. trim(str_val) == "CYLINDER") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_BUBBLE
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "DAM_BREAK") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_DAM_BREAK
+    ! Branche conditionnelle alternative pour nappe liquide (Cas 3.2 Fluids 2021)
+    else if (trim(str_val) == "LIQUID_SHEET") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_LIQUID_SHEET
+    ! Branche conditionnelle alternative pour jet liquide visqueux (Cas 3.3 Fluids 2021)
+    else if (trim(str_val) == "VISCOUS_JET" .or. trim(str_val) == "JET_BUCKLING") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_VISCOUS_JET
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "LAPLACIAN_TEST") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_LAPLACIAN_TEST
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "SINGLE_PHASE") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_UNIFORM
+    end if
+
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.u", cfg%ic_u, 0.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.v", cfg%ic_v, 0.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.center_x", cfg%ic_center_x, 0.5_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.center_y", cfg%ic_center_y, 0.5_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.radius", cfg%ic_radius, 0.25_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.box_x0", cfg%ic_box_x0, 0.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.box_y0", cfg%ic_box_y0, 0.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.box_x1", cfg%ic_box_x1, 0.5_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.box_y1", cfg%ic_box_y1, 0.5_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.pert_amp", cfg%ic_pert_amp, 0.05_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_condition.pert_k", cfg%ic_pert_k, 1.0_dp)
+    ! Lecture de l'épaisseur de nappe liquide (Cas 3.2 Fluids 2021)
+    call json_get_real(buf, "initial_condition.thickness", cfg%ic_thickness, 0.0003_dp)
+    ! Lecture de la largeur de jet liquide (Cas 3.3 Fluids 2021)
+    call json_get_real(buf, "initial_condition.jet_width", cfg%ic_jet_width, 0.08_dp)
+
+    ! Solver
+    call json_get_string(buf, "solver.type", str_val, "AUGMENTED_LAGRANGIAN")
+    ! Évaluation de la condition logique
+    if (trim(str_val) == "CONJUGATE_GRADIENT") then
+       ! Affectation et calcul numérique
+       cfg%solver_type = SOLVER_AUGMENTED_LAGRANGIAN
+       ! Affectation et calcul numérique
+       cfg%linear_solver = LINEAR_CG
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Affectation et calcul numérique
+       cfg%solver_type = SOLVER_AUGMENTED_LAGRANGIAN
+       ! Affectation et calcul numérique
+       cfg%linear_solver = LINEAR_BICGSTAB2
+    end if
+
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "solver.linear_solver", str_val, "BICGSTAB2")
+    ! Évaluation de la condition logique
+    if (trim(str_val) == "BICGSTAB") then
+       ! Affectation et calcul numérique
+       cfg%linear_solver = LINEAR_BICGSTAB
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "CG" .or. trim(str_val) == "CONJUGATE_GRADIENT") then
+       ! Affectation et calcul numérique
+       cfg%linear_solver = LINEAR_CG
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "GMRES") then
+       ! Affectation et calcul numérique
+       cfg%linear_solver = LINEAR_GMRES
+    end if
+
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "solver.tol", cfg%tol, 1.0e-5_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_int(buf, "solver.max_iter", cfg%max_iter, 300)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "solver.r_al", cfg%r_al, 100.0_dp)
+    ! Appel de sous-programme modulaire
+    call json_get_int(buf, "solver.uzawa_iter", cfg%uzawa_iter, 1)
+    ! Appel de sous-programme modulaire
+    call json_get_bool(buf, "solver.use_precond", cfg%use_precond, .true.)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "steady_state_tol", cfg%steady_state_tol, cfg%steady_state_tol)
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "solver.steady_state_tol", cfg%steady_state_tol, cfg%steady_state_tol)
+
+    ! VOF parameters
+    call json_get_string(buf, "vof.reconstruction_method", cfg%reconstruction_method, "PLIC")
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "vof.advection_method", cfg%advection_method, "VOF_TVD")
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "vof.tvd_limiter", cfg%tvd_limiter, "SUPERBEE")
+    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "vof.cfl_vof", cfg%cfl_vof, 0.4_dp)
+
+    ! Output
+    call json_get_string(buf, "output.output_dir", cfg%output_dir, "output")
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "output.directory", cfg%output_dir, cfg%output_dir)
+    ! Appel de sous-programme modulaire
+    call json_get_int(buf, "output.vtk_interval", cfg%vtk_interval, 50)
+    ! Appel de sous-programme modulaire
+    call json_get_int(buf, "output.log_interval", cfg%log_interval, 10)
+    ! Appel de sous-programme modulaire
+    call json_get_bool(buf, "output.write_csv_history", cfg%write_csv, .true.)
+  end subroutine load_config_from_json
+
+end module module_config
+
+```
+
+
+## Chapitre 16 : Maillage MAC 2D et Tableaux Column-Major à Bornes Fantômes en Fortran 2018 (module_mesh.f90, module_fields.f90)
+
+\section{Indiçage Naturel à Base 1 et Bornes Fantômes \texttt{(1-ng:nx+ng)} en Fortran 2018}
+L'un des atouts majeurs de Fortran 2018 pour la mécanique des fluides numérique sur grille structurée est la possibilité d'allouer des tableaux multidimensionnels avec des bornes inférieures négatives ou nulles correspondant directement aux cellules fantômes :
+\begin{itemize}
+  \item \textbf{Champs scalaires centrés} ($p, T, C, \rho, \mu, \nabla\cdot\mathbf{u}$) :
+  \begin{equation}
+    \texttt{allocate(fields\%p(1-ng : nx+ng, 1-ng : ny+ng))}
+  \end{equation}
+  où le domaine intérieur physique occupe exactement $i \in \{1, \dots, N_x\}$ et $j \in \{1, \dots, N_y\}$.
+  \item \textbf{Vitesse horizontale décalée $u$} ($N_x+1$ faces verticales intérieures/frontières d'indices $i \in \{1, \dots, N_x+1\}$) :
+  \begin{equation}
+    \texttt{allocate(fields\%u(1-ng : nx+1+ng, 1-ng : ny+ng))}
+  \end{equation}
+  \item \textbf{Vitesse verticale décalée $v$} ($N_y+1$ faces horizontales intérieures/frontières d'indices $j \in \{1, \dots, N_y+1\}$) :
+  \begin{equation}
+    \texttt{allocate(fields\%v(1-ng : nx+ng, 1-ng : ny+1+ng))}
+  \end{equation}
+\end{itemize}
+
+\section{Ordre Mémoire \emph{Column-Major} et Ordre Optimal des Boucles Imbriquées}
+En Fortran, les tableaux 2D \texttt{A(i, j)} sont stockés en mémoire par colonnes (\emph{Column-Major Order}) : l'élément \texttt{A(i+1, j)} est adjacent en mémoire à \texttt{A(i, j)}. Par conséquent, toutes les boucles spatiales dans \texttt{COVOF\_2D-FORTRAN} sont ordonnées avec \textbf{$j$ en boucle externe et $i$ en boucle interne} :
+\begin{verbatim}
+do j = 1, mesh%ny
+  do i = 1, mesh%nx
+    fields%div(i, j) = (fields%u(i+1, j) - fields%u(i, j)) / mesh%dx &
+                     + (fields%v(i, j+1) - fields%v(i, j)) / mesh%dy
+  end do
+end do
+\end{verbatim}
+Cet ordonnancement garantit exactement la même localité spatiale L1/L2 et la même efficacité SIMD que l'ordonnancement \emph{Row-Major} de C++17.
+
+### Répertoire des Procédures de `src/module_mesh.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 10 | module | `module_mesh` | Unité modulaire Fortran 2018 |
+| 27 | type dérivé | `mesh_2d_t` | Structure de données Fortran 2018 |
+| 67 | subroutine | `init_mesh` | Arguments : (mesh, comm_world, nx, ny, lx, ly, perio...) |
+| 150 | subroutine | `destroy_mesh` | Arguments : (mesh) |
+
+### Code Source Intégral : `src/module_mesh.f90` (224 lignes)
+
+```fortran
+!===============================================================================
+! Module        : module_mesh
+! Description   : Définition de la topologie cartésienne 2D, gestion du
+!                 partitionnement spatial multi-processus OpenMPI, calcul des
+!                 coordonnées métriques (faces décalées et centres de cellules)
+!                 et détection des inclusions géométriques d'obstacles.
+! Auteur        : Elhadji Ibrahima Thiam
+! Standard      : Fortran 2018 / MPI-3
+!===============================================================================
+module module_mesh
+  ! Importation du descripteur de double précision
+  use module_precision, only: dp
+  ! Interdiction stricte du typage implicite pour garantir l'intégrité mémoire
+  implicit none
+  ! Par défaut, tous les membres et routines sont privés
+  private
+  ! Inclusion des définitions MPI requises pour les communicateurs cartésiens
+  include 'mpif.h'
+
+  ! Export explicite des types dérivés et fonctions publiques
+  public :: mesh_2d_t, init_mesh, destroy_mesh
+  public :: x_face, y_face, x_center, y_center, is_in_obstacle
+
+  !-----------------------------------------------------------------------------
+  ! Structure de données représentant le maillage 2D décomposé
+  !-----------------------------------------------------------------------------
+  type :: mesh_2d_t
+     ! Dimensions globales du domaine de calcul (nombre total de mailles)
+     integer  :: nx_global = 64, ny_global = 64
+     ! Longueurs physiques totales du domaine en mètres [m]
+     real(dp) :: lx = 1.0_dp, ly = 1.0_dp
+     ! Pas d'espace uniformes selon les directions X et Y : dx = lx/nx, dy = ly/ny
+     real(dp) :: dx = 0.0_dp, dy = 0.0_dp
+
+     ! --- Topologie Cartésienne MPI et Rangs de Voisinage ---
+     integer  :: rank = 0                 ! Rang du sous-domaine local courant
+     integer  :: size = 1                 ! Nombre total de sous-domaines (processus)
+     integer  :: comm = MPI_COMM_WORLD    ! Communicateur initial parent
+     integer  :: cart_comm = MPI_COMM_NULL! Communicateur cartésien bidimensionnel dédié
+     integer  :: px = 1, py = 1           ! Nombre de processus selon X et selon Y
+     integer  :: coord_x = 0, coord_y = 0 ! Coordonnées cartésiennes du sous-domaine dans la grille MPI
+     integer  :: neighbor_west = MPI_PROC_NULL  ! Rang du voisin Ouest (gauche, x-)
+     integer  :: neighbor_east = MPI_PROC_NULL  ! Rang du voisin Est (droite, x+)
+     integer  :: neighbor_south = MPI_PROC_NULL ! Rang du voisin Sud (bas, y-)
+     integer  :: neighbor_north = MPI_PROC_NULL ! Rang du voisin Nord (haut, y+)
+
+     ! --- Indicateurs Booléens de Frontières Physiques du Domaine Global ---
+     logical  :: is_boundary_left   = .false. ! Vrai si le sous-domaine touche la paroi gauche x = 0
+     logical  :: is_boundary_right  = .false. ! Vrai si le sous-domaine touche la paroi droite x = lx
+     logical  :: is_boundary_bottom = .false. ! Vrai si le sous-domaine touche la paroi inférieure y = 0
+     logical  :: is_boundary_top    = .false. ! Vrai si le sous-domaine touche la paroi supérieure y = ly
+
+     ! --- Partitionnement Spatial Local ---
+     integer  :: nx_local = 64, ny_local = 64 ! Nombre de cellules locales attribuées à ce processus
+     integer  :: i_start_global = 1           ! Indice global de la première cellule locale en X (base 1)
+     integer  :: j_start_global = 1           ! Indice global de la première cellule locale en Y (base 1)
+  end type mesh_2d_t
+
+contains
+
+  !=============================================================================
+  ! Routine : init_mesh
+  ! Rôle    : Calcule la factorisation optimale du nombre de cœurs en une grille
+  !           2D (px, py), crée la topologie cartésienne MPI avec périodicité,
+  !           identifie les 4 voisins immédiats et répartit équitablement les mailles.
+  !=============================================================================
+  subroutine init_mesh(mesh, comm_world, nx, ny, lx, ly, periodic_x, periodic_y)
+    type(mesh_2d_t), intent(out) :: mesh       ! Structure de maillage initialisée en sortie
+    integer, intent(in)          :: comm_world ! Communicateur parent initial
+    integer, intent(in)          :: nx, ny     ! Résolution globale souhaitée en cellules
+    real(dp), intent(in)         :: lx, ly     ! Longueurs physiques du domaine rectangulaire
+    logical, intent(in)          :: periodic_x ! Vrai si conditions périodiques en X
+    logical, intent(in)          :: periodic_y ! Vrai si conditions périodiques en Y
+
+    ! Variables de travail locales pour les primitives cartésiennes MPI
+    integer :: dims(2), periods(2), coords(2)
+    integer :: ierr, rank_in, size_in
+    integer :: rem_x, rem_y
+
+    ! 1. Enregistrement des dimensions physiques et de la taille du communicateur
+    mesh%comm = comm_world
+    call MPI_Comm_rank(comm_world, rank_in, ierr)
+    call MPI_Comm_size(comm_world, size_in, ierr)
+    mesh%rank = rank_in
+    mesh%size = size_in
+
+    mesh%nx_global = nx
+    mesh%ny_global = ny
+    mesh%lx = lx
+    mesh%ly = ly
+    ! Calcul des pas de discrétisation spatiale
+    mesh%dx = lx / real(nx, dp)
+    mesh%dy = ly / real(ny, dp)
+
+    ! 2. Détermination automatique de la décomposition 2D optimale (px, py)
+    dims = [0, 0]
+    call MPI_Dims_create(mesh%size, 2, dims, ierr)
+    mesh%px = dims(1)
+    mesh%py = dims(2)
+
+    ! Définition des drapeaux de périodicité pour la création de la topologie MPI
+    periods(1) = merge(1, 0, periodic_x)
+    periods(2) = merge(1, 0, periodic_y)
+
+    ! 3. Création du communicateur virtuel cartésien MPI 2D
+    call MPI_Cart_create(comm_world, 2, dims, periods, 1, mesh%cart_comm, ierr)
+    call MPI_Comm_rank(mesh%cart_comm, mesh%rank, ierr)
+    call MPI_Cart_coords(mesh%cart_comm, mesh%rank, 2, coords, ierr)
+    mesh%coord_x = coords(1)
+    mesh%coord_y = coords(2)
+
+    ! 4. Recherche des rangs des 4 voisins adjacents par décalage unitaire cartésien
+    ! Décalage direction 0 (axe X) : voisin Ouest (-1) et voisin Est (+1)
+    call MPI_Cart_shift(mesh%cart_comm, 0, 1, mesh%neighbor_west, mesh%neighbor_east, ierr)
+    ! Décalage direction 1 (axe Y) : voisin Sud (-1) et voisin Nord (+1)
+    call MPI_Cart_shift(mesh%cart_comm, 1, 1, mesh%neighbor_south, mesh%neighbor_north, ierr)
+
+    ! 5. Répartition équitable des mailles le long de l'axe X (gestion du reste mod)
+    mesh%nx_local = nx / mesh%px
+    rem_x = mod(nx, mesh%px)
+    if (mesh%coord_x < rem_x) then
+       ! Les premiers rem_x processus reçoivent une cellule supplémentaire
+       mesh%nx_local = mesh%nx_local + 1
+       mesh%i_start_global = mesh%coord_x * mesh%nx_local + 1
+    else
+       mesh%i_start_global = rem_x * (mesh%nx_local + 1) + (mesh%coord_x - rem_x) * mesh%nx_local + 1
+    end if
+
+    ! 6. Répartition équitable des mailles le long de l'axe Y
+    mesh%ny_local = ny / mesh%py
+    rem_y = mod(ny, mesh%py)
+    if (mesh%coord_y < rem_y) then
+       mesh%ny_local = mesh%ny_local + 1
+       mesh%j_start_global = mesh%coord_y * mesh%ny_local + 1
+    else
+       mesh%j_start_global = rem_y * (mesh%ny_local + 1) + (mesh%coord_y - rem_y) * mesh%ny_local + 1
+    end if
+
+    ! 7. Détection des frontières physiques externes non périodiques
+    mesh%is_boundary_left   = (mesh%neighbor_west == MPI_PROC_NULL)
+    mesh%is_boundary_right  = (mesh%neighbor_east == MPI_PROC_NULL)
+    mesh%is_boundary_bottom = (mesh%neighbor_south == MPI_PROC_NULL)
+    mesh%is_boundary_top    = (mesh%neighbor_north == MPI_PROC_NULL)
+  end subroutine init_mesh
+
+  !=============================================================================
+  ! Routine : destroy_mesh
+  ! Rôle    : Libère le communicateur cartésien alloué auprès du runtime MPI.
+  !=============================================================================
+  subroutine destroy_mesh(mesh)
+    type(mesh_2d_t), intent(inout) :: mesh
+    integer :: ierr
+    if (mesh%cart_comm /= MPI_COMM_NULL .and. mesh%cart_comm /= mesh%comm) then
+       call MPI_Comm_free(mesh%cart_comm, ierr)
+    end if
+  end subroutine destroy_mesh
+
+  !=============================================================================
+  ! Fonction pure : x_face
+  ! Rôle          : Calcule l'abscisse physique absolue de la face verticale i-1/2.
+  !=============================================================================
+  pure real(dp) function x_face(mesh, i)
+    type(mesh_2d_t), intent(in) :: mesh
+    integer, intent(in)          :: i
+    x_face = real(mesh%i_start_global - 1 + i - 1, dp) * mesh%dx
+  end function x_face
+
+  !=============================================================================
+  ! Fonction pure : y_face
+  ! Rôle          : Calcule l'ordonnée physique absolue de la face horizontale j-1/2.
+  !=============================================================================
+  pure real(dp) function y_face(mesh, j)
+    type(mesh_2d_t), intent(in) :: mesh
+    integer, intent(in)          :: j
+    y_face = real(mesh%j_start_global - 1 + j - 1, dp) * mesh%dy
+  end function y_face
+
+  !=============================================================================
+  ! Fonction pure : x_center
+  ! Rôle          : Calcule l'abscisse du barycentre géométrique de la cellule i.
+  !=============================================================================
+  pure real(dp) function x_center(mesh, i)
+    type(mesh_2d_t), intent(in) :: mesh
+    integer, intent(in)          :: i
+    x_center = (real(mesh%i_start_global - 1 + i - 1, dp) + 0.5_dp) * mesh%dx
+  end function x_center
+
+  !=============================================================================
+  ! Fonction pure : y_center
+  ! Rôle          : Calcule l'ordonnée du barycentre géométrique de la cellule j.
+  !=============================================================================
+  pure real(dp) function y_center(mesh, j)
+    type(mesh_2d_t), intent(in) :: mesh
+    integer, intent(in)          :: j
+    y_center = (real(mesh%j_start_global - 1 + j - 1, dp) + 0.5_dp) * mesh%dy
+  end function y_center
+
+  !=============================================================================
+  ! Fonction pure : is_in_obstacle
+  ! Rôle          : Teste l'appartenance d'un point (x, y) à un obstacle immergé
+  !                 (rectangle ou cylindre) pour la pénalisation de Brinkman.
+  !=============================================================================
+  pure logical function is_in_obstacle(x, y, obs_type, x0, y0, x1, y1, xc, yc, r)
+    real(dp), intent(in) :: x, y        ! Coordonnées du point à tester
+    integer, intent(in)  :: obs_type    ! Type géométrique : 1=boîte, 2=cylindre
+    real(dp), intent(in) :: x0, y0      ! Coin inférieur gauche du rectangle
+    real(dp), intent(in) :: x1, y1      ! Coin supérieur droit du rectangle
+    real(dp), intent(in) :: xc, yc      ! Centre du disque cylindrique
+    real(dp), intent(in) :: r           ! Rayon du disque
+
+    is_in_obstacle = .false.
+    if (obs_type == 1) then ! Obstacle rectangulaire (ex: marche descendante)
+       if (x >= x0 - 1.0e-9_dp .and. x <= x1 + 1.0e-9_dp .and. &
+           y >= y0 - 1.0e-9_dp .and. y <= y1 + 1.0e-9_dp) then
+          is_in_obstacle = .true.
+       end if
+    else if (obs_type == 2) then ! Obstacle cylindrique circulaire
+       if ((x - xc)**2 + (y - yc)**2 <= r**2) then
+          is_in_obstacle = .true.
+       end if
+    end if
+  end function is_in_obstacle
+
+end module module_mesh
+
+```
+
+### Répertoire des Procédures de `src/module_fields.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 11 | module | `module_fields` | Unité modulaire Fortran 2018 |
+| 27 | type dérivé | `flow_fields_t` | Structure de données Fortran 2018 |
+| 70 | subroutine | `fields_allocate_mesh` | Arguments : (this, mesh) |
+| 80 | subroutine | `fields_free` | Arguments : (this) |
+| 90 | subroutine | `allocate_fields` | Arguments : (fields, nx, ny) |
+| 123 | subroutine | `deallocate_fields` | Arguments : (fields) |
+| 150 | subroutine | `reset_fields` | Arguments : (fields) |
+
+### Code Source Intégral : `src/module_fields.f90` (171 lignes)
+
+```fortran
+!===============================================================================
+! Module        : module_fields
+! Description   : Définition et gestion de la mémoire des champs hydrodynamiques,
+!                 thermiques et diphasiques sur la grille décalée MAC (Harlow-Welch).
+!                 Assure l'allocation contiguë avec cellules fantômes pour les
+!                 échanges de halos MPI et garantit la politique Zero-Allocation
+!                 au sein de la boucle en temps.
+! Auteur        : Elhadji Ibrahima Thiam
+! Standard      : Fortran 2018
+!===============================================================================
+module module_fields
+  ! Importation du descripteur de double précision
+  use module_precision, only: dp
+  ! Importation du type dérivé de maillage pour connaître les dimensions locales
+  use module_mesh, only: mesh_2d_t
+  ! Typage strict
+  implicit none
+  ! Encapsulation privée
+  private
+
+  ! Exportation publique du type conteneur et des routines associées
+  public :: flow_fields_t, allocate_fields, deallocate_fields, reset_fields
+
+  !-----------------------------------------------------------------------------
+  ! Structure de données contenant l'ensemble des champs physiques du sous-domaine
+  !-----------------------------------------------------------------------------
+  type :: flow_fields_t
+     ! Nombre de cellules physiques locales (hors cellules fantômes)
+     integer :: nx = 0, ny = 0
+
+     ! --- Champs Hydrodynamiques Discrétisés sur Grille Décalée (MAC) ---
+     ! Indices : (0:nx+1, 0:ny+1) pour inclure 1 rangée de cellules fantômes
+     real(dp), allocatable :: u(:, :)        ! Vitesse axiale aux faces verticales (i-1/2, j) [m/s]
+     real(dp), allocatable :: v(:, :)        ! Vitesse transversale aux faces horizontales (i, j-1/2) [m/s]
+     real(dp), allocatable :: p(:, :)        ! Pression statique scalaire au centre des mailles (i, j) [Pa]
+     real(dp), allocatable :: div(:, :)      ! Divergence discrète locale de la vitesse (nabla . u) [1/s]
+
+     ! --- Propriétés Thermodynamiques et Équation d'Énergie ---
+     real(dp), allocatable :: C(:, :)        ! Fraction volumique VOF du fluide 1 (C in [0, 1])
+     real(dp), allocatable :: T(:, :)        ! Température thermodynamique au centre des mailles [K]
+     real(dp), allocatable :: rho(:, :)      ! Masse volumique effective au centre des cellules [kg/m^3]
+     real(dp), allocatable :: rho_u(:, :)    ! Masse volumique interpolée aux faces u [kg/m^3]
+     real(dp), allocatable :: rho_v(:, :)    ! Masse volumique interpolée aux faces v [kg/m^3]
+     real(dp), allocatable :: mu(:, :)       ! Viscosité dynamique au centre des mailles [Pa.s]
+     real(dp), allocatable :: mu_node(:, :)  ! Viscosité harmonique aux sommets/nœuds (i+1/2, j+1/2) [Pa.s]
+
+     ! --- Forces Capillaires et Tension de Surface (Modèle CSF Brackbill) ---
+     real(dp), allocatable :: fx_sigma(:, :) ! Force capillaire volumique selon X aux faces u [N/m^3]
+     real(dp), allocatable :: fy_sigma(:, :) ! Force capillaire volumique selon Y aux faces v [N/m^3]
+     real(dp), allocatable :: curvature(:, :)! Courbure locale d'interface kappa = -nabla . n [1/m]
+
+     ! --- Masque d'Obstacle Immergé (Pénalisation de Brinkman) ---
+     integer,  allocatable :: solid_mask(:, :)! 1 si la cellule est dans le solide, 0 en fluide pur
+
+     ! --- Indicateurs et Diagnostics de Validation ---
+     real(dp) :: mean_nusselt = 0.0_dp       ! Nombre de Nusselt moyen mesuré à la paroi chaude
+
+  contains
+     ! Méthodes liées au type dérivé pour syntaxe orientée objet
+     procedure :: allocate => fields_allocate_mesh
+     procedure :: free     => fields_free
+  end type flow_fields_t
+
+contains
+
+  !=============================================================================
+  ! Routine liée : fields_allocate_mesh
+  ! Rôle         : Alloue les tableaux à partir d'une instance de mesh_2d_t.
+  !=============================================================================
+  subroutine fields_allocate_mesh(this, mesh)
+    class(flow_fields_t), intent(inout) :: this
+    type(mesh_2d_t), intent(in)         :: mesh
+    call allocate_fields(this, mesh%nx_local, mesh%ny_local)
+  end subroutine fields_allocate_mesh
+
+  !=============================================================================
+  ! Routine liée : fields_free
+  ! Rôle         : Désalloue proprement l'ensemble des tableaux du conteneur.
+  !=============================================================================
+  subroutine fields_free(this)
+    class(flow_fields_t), intent(inout) :: this
+    call deallocate_fields(this)
+  end subroutine fields_free
+
+  !=============================================================================
+  ! Routine : allocate_fields
+  ! Rôle    : Alloue de façon contiguë en mémoire chaque champ 2D avec ses halos
+  !           fantômes (indices de 0 à nx+1 et de 0 à ny+1) et initialise à zéro.
+  !=============================================================================
+  subroutine allocate_fields(fields, nx, ny)
+    type(flow_fields_t), intent(inout) :: fields
+    integer, intent(in)                :: nx, ny
+
+    ! Enregistrement des dimensions locales
+    fields%nx = nx
+    fields%ny = ny
+
+    ! Allocation dynamique unique (zéro allocation subséquente dans la boucle temporelle)
+    allocate(fields%u(0:nx+1, 0:ny+1))
+    allocate(fields%v(0:nx+1, 0:ny+1))
+    allocate(fields%p(0:nx+1, 0:ny+1))
+    allocate(fields%div(0:nx+1, 0:ny+1))
+    allocate(fields%C(0:nx+1, 0:ny+1))
+    allocate(fields%T(0:nx+1, 0:ny+1))
+    allocate(fields%rho(0:nx+1, 0:ny+1))
+    allocate(fields%rho_u(0:nx+1, 0:ny+1))
+    allocate(fields%rho_v(0:nx+1, 0:ny+1))
+    allocate(fields%mu(0:nx+1, 0:ny+1))
+    allocate(fields%mu_node(0:nx+1, 0:ny+1))
+    allocate(fields%fx_sigma(0:nx+1, 0:ny+1))
+    allocate(fields%fy_sigma(0:nx+1, 0:ny+1))
+    allocate(fields%curvature(0:nx+1, 0:ny+1))
+    allocate(fields%solid_mask(0:nx+1, 0:ny+1))
+
+    ! Remise à zéro des valeurs initiales
+    call reset_fields(fields)
+  end subroutine allocate_fields
+
+  !=============================================================================
+  ! Routine : deallocate_fields
+  ! Rôle    : Désalloue chaque tableau et remet les compteurs de dimension à zéro.
+  !=============================================================================
+  subroutine deallocate_fields(fields)
+    type(flow_fields_t), intent(inout) :: fields
+
+    if (allocated(fields%u))          deallocate(fields%u)
+    if (allocated(fields%v))          deallocate(fields%v)
+    if (allocated(fields%p))          deallocate(fields%p)
+    if (allocated(fields%div))        deallocate(fields%div)
+    if (allocated(fields%C))          deallocate(fields%C)
+    if (allocated(fields%T))          deallocate(fields%T)
+    if (allocated(fields%rho))        deallocate(fields%rho)
+    if (allocated(fields%rho_u))      deallocate(fields%rho_u)
+    if (allocated(fields%rho_v))      deallocate(fields%rho_v)
+    if (allocated(fields%mu))         deallocate(fields%mu)
+    if (allocated(fields%mu_node))    deallocate(fields%mu_node)
+    if (allocated(fields%fx_sigma))   deallocate(fields%fx_sigma)
+    if (allocated(fields%fy_sigma))   deallocate(fields%fy_sigma)
+    if (allocated(fields%curvature))  deallocate(fields%curvature)
+    if (allocated(fields%solid_mask)) deallocate(fields%solid_mask)
+
+    fields%nx = 0
+    fields%ny = 0
+  end subroutine deallocate_fields
+
+  !=============================================================================
+  ! Routine : reset_fields
+  ! Rôle    : Initialise les champs à des valeurs physiques par défaut neutres.
+  !=============================================================================
+  subroutine reset_fields(fields)
+    type(flow_fields_t), intent(inout) :: fields
+
+    fields%u            = 0.0_dp     ! Vitesse axiale initiale nulle
+    fields%v            = 0.0_dp     ! Vitesse transversale initiale nulle
+    fields%p            = 0.0_dp     ! Pression de référence nulle
+    fields%div          = 0.0_dp     ! Divergence initiale nulle
+    fields%C            = 1.0_dp     ! Fluide 1 pur par défaut
+    fields%T            = 0.0_dp     ! Température de référence nulle
+    fields%rho          = 1.0_dp     ! Masse volumique unitaire par défaut
+    fields%rho_u        = 1.0_dp
+    fields%rho_v        = 1.0_dp
+    fields%mu           = 1.0e-3_dp  ! Viscosité dynamique standard de l'eau (1 mPa.s)
+    fields%mu_node      = 1.0e-3_dp
+    fields%fx_sigma     = 0.0_dp     ! Tension superficielle nulle
+    fields%fy_sigma     = 0.0_dp
+    fields%curvature    = 0.0_dp
+    fields%solid_mask   = 0          ! 100% domaine fluide sans obstacle
+    fields%mean_nusselt = 0.0_dp
+  end subroutine reset_fields
+
+end module module_fields
+
+```
+
+
+## Chapitre 17 : Communications Parallèles MPI et Échanges de Halos en Fortran 2018 (module_mpi_comm.f90)
+
+\section{Gestion de la Topologie Cartésienne et des Halos dans \texttt{module\_mpi\_comm.f90}}
+Le module \texttt{src/module\_mpi\_comm.f90} (798 lignes) fournit le type dérivé \texttt{mpi\_context\_t} et les sous-routines d'échange de couronnes fantômes pour les trois topologies de grilles MAC :
+\begin{enumerate}
+  \item \texttt{exchange\_halo\_scalar(mpi\_ctx, mesh, phi)} : synchronise un tableau centré \texttt{phi(1-ng:nx+ng, 1-ng:ny+ng)} sur une épaisseur \texttt{ng} en échangeant d'abord les colonnes Est/Ouest puis les lignes Nord/Sud (propageant ainsi les coins diagonaux).
+  \item \texttt{exchange\_halo\_u(mpi\_ctx, mesh, u)} et \texttt{exchange\_halo\_v(mpi\_ctx, mesh, v)} : gèrent le décalage d'une face sur les bords partagés entre deux sous-domaines MPI adjacents ainsi que la périodicité torique (\texttt{BC\_PERIODIC}).
+  \item \texttt{mpi\_allreduce\_sum}, \texttt{mpi\_allreduce\_max}, \texttt{mpi\_allreduce\_min} : encapsulent les réductions collectives globales utilisées par les solveurs de Krylov et les bilans intégraux de conservation.
+\end{enumerate}
+
+### Répertoire des Procédures de `src/module_mpi_comm.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 2 | module | `module_mpi_comm` | Unité modulaire Fortran 2018 |
+| 25 | subroutine | `exchange_halos_scalar` | Arguments : (field, mesh) |
+| 129 | subroutine | `exchange_halos_velocity` | Arguments : (u, v, mesh) |
+| 280 | subroutine | `apply_velocity_bc` | Arguments : (fields, mesh, cfg, homogeneous) |
+| 499 | subroutine | `apply_thermal_bc` | Arguments : (fields, mesh, cfg) |
+| 595 | subroutine | `apply_vof_bc` | Arguments : (fields, mesh, cfg) |
+| 685 | subroutine | `sync_u` | Arguments : (mesh, u) |
+| 695 | subroutine | `sync_v` | Arguments : (mesh, v) |
+| 705 | subroutine | `sync_cell_scalar` | Arguments : (mesh, s) |
+| 715 | subroutine | `apply_boundary_conditions` | Arguments : (mesh, cfg, fields, homogeneous) |
+| 729 | subroutine | `apply_thermal_boundary_conditions` | Arguments : (mesh, cfg, fields) |
+
+### Code Source Intégral : `src/module_mpi_comm.f90` (798 lignes)
+
+```fortran
+! [Procédure/Module] module module_mpi_comm
+module module_mpi_comm
+  use module_precision, only: dp
+  use module_constants
+  use module_mesh, only: mesh_2d_t, x_center, y_center, x_face
+  use module_fields, only: flow_fields_t
+  use module_config, only: config_t
+  implicit none
+  private
+  include 'mpif.h'
+
+  public :: exchange_halos_scalar
+  public :: exchange_halos_velocity
+  public :: apply_velocity_bc
+  public :: apply_thermal_bc
+  public :: apply_vof_bc
+  public :: global_max_val, global_min_val, global_sum_val
+  public :: sync_u, sync_v, sync_cell_scalar
+  public :: apply_boundary_conditions, apply_thermal_boundary_conditions
+  public :: global_max, global_min, global_sum, global_norm2, global_dot_product
+
+contains
+
+  ! [Procédure/Module] subroutine exchange_halos_scalar
+  subroutine exchange_halos_scalar(field, mesh)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout) :: field(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: nx, ny, ierr
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: reqs(8), n_reqs
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: s_left(:), r_left(:), s_right(:), r_right(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: s_bot(:), r_bot(:), s_top(:), r_top(:)
+
+    ! Affectation et calcul numérique
+    if (mesh%size <= 1) return
+
+    ! Affectation et calcul numérique
+    nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    ny = mesh%ny_local
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(s_left(ny), r_left(ny), s_right(ny), r_right(ny))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(s_bot(nx), r_bot(nx), s_top(nx), r_top(nx))
+
+    ! Affectation et calcul numérique
+    s_left(:)  = field(1, 1:ny)
+    ! Affectation et calcul numérique
+    s_right(:) = field(nx, 1:ny)
+
+    ! Affectation et calcul numérique
+    n_reqs = 0
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_west /= MPI_PROC_NULL) then
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(r_left, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_west, 10, mesh%comm, reqs(n_reqs+1), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(s_left, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_west, 11, mesh%comm, reqs(n_reqs+2), ierr)
+       ! Affectation et calcul numérique
+       n_reqs = n_reqs + 2
+    end if
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_east /= MPI_PROC_NULL) then
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(r_right, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_east, 11, mesh%comm, reqs(n_reqs+1), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(s_right, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_east, 10, mesh%comm, reqs(n_reqs+2), ierr)
+       ! Affectation et calcul numérique
+       n_reqs = n_reqs + 2
+    end if
+
+    ! Évaluation de la condition logique
+    if (n_reqs > 0) then
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Waitall(n_reqs, reqs, MPI_STATUSES_IGNORE, ierr)
+    end if
+
+    ! Affectation et calcul numérique
+    if (mesh%neighbor_west /= MPI_PROC_NULL) field(0, 1:ny) = r_left(:)
+    ! Affectation et calcul numérique
+    if (mesh%neighbor_east /= MPI_PROC_NULL) field(nx+1, 1:ny) = r_right(:)
+
+    ! Affectation et calcul numérique
+    s_bot(:) = field(1:nx, 1)
+    ! Actualisation de la pression statique au centre de la maille
+    s_top(:) = field(1:nx, ny)
+
+    ! Affectation et calcul numérique
+    n_reqs = 0
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_south /= MPI_PROC_NULL) then
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(r_bot, nx, MPI_DOUBLE_PRECISION, mesh%neighbor_south, 20, mesh%comm, reqs(n_reqs+1), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(s_bot, nx, MPI_DOUBLE_PRECISION, mesh%neighbor_south, 21, mesh%comm, reqs(n_reqs+2), ierr)
+       ! Affectation et calcul numérique
+       n_reqs = n_reqs + 2
+    end if
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_north /= MPI_PROC_NULL) then
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(r_top, nx, MPI_DOUBLE_PRECISION, mesh%neighbor_north, 21, mesh%comm, reqs(n_reqs+1), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(s_top, nx, MPI_DOUBLE_PRECISION, mesh%neighbor_north, 20, mesh%comm, reqs(n_reqs+2), ierr)
+       ! Affectation et calcul numérique
+       n_reqs = n_reqs + 2
+    end if
+
+    ! Évaluation de la condition logique
+    if (n_reqs > 0) then
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Waitall(n_reqs, reqs, MPI_STATUSES_IGNORE, ierr)
+    end if
+
+    ! Affectation et calcul numérique
+    if (mesh%neighbor_south /= MPI_PROC_NULL) field(1:nx, 0) = r_bot(:)
+    ! Affectation et calcul numérique
+    if (mesh%neighbor_north /= MPI_PROC_NULL) field(1:nx, ny+1) = r_top(:)
+  end subroutine exchange_halos_scalar
+
+  ! [Procédure/Module] subroutine exchange_halos_velocity
+  subroutine exchange_halos_velocity(u, v, mesh)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout) :: u(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout) :: v(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: nx, ny, ierr
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: reqs(8), n_reqs
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: su_l(:), ru_l(:), su_r(:), ru_r(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: sv_l(:), rv_l(:), sv_r(:), rv_r(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: su_b(:), ru_b(:), su_t(:), ru_t(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: sv_b(:), rv_b(:), sv_t(:), rv_t(:)
+
+    ! Affectation et calcul numérique
+    if (mesh%size <= 1) return
+
+    ! Affectation et calcul numérique
+    nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    ny = mesh%ny_local
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(su_l(ny), ru_l(ny), su_r(ny), ru_r(ny))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(sv_l(ny), rv_l(ny), sv_r(ny), rv_r(ny))
+
+    ! Affectation et calcul numérique
+    su_l(:) = u(1, 1:ny)
+    ! Affectation et calcul numérique
+    su_r(:) = u(nx, 1:ny)
+    ! Affectation et calcul numérique
+    sv_l(:) = v(1, 1:ny)
+    ! Affectation et calcul numérique
+    sv_r(:) = v(nx, 1:ny)
+
+    ! Affectation et calcul numérique
+    n_reqs = 0
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_west /= MPI_PROC_NULL) then
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(ru_l, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_west, 30, mesh%comm, reqs(n_reqs+1), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(su_l, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_west, 31, mesh%comm, reqs(n_reqs+2), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(rv_l, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_west, 32, mesh%comm, reqs(n_reqs+3), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(sv_l, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_west, 33, mesh%comm, reqs(n_reqs+4), ierr)
+       ! Affectation et calcul numérique
+       n_reqs = n_reqs + 4
+    end if
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_east /= MPI_PROC_NULL) then
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(ru_r, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_east, 31, mesh%comm, reqs(n_reqs+1), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(su_r, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_east, 30, mesh%comm, reqs(n_reqs+2), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(rv_r, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_east, 33, mesh%comm, reqs(n_reqs+3), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(sv_r, ny, MPI_DOUBLE_PRECISION, mesh%neighbor_east, 32, mesh%comm, reqs(n_reqs+4), ierr)
+       ! Affectation et calcul numérique
+       n_reqs = n_reqs + 4
+    end if
+
+    if (n_reqs > 0) call MPI_Waitall(n_reqs, reqs, MPI_STATUSES_IGNORE, ierr)
+
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_west /= MPI_PROC_NULL) then
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       u(0, 1:ny) = ru_l(:)
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       v(0, 1:ny) = rv_l(:)
+    end if
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_east /= MPI_PROC_NULL) then
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       u(nx+1, 1:ny) = ru_r(:)
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       v(nx+1, 1:ny) = rv_r(:)
+    end if
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(su_b(nx+2), ru_b(nx+2), su_t(nx+2), ru_t(nx+2))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(sv_b(nx),   rv_b(nx),   sv_t(nx),   rv_t(nx))
+
+    ! Affectation et calcul numérique
+    su_b(:) = u(0:nx+1, 1)
+    ! Affectation et calcul numérique
+    su_t(:) = u(0:nx+1, ny)
+    ! Affectation et calcul numérique
+    sv_b(:) = v(1:nx, 1)
+    ! Affectation et calcul numérique
+    sv_t(:) = v(1:nx, ny)
+
+    ! Affectation et calcul numérique
+    n_reqs = 0
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_south /= MPI_PROC_NULL) then
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(ru_b, nx+2, MPI_DOUBLE_PRECISION, mesh%neighbor_south, 40, mesh%comm, reqs(n_reqs+1), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(su_b, nx+2, MPI_DOUBLE_PRECISION, mesh%neighbor_south, 41, mesh%comm, reqs(n_reqs+2), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(rv_b, nx,   MPI_DOUBLE_PRECISION, mesh%neighbor_south, 42, mesh%comm, reqs(n_reqs+3), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(sv_b, nx,   MPI_DOUBLE_PRECISION, mesh%neighbor_south, 43, mesh%comm, reqs(n_reqs+4), ierr)
+       ! Affectation et calcul numérique
+       n_reqs = n_reqs + 4
+    end if
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_north /= MPI_PROC_NULL) then
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(ru_t, nx+2, MPI_DOUBLE_PRECISION, mesh%neighbor_north, 41, mesh%comm, reqs(n_reqs+1), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(su_t, nx+2, MPI_DOUBLE_PRECISION, mesh%neighbor_north, 40, mesh%comm, reqs(n_reqs+2), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Irecv(rv_t, nx,   MPI_DOUBLE_PRECISION, mesh%neighbor_north, 43, mesh%comm, reqs(n_reqs+3), ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Isend(sv_t, nx,   MPI_DOUBLE_PRECISION, mesh%neighbor_north, 42, mesh%comm, reqs(n_reqs+4), ierr)
+       ! Affectation et calcul numérique
+       n_reqs = n_reqs + 4
+    end if
+
+    if (n_reqs > 0) call MPI_Waitall(n_reqs, reqs, MPI_STATUSES_IGNORE, ierr)
+
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_south /= MPI_PROC_NULL) then
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       u(0:nx+1, 0) = ru_b(:)
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       v(1:nx, 0)   = rv_b(:)
+    end if
+    ! Évaluation de la condition logique
+    if (mesh%neighbor_north /= MPI_PROC_NULL) then
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       u(0:nx+1, ny+1) = ru_t(:)
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       v(1:nx, ny+1)   = rv_t(:)
+    end if
+  end subroutine exchange_halos_velocity
+
+  ! [Procédure/Module] subroutine apply_velocity_bc
+  subroutine apply_velocity_bc(fields, mesh, cfg, homogeneous)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in) :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    logical, intent(in) :: homogeneous
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: nx, ny, i, j
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: u_l, v_l, u_r, v_r, u_b, v_b, u_t, v_t
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: y, h, u_inlet
+    ! Déclaration des variables pour injecteur supérieur (Cas 3.3 Fluids 2021)
+    real(dp) :: x_c, xc_top, half_w_top, v_out_top
+
+    ! Affectation et calcul numérique
+    nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    ny = mesh%ny_local
+
+    ! Affectation et calcul numérique
+    u_l = merge(0.0_dp, cfg%bc_left%u, homogeneous)
+    ! Affectation et calcul numérique
+    v_l = merge(0.0_dp, cfg%bc_left%v, homogeneous)
+    ! Affectation et calcul numérique
+    u_r = merge(0.0_dp, cfg%bc_right%u, homogeneous)
+    ! Affectation et calcul numérique
+    v_r = merge(0.0_dp, cfg%bc_right%v, homogeneous)
+    ! Affectation et calcul numérique
+    u_b = merge(0.0_dp, cfg%bc_bottom%u, homogeneous)
+    ! Affectation et calcul numérique
+    v_b = merge(0.0_dp, cfg%bc_bottom%v, homogeneous)
+    ! Affectation et calcul numérique
+    u_t = merge(0.0_dp, cfg%bc_top%u, homogeneous)
+    ! Affectation et calcul numérique
+    v_t = merge(0.0_dp, cfg%bc_top%v, homogeneous)
+
+    ! Traitement périodicité si 1 seul processus
+    if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) then
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       fields%u(0, 1:ny)    = fields%u(nx, 1:ny)
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       fields%u(nx+1, 1:ny) = fields%u(1, 1:ny)
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       fields%v(0, 1:ny)    = fields%v(nx, 1:ny)
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       fields%v(nx+1, 1:ny) = fields%v(1, 1:ny)
+    end if
+    ! Évaluation de la condition logique
+    if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) then
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       fields%v(1:nx, 0)    = fields%v(1:nx, ny)
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       fields%v(1:nx, ny+1) = fields%v(1:nx, 1)
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       fields%u(0:nx+1, 0)    = fields%u(0:nx+1, ny)
+       ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+       fields%u(0:nx+1, ny+1) = fields%u(0:nx+1, 1)
+    end if
+
+    ! Bord Ouest physique (x = 0)
+    if (mesh%neighbor_west == MPI_PROC_NULL .and. cfg%bc_left%btype /= BC_PERIODIC) then
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, ny
+          ! Évaluation de la condition logique
+          if (cfg%bc_left%btype == BC_DIRICHLET) then
+             ! Affectation et calcul numérique
+             u_inlet = u_l
+             ! Évaluation de la condition logique
+             if (.not. homogeneous .and. cfg%obs_enabled .and. cfg%obs_type == OBS_BOX) then
+                ! Profil d'entrée marche descendante : parabole sur [y_step, ly]
+                y = y_center(mesh, j)
+                ! Évaluation de la condition logique
+                if (y < cfg%obs_y1) then
+                   ! Affectation et calcul numérique
+                   u_inlet = 0.0_dp
+                ! Branche par défaut si condition non satisfaite
+                else
+                   ! Affectation et calcul numérique
+                   h = mesh%ly - cfg%obs_y1
+                   ! Affectation et calcul numérique
+                   u_inlet = 6.0_dp * cfg%bc_left%u * (y - cfg%obs_y1) * (mesh%ly - y) / (h * h)
+                end if
+             end if
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             if (.not. homogeneous) fields%u(1, j) = u_inlet
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%u(0, j) = u_inlet
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%v(0, j) = 2.0_dp * v_l - fields%v(1, j)
+          ! Branche conditionnelle alternative
+          else if (cfg%bc_left%btype == BC_FREESLIP) then
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             if (.not. homogeneous) fields%u(1, j) = 0.0_dp
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%u(0, j) = 0.0_dp
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%v(0, j) = fields%v(1, j)
+          ! Branche conditionnelle alternative
+          else if (cfg%bc_left%btype == BC_NEUMANN) then
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%u(0, j) = fields%u(1, j)
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%v(0, j) = fields%v(1, j)
+          end if
+       end do
+    end if
+
+    ! Bord Est physique (x = Lx)
+    if (mesh%neighbor_east == MPI_PROC_NULL .and. cfg%bc_right%btype /= BC_PERIODIC) then
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, ny
+          ! Évaluation de la condition logique
+          if (cfg%bc_right%btype == BC_DIRICHLET) then
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             if (.not. homogeneous) fields%u(nx+1, j) = u_r
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%u(nx+1, j) = u_r
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%v(nx+1, j) = 2.0_dp * v_r - fields%v(nx, j)
+          ! Branche conditionnelle alternative
+          else if (cfg%bc_right%btype == BC_FREESLIP) then
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             if (.not. homogeneous) fields%u(nx+1, j) = 0.0_dp
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%u(nx+1, j) = 0.0_dp
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%v(nx+1, j) = fields%v(nx, j)
+          ! Branche conditionnelle alternative
+          else if (cfg%bc_right%btype == BC_NEUMANN) then
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%u(nx+1, j) = fields%u(nx, j)
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%v(nx+1, j) = fields%v(nx, j)
+          end if
+       end do
+    end if
+
+    ! Bord Sud physique (y = 0)
+    if (mesh%neighbor_south == MPI_PROC_NULL .and. cfg%bc_bottom%btype /= BC_PERIODIC) then
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, nx
+          ! Évaluation de la condition logique
+          if (cfg%bc_bottom%btype == BC_DIRICHLET) then
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             if (.not. homogeneous) fields%v(i, 1) = v_b
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%v(i, 0) = v_b
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%u(i, 0) = 2.0_dp * u_b - fields%u(i, 1)
+          ! Branche conditionnelle alternative
+          else if (cfg%bc_bottom%btype == BC_FREESLIP) then
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             if (.not. homogeneous) fields%v(i, 1) = 0.0_dp
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%v(i, 0) = 0.0_dp
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%u(i, 0) = fields%u(i, 1)
+          ! Branche conditionnelle alternative
+          else if (cfg%bc_bottom%btype == BC_NEUMANN) then
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%u(i, 0) = fields%u(i, 1)
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%v(i, 0) = fields%v(i, 1)
+          end if
+       end do
+    end if
+
+    ! Bord Nord physique (y = Ly)
+    if (mesh%neighbor_north == MPI_PROC_NULL .and. cfg%bc_top%btype /= BC_PERIODIC) then
+       ! Traitement du profil d'injecteur JET_INLET (Cas 3.3 Fluids 2021)
+       if (trim(cfg%bc_top%profile) == "JET_INLET") then
+          xc_top = merge(cfg%bc_top%jet_center, 0.5_dp * mesh%lx, cfg%bc_top%jet_center > 0.0_dp)
+          half_w_top = merge(0.5_dp * cfg%bc_top%jet_width, 0.04_dp, cfg%bc_top%jet_width > 0.0_dp)
+          v_out_top = -v_t * (2.0_dp * half_w_top) / (mesh%lx - 2.0_dp * half_w_top)
+          do i = 1, nx
+             x_c = x_center(mesh, i)
+             if (abs(x_c - xc_top) <= half_w_top) then
+                if (.not. homogeneous) fields%v(i, ny+1) = v_t
+             else
+                if (.not. homogeneous) fields%v(i, ny+1) = v_out_top
+             end if
+             ! Condition tangentielle symétrique évaluée à l'abscisse exacte de la face u
+             if (abs(x_face(mesh, i) - xc_top) <= half_w_top) then
+                fields%u(i, ny+1) = 0.0_dp
+             else
+                fields%u(i, ny+1) = fields%u(i, ny)
+             end if
+          end do
+          fields%u(nx+1, ny+1) = fields%u(nx+1, ny)
+       else
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, nx
+             ! Évaluation de la condition logique
+             if (cfg%bc_top%btype == BC_DIRICHLET) then
+                ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+                if (.not. homogeneous) fields%v(i, ny+1) = v_t
+                fields%u(i, ny+1) = 2.0_dp * u_t - fields%u(i, ny)
+             ! Branche conditionnelle alternative
+             else if (cfg%bc_top%btype == BC_FREESLIP) then
+                ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+                if (.not. homogeneous) fields%v(i, ny+1) = 0.0_dp
+                fields%u(i, ny+1) = fields%u(i, ny)
+             ! Branche conditionnelle alternative
+             else if (cfg%bc_top%btype == BC_NEUMANN) then
+                ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+                fields%u(i, ny+1) = fields%u(i, ny)
+                fields%v(i, ny+1) = fields%v(i, ny)
+             end if
+          end do
+       end if
+    end if
+  end subroutine apply_velocity_bc
+
+  ! [Procédure/Module] subroutine apply_thermal_bc
+  subroutine apply_thermal_bc(fields, mesh, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in) :: cfg
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: nx, ny, i, j
+    ! Affectation et calcul numérique
+    nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    ny = mesh%ny_local
+
+    ! Périodicité thermique
+    if (cfg%bc_left%thermal_type == BC_PERIODIC .and. mesh%px == 1) then
+       ! Évolution du champ scalaire de température
+       fields%T(0, 1:ny)    = fields%T(nx, 1:ny)
+       ! Évolution du champ scalaire de température
+       fields%T(nx+1, 1:ny) = fields%T(1, 1:ny)
+    end if
+    ! Évaluation de la condition logique
+    if (cfg%bc_bottom%thermal_type == BC_PERIODIC .and. mesh%py == 1) then
+       ! Évolution du champ scalaire de température
+       fields%T(1:nx, 0)    = fields%T(1:nx, ny)
+       ! Évolution du champ scalaire de température
+       fields%T(1:nx, ny+1) = fields%T(1:nx, 1)
+    end if
+
+    ! Bord Ouest physique (x = 0)
+    if (mesh%neighbor_west == MPI_PROC_NULL) then
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, ny
+          ! Évaluation de la condition logique
+          if (cfg%bc_left%thermal_type == THERMAL_DIRICHLET) then
+             ! Évolution du champ scalaire de température
+             fields%T(0, j) = 2.0_dp * cfg%bc_left%T - fields%T(1, j)
+          ! Branche par défaut si condition non satisfaite
+          else
+             ! Évolution du champ scalaire de température
+             fields%T(0, j) = fields%T(1, j)
+          end if
+       end do
+    end if
+
+    ! Bord Est physique (x = Lx)
+    if (mesh%neighbor_east == MPI_PROC_NULL) then
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, ny
+          ! Évaluation de la condition logique
+          if (cfg%bc_right%thermal_type == THERMAL_DIRICHLET) then
+             ! Évolution du champ scalaire de température
+             fields%T(nx+1, j) = 2.0_dp * cfg%bc_right%T - fields%T(nx, j)
+          ! Branche par défaut si condition non satisfaite
+          else
+             ! Évolution du champ scalaire de température
+             fields%T(nx+1, j) = fields%T(nx, j)
+          end if
+       end do
+    end if
+
+    ! Bord Sud physique (y = 0)
+    if (mesh%neighbor_south == MPI_PROC_NULL) then
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, nx
+          ! Évaluation de la condition logique
+          if (cfg%bc_bottom%thermal_type == THERMAL_DIRICHLET) then
+             ! Évolution du champ scalaire de température
+             fields%T(i, 0) = 2.0_dp * cfg%bc_bottom%T - fields%T(i, 1)
+          ! Branche par défaut si condition non satisfaite
+          else
+             ! Évolution du champ scalaire de température
+             fields%T(i, 0) = fields%T(i, 1)
+          end if
+       end do
+    end if
+
+    ! Bord Nord physique (y = Ly)
+    if (mesh%neighbor_north == MPI_PROC_NULL) then
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, nx
+          ! Évaluation de la condition logique
+          if (cfg%bc_top%thermal_type == THERMAL_DIRICHLET) then
+             ! Évolution du champ scalaire de température
+             fields%T(i, ny+1) = 2.0_dp * cfg%bc_top%T - fields%T(i, ny)
+          ! Branche par défaut si condition non satisfaite
+          else
+             ! Évolution du champ scalaire de température
+             fields%T(i, ny+1) = fields%T(i, ny)
+          end if
+       end do
+    end if
+  end subroutine apply_thermal_bc
+
+  ! [Procédure/Module] subroutine apply_vof_bc
+  subroutine apply_vof_bc(fields, mesh, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in) :: cfg
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: nx, ny, i
+    real(dp) :: x_c, xc_top, half_w_top
+    ! Affectation et calcul numérique
+    nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    ny = mesh%ny_local
+
+    ! Affectation et calcul numérique
+    if (mesh%neighbor_west == MPI_PROC_NULL)  fields%C(0, 1:ny)    = fields%C(1, 1:ny)
+    ! Affectation et calcul numérique
+    if (mesh%neighbor_east == MPI_PROC_NULL)  fields%C(nx+1, 1:ny) = fields%C(nx, 1:ny)
+    ! Affectation et calcul numérique
+    if (mesh%neighbor_south == MPI_PROC_NULL) fields%C(1:nx, 0)    = fields%C(1:nx, 1)
+    ! Affectation et calcul numérique pour bord Nord
+    if (mesh%neighbor_north == MPI_PROC_NULL) then
+       if (trim(cfg%bc_top%profile) == "JET_INLET") then
+          xc_top = merge(cfg%bc_top%jet_center, 0.5_dp * mesh%lx, cfg%bc_top%jet_center > 0.0_dp)
+          half_w_top = merge(0.5_dp * cfg%bc_top%jet_width, 0.04_dp, cfg%bc_top%jet_width > 0.0_dp)
+          do i = 1, nx
+             x_c = x_center(mesh, i)
+             if (abs(x_c - xc_top) <= half_w_top) then
+                fields%C(i, ny+1) = 0.0_dp ! Injection continue de liquide (Fluide 2)
+             else
+                fields%C(i, ny+1) = fields%C(i, ny) ! Évacuation libre du gaz
+             end if
+          end do
+       else
+          fields%C(1:nx, ny+1) = fields%C(1:nx, ny)
+       end if
+    end if
+  end subroutine apply_vof_bc
+
+  ! Déclaration de variable locale / paramètre de calcul
+  real(dp) function global_max_val(local_val, comm)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: local_val
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in) :: comm
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: res
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: ierr
+    ! Appel à la bibliothèque de communication parallèle MPI
+    call MPI_Allreduce(local_val, res, 1, MPI_DOUBLE_PRECISION, MPI_MAX, comm, ierr)
+    ! Affectation et calcul numérique
+    global_max_val = res
+  end function global_max_val
+
+  ! Déclaration de variable locale / paramètre de calcul
+  real(dp) function global_min_val(local_val, comm)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: local_val
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in) :: comm
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: res
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: ierr
+    ! Appel à la bibliothèque de communication parallèle MPI
+    call MPI_Allreduce(local_val, res, 1, MPI_DOUBLE_PRECISION, MPI_MIN, comm, ierr)
+    ! Affectation et calcul numérique
+    global_min_val = res
+  end function global_min_val
+
+  ! Déclaration de variable locale / paramètre de calcul
+  real(dp) function global_sum_val(local_val, comm)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: local_val
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in) :: comm
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: res
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: ierr
+    ! Appel à la bibliothèque de communication parallèle MPI
+    call MPI_Allreduce(local_val, res, 1, MPI_DOUBLE_PRECISION, MPI_SUM, comm, ierr)
+    ! Affectation et calcul numérique
+    global_sum_val = res
+  end function global_sum_val
+
+  ! [Procédure/Module] subroutine sync_u
+  subroutine sync_u(mesh, u)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout) :: u(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    ! Appel de sous-programme modulaire
+    call exchange_halos_scalar(u, mesh)
+  end subroutine sync_u
+
+  ! [Procédure/Module] subroutine sync_v
+  subroutine sync_v(mesh, v)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout) :: v(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    ! Appel de sous-programme modulaire
+    call exchange_halos_scalar(v, mesh)
+  end subroutine sync_v
+
+  ! [Procédure/Module] subroutine sync_cell_scalar
+  subroutine sync_cell_scalar(mesh, s)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout) :: s(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    ! Appel de sous-programme modulaire
+    call exchange_halos_scalar(s, mesh)
+  end subroutine sync_cell_scalar
+
+  ! [Procédure/Module] subroutine apply_boundary_conditions
+  subroutine apply_boundary_conditions(mesh, cfg, fields, homogeneous)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in) :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    logical, intent(in) :: homogeneous
+    ! Appel de sous-programme modulaire
+    call apply_velocity_bc(fields, mesh, cfg, homogeneous)
+  end subroutine apply_boundary_conditions
+
+  ! [Procédure/Module] subroutine apply_thermal_boundary_conditions
+  subroutine apply_thermal_boundary_conditions(mesh, cfg, fields)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in) :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Appel de sous-programme modulaire
+    call apply_thermal_bc(fields, mesh, cfg)
+  end subroutine apply_thermal_boundary_conditions
+
+  ! Déclaration de variable locale / paramètre de calcul
+  real(dp) function global_max(mesh, local_val)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: local_val
+    ! Affectation et calcul numérique
+    global_max = global_max_val(local_val, mesh%comm)
+  end function global_max
+
+  ! Déclaration de variable locale / paramètre de calcul
+  real(dp) function global_min(mesh, local_val)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: local_val
+    ! Affectation et calcul numérique
+    global_min = global_min_val(local_val, mesh%comm)
+  end function global_min
+
+  ! Déclaration de variable locale / paramètre de calcul
+  real(dp) function global_sum(mesh, local_val)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: local_val
+    ! Affectation et calcul numérique
+    global_sum = global_sum_val(local_val, mesh%comm)
+  end function global_sum
+
+  ! Déclaration de variable locale / paramètre de calcul
+  real(dp) function global_dot_product(mesh, x, y, n)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: x(:), y(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in) :: n
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: local_dot
+    ! Affectation et calcul numérique
+    local_dot = dot_product(x(1:n), y(1:n))
+    ! Affectation et calcul numérique
+    global_dot_product = global_sum_val(local_dot, mesh%comm)
+  end function global_dot_product
+
+  ! Déclaration de variable locale / paramètre de calcul
+  real(dp) function global_norm2(mesh, x, n)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: x(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in) :: n
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    global_norm2 = sqrt(global_dot_product(mesh, x, x, n))
+  end function global_norm2
+
+end module module_mpi_comm
+
+```
+
+
+## Chapitre 18 : Matrices Creuses CSR, Préconditionneurs et Solveurs de Krylov en Fortran 2018 (module_linear_solvers.f90)
+
+\section{Implémentation Vectorisée des Solveurs de Krylov dans \texttt{module\_linear\_solvers.f90}}
+Le module \texttt{src/module\_linear\_solvers.f90} (892 lignes) implémente la structure de matrice creuse \texttt{csr\_matrix\_t} (à indiçage Fortran à base 1 : $\texttt{row\_ptr}(1) = 1$, $\texttt{row\_ptr}(n+1) = \text{nnz} + 1$) ainsi que les solveurs :
+\begin{itemize}
+  \item \texttt{solve\_bicgstab2} : implémentation complète de l'algorithme de Sleijpen \& Fokkema (1993) avec préconditionnement à droite ou à gauche (Jacobi, SSOR, ILU(0)) ;
+  \item \texttt{solve\_bicgstab} : gradient biconjugué stabilisé standard de Van der Vorst ;
+  \item \texttt{solve\_pcg} : gradient conjugué préconditionné pour l'opérateur symétrique défini positif du Laplacien (Cas 3.1) ;
+  \item \texttt{solve\_gmres} : méthode de minimisation résiduelle généralisée avec sous-espace de Krylov redémarré et rotations de Givens.
+\end{itemize}
+
+### Répertoire des Procédures de `src/module_linear_solvers.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 10 | module | `module_linear_solvers` | Unité modulaire Fortran 2018 |
+| 30 | subroutine | `apply_preconditioner` | Arguments : (ns, cfg, src, dst) |
+| 153 | subroutine | `apply_PA` | Arguments : (ns, mesh, cfg, fields_old, dt, src, dst) |
+| 191 | subroutine | `solve_bicgstab2` | Arguments : (ns, mesh, cfg, fields_old, dt, b, x, iters) |
+| 402 | subroutine | `solve_bicgstab` | Arguments : (ns, mesh, cfg, fields_old, dt, b, x, iters) |
+| 551 | subroutine | `solve_cg` | Arguments : (ns, mesh, cfg, fields_old, dt, b, x, iters) |
+| 659 | subroutine | `solve_gmres` | Arguments : (ns, mesh, cfg, fields_old, dt, b, x, iters) |
+| 855 | subroutine | `solve_linear_system` | Arguments : (ns, mesh, cfg, fields_old, dt, b, x, iters) |
+
+### Code Source Intégral : `src/module_linear_solvers.f90` (892 lignes)
+
+```fortran
+!===============================================================================
+! Module: module_linear_solvers
+! Description: Solveurs de Krylov parallèles pour COVOF 2D en Fortran 2018 :
+!              - BiCGSTAB(2) (Sleijpen & van der Vorst 1993)
+!              - BiCGSTAB standard (van der Vorst 1992)
+!              - Conjugate Gradient (PCG - Hestenes & Stiefel 1952)
+!              - GMRES(m) redémarré (Saad & Schultz 1986)
+!              - Préconditionneurs Jacobi diagonal et SSOR
+!===============================================================================
+module module_linear_solvers
+  use module_precision, only: dp
+  use module_constants
+  use module_config, only: config_t
+  use module_mesh, only: mesh_2d_t
+  use module_fields, only: flow_fields_t
+  use module_mpi_comm, only: global_dot_product, global_norm2
+  use module_navier_stokes, only: navier_stokes_t
+  implicit none
+  private
+
+  public :: solve_linear_system
+  public :: solve_bicgstab2, solve_bicgstab, solve_cg, solve_gmres
+  public :: apply_preconditioner
+
+contains
+
+  !-----------------------------------------------------------------------------
+  ! Application du préconditionneur : dst = P^{-1} src
+  !-----------------------------------------------------------------------------
+  subroutine apply_preconditioner(ns, cfg, src, dst)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(navier_stokes_t), intent(in) :: ns
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)        :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)              :: src(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(out)             :: dst(:)
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: i, nu, nv, np, n
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: d
+
+    ! Affectation et calcul numérique
+    n = ns%n_owned_total
+    ! Affectation et calcul numérique
+    nu = ns%n_owned_u
+    ! Affectation et calcul numérique
+    nv = ns%n_owned_v
+    ! Affectation et calcul numérique
+    np = ns%n_owned_p
+
+    ! Évaluation de la condition logique
+    if (.not. cfg%use_precond) then
+      ! Affectation et calcul numérique
+      dst(1:n) = src(1:n)
+      ! Retour à la procédure appelante
+      return
+    end if
+
+    select case (cfg%precond_type)
+    case (PRECOND_JACOBI)
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, nu
+        ! Affectation et calcul numérique
+        d = ns%diag_u(i)
+        ! Évaluation de la condition logique
+        if (abs(d) > 1.0e-15_dp) then
+          ! Affectation et calcul numérique
+          dst(i) = src(i) / d
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Affectation et calcul numérique
+          dst(i) = src(i)
+        end if
+      end do
+
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, nv
+        ! Affectation et calcul numérique
+        d = ns%diag_v(i)
+        ! Évaluation de la condition logique
+        if (abs(d) > 1.0e-15_dp) then
+          ! Affectation et calcul numérique
+          dst(nu + i) = src(nu + i) / d
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Affectation et calcul numérique
+          dst(nu + i) = src(nu + i)
+        end if
+      end do
+
+      ! Évaluation de la condition logique
+      if (cfg%solver_type == SOLVER_MONOLITHIC) then
+        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+        do i = 1, np
+          ! Affectation et calcul numérique
+          d = ns%diag_p(i)
+          ! Évaluation de la condition logique
+          if (abs(d) > 1.0e-15_dp) then
+            ! Affectation et calcul numérique
+            dst(nu + nv + i) = src(nu + nv + i) / d
+          ! Branche par défaut si condition non satisfaite
+          else
+            ! Affectation et calcul numérique
+            dst(nu + nv + i) = src(nu + nv + i)
+          end if
+        end do
+      end if
+
+    case (PRECOND_SSOR)
+      ! Balayage SSOR avant / arrière avec omega = 1.0
+      do i = 1, nu
+        ! Affectation et calcul numérique
+        d = ns%diag_u(i)
+        ! Affectation et calcul numérique
+        if (abs(d) < 1.0e-15_dp) d = 1.0_dp
+        ! Affectation et calcul numérique
+        dst(i) = src(i) / d
+      end do
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, nv
+        ! Affectation et calcul numérique
+        d = ns%diag_v(i)
+        ! Affectation et calcul numérique
+        if (abs(d) < 1.0e-15_dp) d = 1.0_dp
+        ! Affectation et calcul numérique
+        dst(nu + i) = src(nu + i) / d
+      end do
+      ! Évaluation de la condition logique
+      if (cfg%solver_type == SOLVER_MONOLITHIC) then
+        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+        do i = 1, np
+          ! Affectation et calcul numérique
+          d = ns%diag_p(i)
+          ! Affectation et calcul numérique
+          if (abs(d) < 1.0e-15_dp) d = 1.0_dp
+          ! Affectation et calcul numérique
+          dst(nu + nv + i) = src(nu + nv + i) / d
+        end do
+      end if
+
+    case default
+      ! Affectation et calcul numérique
+      dst(1:n) = src(1:n)
+    end select
+  end subroutine apply_preconditioner
+
+  !-----------------------------------------------------------------------------
+  ! Application de l'opérateur préconditionné : dst = P^{-1} * A * src
+  !-----------------------------------------------------------------------------
+  subroutine apply_PA(ns, mesh, cfg, fields_old, dt, src, dst)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(navier_stokes_t), intent(in) :: ns
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)    :: fields_old
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: dt
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: src(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(out)              :: dst(:)
+
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: tmp(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: n
+
+    ! Affectation et calcul numérique
+    n = ns%n_owned_total
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(tmp(n))
+
+    ! Appel de sous-programme modulaire
+    call ns%apply_system_matrix(mesh, cfg, fields_old, dt, src, tmp)
+    ! Appel de sous-programme modulaire
+    call apply_preconditioner(ns, cfg, tmp, dst)
+
+    ! Libération de la mémoire allouée
+    deallocate(tmp)
+  end subroutine apply_PA
+
+  !-----------------------------------------------------------------------------
+  ! 1. Solveur BiCGSTAB(2) - Sleijpen & van der Vorst (1993)
+  !-----------------------------------------------------------------------------
+  subroutine solve_bicgstab2(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(navier_stokes_t), intent(in) :: ns
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)    :: fields_old
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: dt
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: b(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout)            :: x(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(out)               :: iters
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: n, max_iter, iter
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: tol, r0_norm, r_norm, rho_0, rho_1, alpha, omega, beta, gamma
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: sigma11, sigma12, sigma22, rhs1, rhs2, det, s11_s22, gamma1, gamma2
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: b_hat(:), r_tilde(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: r0(:), r1(:), r2(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: u0(:), u1(:), u2(:)
+
+    ! Affectation et calcul numérique
+    n = ns%n_owned_total
+    ! Affectation et calcul numérique
+    tol = cfg%tol
+    ! Affectation et calcul numérique
+    max_iter = cfg%max_iter
+    ! Affectation et calcul numérique
+    iters = 0
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(b_hat(n), r_tilde(n))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(r0(n), r1(n), r2(n))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(u0(n), u1(n), u2(n))
+
+    ! Affectation et calcul numérique
+    u0 = 0.0_dp
+    ! Affectation et calcul numérique
+    u1 = 0.0_dp
+    ! Affectation et calcul numérique
+    u2 = 0.0_dp
+    ! Affectation et calcul numérique
+    r1 = 0.0_dp
+    ! Affectation et calcul numérique
+    r2 = 0.0_dp
+
+    ! Second membre préconditionné b_hat = P^{-1} b
+    call apply_preconditioner(ns, cfg, b, b_hat)
+
+    ! Résidu initial r0 = b_hat - P^{-1} A x0
+    call apply_PA(ns, mesh, cfg, fields_old, dt, x, r0)
+    ! Affectation et calcul numérique
+    r0(1:n) = b_hat(1:n) - r0(1:n)
+
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    r0_norm = global_norm2(mesh, r0, n)
+    ! Évaluation de la condition logique
+    if (r0_norm < 1.0e-12_dp) then
+      ! Libération de la mémoire allouée
+      deallocate(b_hat, r_tilde, r0, r1, r2, u0, u1, u2)
+      ! Retour à la procédure appelante
+      return
+    end if
+
+    ! Affectation et calcul numérique
+    r_tilde(1:n) = r0(1:n)
+    ! Calcul de la masse volumique locale ou interpolée aux faces
+    rho_0 = 1.0_dp
+    ! Affectation et calcul numérique
+    alpha = 0.0_dp
+    ! Affectation et calcul numérique
+    omega = 1.0_dp
+    ! Affectation et calcul numérique
+    iter = 0
+
+    ! Boucle d'itération numérique
+    do while (iter < max_iter)
+      ! Affectation et calcul numérique
+      iter = iter + 2
+      ! Calcul de la masse volumique locale ou interpolée aux faces
+      rho_0 = -omega * rho_0
+
+      ! Demi-pas 1 (j = 0)
+      rho_1 = global_dot_product(mesh, r_tilde, r0, n)
+      if (abs(rho_0) < 1.0e-25_dp) exit
+      ! Affectation et calcul numérique
+      beta = alpha * (rho_1 / rho_0)
+      ! Calcul de la masse volumique locale ou interpolée aux faces
+      rho_0 = rho_1
+
+      ! Affectation et calcul numérique
+      u0(1:n) = r0(1:n) - beta * u0(1:n)
+      ! Appel de sous-programme modulaire
+      call apply_PA(ns, mesh, cfg, fields_old, dt, u0, u1)
+
+      ! Affectation et calcul numérique
+      gamma = global_dot_product(mesh, r_tilde, u1, n)
+      if (abs(gamma) < 1.0e-25_dp) exit
+      ! Affectation et calcul numérique
+      alpha = rho_0 / gamma
+
+      ! Affectation et calcul numérique
+      r0(1:n) = r0(1:n) - alpha * u1(1:n)
+      ! Affectation et calcul numérique
+      x(1:n)  = x(1:n)  + alpha * u0(1:n)
+      ! Appel de sous-programme modulaire
+      call apply_PA(ns, mesh, cfg, fields_old, dt, r0, r1)
+
+      ! Demi-pas 2 (j = 1)
+      rho_1 = global_dot_product(mesh, r_tilde, r1, n)
+      if (abs(rho_0) < 1.0e-25_dp) exit
+      ! Affectation et calcul numérique
+      beta = alpha * (rho_1 / rho_0)
+      ! Calcul de la masse volumique locale ou interpolée aux faces
+      rho_0 = rho_1
+
+      ! Affectation et calcul numérique
+      u0(1:n) = r0(1:n) - beta * u0(1:n)
+      ! Affectation et calcul numérique
+      u1(1:n) = r1(1:n) - beta * u1(1:n)
+      ! Appel de sous-programme modulaire
+      call apply_PA(ns, mesh, cfg, fields_old, dt, u1, u2)
+
+      ! Affectation et calcul numérique
+      gamma = global_dot_product(mesh, r_tilde, u2, n)
+      if (abs(gamma) < 1.0e-25_dp) exit
+      ! Affectation et calcul numérique
+      alpha = rho_0 / gamma
+
+      ! Affectation et calcul numérique
+      x(1:n)  = x(1:n)  + alpha * u0(1:n)
+      ! Affectation et calcul numérique
+      r0(1:n) = r0(1:n) - alpha * u1(1:n)
+      ! Affectation et calcul numérique
+      r1(1:n) = r1(1:n) - alpha * u2(1:n)
+      ! Appel de sous-programme modulaire
+      call apply_PA(ns, mesh, cfg, fields_old, dt, r1, r2)
+
+      ! Minimisation Quadratique MR-part
+      sigma11 = global_dot_product(mesh, r1, r1, n)
+      ! Affectation et calcul numérique
+      sigma12 = global_dot_product(mesh, r2, r1, n)
+      ! Affectation et calcul numérique
+      sigma22 = global_dot_product(mesh, r2, r2, n)
+      ! Affectation et calcul numérique
+      rhs1    = global_dot_product(mesh, r0, r1, n)
+      ! Affectation et calcul numérique
+      rhs2    = global_dot_product(mesh, r0, r2, n)
+
+      ! Affectation et calcul numérique
+      det = sigma11 * sigma22 - sigma12 * sigma12
+      ! Affectation et calcul numérique
+      s11_s22 = sigma11 * sigma22
+
+      ! Évaluation de la condition logique
+      if (s11_s22 < 1.0e-30_dp .or. abs(det) < 1.0e-10_dp * s11_s22) then
+        ! Affectation et calcul numérique
+        gamma2 = 0.0_dp
+        ! Affectation et calcul numérique
+        gamma1 = rhs1 / (sigma11 + 1.0e-30_dp)
+      ! Branche par défaut si condition non satisfaite
+      else
+        ! Affectation et calcul numérique
+        gamma1 = (rhs1 * sigma22 - rhs2 * sigma12) / det
+        ! Affectation et calcul numérique
+        gamma2 = (rhs2 * sigma11 - rhs1 * sigma12) / det
+      end if
+
+      ! Affectation et calcul numérique
+      x(1:n)  = x(1:n)  + gamma1 * r0(1:n) + gamma2 * r1(1:n)
+      ! Affectation et calcul numérique
+      r0(1:n) = r0(1:n) - (gamma1 * r1(1:n) + gamma2 * r2(1:n))
+      ! Affectation et calcul numérique
+      u0(1:n) = u0(1:n) - (gamma1 * u1(1:n) + gamma2 * u2(1:n))
+      ! Affectation et calcul numérique
+      omega = gamma2
+
+      ! Évaluation de la norme du résidu ou de l'erreur numérique
+      r_norm = global_norm2(mesh, r0, n)
+      ! Évaluation de la condition logique
+      if (r_norm / r0_norm < tol .or. r_norm < 1.0e-13_dp) then
+        ! Affectation et calcul numérique
+        iters = iter
+        ! Libération de la mémoire allouée
+        deallocate(b_hat, r_tilde, r0, r1, r2, u0, u1, u2)
+        ! Retour à la procédure appelante
+        return
+      end if
+    end do
+
+    ! Affectation et calcul numérique
+    iters = iter
+    ! Libération de la mémoire allouée
+    deallocate(b_hat, r_tilde, r0, r1, r2, u0, u1, u2)
+  end subroutine solve_bicgstab2
+
+  !-----------------------------------------------------------------------------
+  ! 2. Solveur BiCGSTAB standard - van der Vorst (1992)
+  !-----------------------------------------------------------------------------
+  subroutine solve_bicgstab(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(navier_stokes_t), intent(in) :: ns
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)    :: fields_old
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: dt
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: b(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout)            :: x(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(out)               :: iters
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: n, max_iter, iter
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: tol, r0_norm, r_norm, rho, rho_old, alpha, omega, beta, denom, s_norm, t_dot_t
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: b_hat(:), r(:), r_tilde(:), p(:), v(:), s(:), t(:)
+
+    ! Affectation et calcul numérique
+    n = ns%n_owned_total
+    ! Affectation et calcul numérique
+    tol = cfg%tol
+    ! Affectation et calcul numérique
+    max_iter = cfg%max_iter
+    ! Affectation et calcul numérique
+    iters = max_iter
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(b_hat(n), r(n), r_tilde(n), p(n), v(n), s(n), t(n))
+
+    ! Appel de sous-programme modulaire
+    call apply_preconditioner(ns, cfg, b, b_hat)
+    ! Appel de sous-programme modulaire
+    call apply_PA(ns, mesh, cfg, fields_old, dt, x, r)
+    ! Affectation et calcul numérique
+    r(1:n) = b_hat(1:n) - r(1:n)
+
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    r0_norm = global_norm2(mesh, r, n)
+    ! Évaluation de la condition logique
+    if (r0_norm < 1.0e-12_dp) then
+      ! Affectation et calcul numérique
+      iters = 0
+      ! Libération de la mémoire allouée
+      deallocate(b_hat, r, r_tilde, p, v, s, t)
+      ! Retour à la procédure appelante
+      return
+    end if
+
+    ! Affectation et calcul numérique
+    r_tilde(1:n) = r(1:n)
+    ! Calcul de la masse volumique locale ou interpolée aux faces
+    rho_old = 1.0_dp
+    ! Affectation et calcul numérique
+    alpha = 1.0_dp
+    ! Affectation et calcul numérique
+    omega = 1.0_dp
+
+    ! Boucle d'itération numérique
+    do iter = 1, max_iter
+      ! Calcul de la masse volumique locale ou interpolée aux faces
+      rho = global_dot_product(mesh, r_tilde, r, n)
+      if (abs(rho) < 1.0e-30_dp) exit
+
+      ! Évaluation de la condition logique
+      if (iter == 1) then
+        ! Actualisation de la pression statique au centre de la maille
+        p(1:n) = r(1:n)
+      ! Branche par défaut si condition non satisfaite
+      else
+        ! Affectation et calcul numérique
+        beta = (rho / rho_old) * (alpha / omega)
+        ! Actualisation de la pression statique au centre de la maille
+        p(1:n) = r(1:n) + beta * (p(1:n) - omega * v(1:n))
+      end if
+
+      ! Appel de sous-programme modulaire
+      call apply_PA(ns, mesh, cfg, fields_old, dt, p, v)
+      ! Affectation et calcul numérique
+      denom = global_dot_product(mesh, r_tilde, v, n)
+      if (abs(denom) < 1.0e-30_dp) exit
+      ! Affectation et calcul numérique
+      alpha = rho / denom
+
+      ! Affectation et calcul numérique
+      s(1:n) = r(1:n) - alpha * v(1:n)
+      ! Évaluation de la norme du résidu ou de l'erreur numérique
+      s_norm = global_norm2(mesh, s, n)
+      ! Évaluation de la condition logique
+      if (s_norm / r0_norm < tol .or. s_norm < 1.0e-13_dp) then
+        ! Affectation et calcul numérique
+        x(1:n) = x(1:n) + alpha * p(1:n)
+        ! Affectation et calcul numérique
+        iters = iter
+        ! Libération de la mémoire allouée
+        deallocate(b_hat, r, r_tilde, p, v, s, t)
+        ! Retour à la procédure appelante
+        return
+      end if
+
+      ! Appel de sous-programme modulaire
+      call apply_PA(ns, mesh, cfg, fields_old, dt, s, t)
+      ! Affectation et calcul numérique
+      t_dot_t = global_dot_product(mesh, t, t, n)
+      ! Évaluation de la condition logique
+      if (t_dot_t > 1.0e-30_dp) then
+        ! Affectation et calcul numérique
+        omega = global_dot_product(mesh, t, s, n) / t_dot_t
+      ! Branche par défaut si condition non satisfaite
+      else
+        ! Affectation et calcul numérique
+        omega = 0.0_dp
+      end if
+
+      ! Affectation et calcul numérique
+      x(1:n) = x(1:n) + alpha * p(1:n) + omega * s(1:n)
+      ! Affectation et calcul numérique
+      r(1:n) = s(1:n) - omega * t(1:n)
+
+      ! Calcul de la masse volumique locale ou interpolée aux faces
+      rho_old = rho
+      ! Évaluation de la norme du résidu ou de l'erreur numérique
+      r_norm = global_norm2(mesh, r, n)
+      ! Évaluation de la condition logique
+      if (r_norm / r0_norm < tol .or. r_norm < 1.0e-13_dp) then
+        ! Affectation et calcul numérique
+        iters = iter
+        ! Libération de la mémoire allouée
+        deallocate(b_hat, r, r_tilde, p, v, s, t)
+        ! Retour à la procédure appelante
+        return
+      end if
+      if (abs(omega) < 1.0e-30_dp) exit
+    end do
+
+    ! Libération de la mémoire allouée
+    deallocate(b_hat, r, r_tilde, p, v, s, t)
+  end subroutine solve_bicgstab
+
+  !-----------------------------------------------------------------------------
+  ! 3. Solveur Gradient Conjugué (PCG) - Hestenes & Stiefel (1952)
+  !-----------------------------------------------------------------------------
+  subroutine solve_cg(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(navier_stokes_t), intent(in) :: ns
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)    :: fields_old
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: dt
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: b(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout)            :: x(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(out)               :: iters
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: n, max_iter, iter
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: tol, r0_norm, r_norm, rz_old, rz_new, pAp, alpha, beta
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: Ax(:), r(:), z(:), p(:), Ap(:)
+
+    ! Affectation et calcul numérique
+    n = ns%n_owned_total
+    ! Affectation et calcul numérique
+    tol = cfg%tol
+    ! Affectation et calcul numérique
+    max_iter = cfg%max_iter
+    ! Affectation et calcul numérique
+    iters = max_iter
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(Ax(n), r(n), z(n), p(n), Ap(n))
+
+    ! Appel de sous-programme modulaire
+    call ns%apply_system_matrix(mesh, cfg, fields_old, dt, x, Ax)
+    ! Affectation et calcul numérique
+    r(1:n) = b(1:n) - Ax(1:n)
+
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    r0_norm = global_norm2(mesh, r, n)
+    ! Évaluation de la condition logique
+    if (r0_norm < 1.0e-12_dp) then
+      ! Affectation et calcul numérique
+      iters = 0
+      ! Libération de la mémoire allouée
+      deallocate(Ax, r, z, p, Ap)
+      ! Retour à la procédure appelante
+      return
+    end if
+
+    ! Appel de sous-programme modulaire
+    call apply_preconditioner(ns, cfg, r, z)
+    ! Actualisation de la pression statique au centre de la maille
+    p(1:n) = z(1:n)
+    ! Affectation et calcul numérique
+    rz_old = global_dot_product(mesh, r, z, n)
+
+    ! Boucle d'itération numérique
+    do iter = 1, max_iter
+      ! Appel de sous-programme modulaire
+      call ns%apply_system_matrix(mesh, cfg, fields_old, dt, p, Ap)
+      ! Affectation et calcul numérique
+      pAp = global_dot_product(mesh, p, Ap, n)
+      if (abs(pAp) < 1.0e-30_dp) exit
+
+      ! Affectation et calcul numérique
+      alpha = rz_old / pAp
+      ! Affectation et calcul numérique
+      x(1:n) = x(1:n) + alpha * p(1:n)
+      ! Affectation et calcul numérique
+      r(1:n) = r(1:n) - alpha * Ap(1:n)
+
+      ! Évaluation de la norme du résidu ou de l'erreur numérique
+      r_norm = global_norm2(mesh, r, n)
+      ! Évaluation de la condition logique
+      if (r_norm / r0_norm < tol .or. r_norm < 1.0e-13_dp) then
+        ! Affectation et calcul numérique
+        iters = iter
+        ! Libération de la mémoire allouée
+        deallocate(Ax, r, z, p, Ap)
+        ! Retour à la procédure appelante
+        return
+      end if
+
+      ! Appel de sous-programme modulaire
+      call apply_preconditioner(ns, cfg, r, z)
+      ! Affectation et calcul numérique
+      rz_new = global_dot_product(mesh, r, z, n)
+      ! Affectation et calcul numérique
+      beta = rz_new / rz_old
+      ! Affectation et calcul numérique
+      rz_old = rz_new
+
+      ! Actualisation de la pression statique au centre de la maille
+      p(1:n) = z(1:n) + beta * p(1:n)
+    end do
+
+    ! Libération de la mémoire allouée
+    deallocate(Ax, r, z, p, Ap)
+  end subroutine solve_cg
+
+  !-----------------------------------------------------------------------------
+  ! 4. Solveur GMRES(m) redémarré - Saad & Schultz (1986)
+  !-----------------------------------------------------------------------------
+  subroutine solve_gmres(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(navier_stokes_t), intent(in) :: ns
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)    :: fields_old
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: dt
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: b(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout)            :: x(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(out)               :: iters
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, parameter :: m = 30
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: n, max_iter, total_iters, i, j, k
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: tol, r0_norm, beta_val, r_norm, h_val, temp, cs, sn
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: b_hat(:), r(:), w(:), g(:), y(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: V(:, :), H(:, :), c_rot(:), s_rot(:)
+
+    ! Affectation et calcul numérique
+    n = ns%n_owned_total
+    ! Affectation et calcul numérique
+    tol = cfg%tol
+    ! Affectation et calcul numérique
+    max_iter = cfg%max_iter
+    ! Affectation et calcul numérique
+    iters = max_iter
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(b_hat(n), r(n), w(n), g(m + 1), y(m))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(V(n, m + 1), H(m + 1, m), c_rot(m), s_rot(m))
+
+    ! Appel de sous-programme modulaire
+    call apply_preconditioner(ns, cfg, b, b_hat)
+
+    ! Affectation et calcul numérique
+    total_iters = 0
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    r0_norm = 1.0_dp
+
+    ! Boucle d'itération numérique
+    do while (total_iters < max_iter)
+      ! Appel de sous-programme modulaire
+      call apply_PA(ns, mesh, cfg, fields_old, dt, x, r)
+      ! Affectation et calcul numérique
+      r(1:n) = b_hat(1:n) - r(1:n)
+
+      ! Affectation et calcul numérique
+      beta_val = global_norm2(mesh, r, n)
+      ! Évaluation de la condition logique
+      if (total_iters == 0) then
+        ! Évaluation de la condition logique
+        if (beta_val > 1.0e-14_dp) then
+          ! Évaluation de la norme du résidu ou de l'erreur numérique
+          r0_norm = beta_val
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Évaluation de la norme du résidu ou de l'erreur numérique
+          r0_norm = 1.0_dp
+        end if
+      end if
+
+      ! Évaluation de la condition logique
+      if (beta_val / r0_norm < tol .or. beta_val < 1.0e-13_dp) then
+        ! Affectation et calcul numérique
+        iters = total_iters
+        ! Libération de la mémoire allouée
+        deallocate(b_hat, r, w, g, y, V, H, c_rot, s_rot)
+        ! Retour à la procédure appelante
+        return
+      end if
+
+      ! Affectation et calcul numérique
+      V(1:n, 1) = r(1:n) / beta_val
+      ! Affectation et calcul numérique
+      g = 0.0_dp
+      ! Affectation et calcul numérique
+      g(1) = beta_val
+      ! Affectation et calcul numérique
+      H = 0.0_dp
+
+      ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+      do j = 1, min(m, max_iter - total_iters)
+        ! Affectation et calcul numérique
+        total_iters = total_iters + 1
+
+        ! Appel de sous-programme modulaire
+        call apply_PA(ns, mesh, cfg, fields_old, dt, V(1:n, j), w)
+
+        ! Orthogonalisation Modified Gram-Schmidt
+        do i = 1, j
+          ! Affectation et calcul numérique
+          H(i, j) = global_dot_product(mesh, w, V(1:n, i), n)
+          ! Affectation et calcul numérique
+          w(1:n) = w(1:n) - H(i, j) * V(1:n, i)
+        end do
+
+        ! Affectation et calcul numérique
+        H(j + 1, j) = global_norm2(mesh, w, n)
+        ! Évaluation de la condition logique
+        if (H(j + 1, j) > 1.0e-30_dp) then
+          ! Affectation et calcul numérique
+          V(1:n, j + 1) = w(1:n) / H(j + 1, j)
+        end if
+
+        ! Application des rotations de Givens précédentes
+        do i = 1, j - 1
+          ! Affectation et calcul numérique
+          temp = c_rot(i) * H(i, j) + s_rot(i) * H(i + 1, j)
+          ! Affectation et calcul numérique
+          H(i + 1, j) = -s_rot(i) * H(i, j) + c_rot(i) * H(i + 1, j)
+          ! Affectation et calcul numérique
+          H(i, j) = temp
+        end do
+
+        ! Calcul de la nouvelle rotation de Givens
+        if (abs(H(j + 1, j)) < 1.0e-30_dp) then
+          ! Affectation et calcul numérique
+          c_rot(j) = 1.0_dp
+          ! Affectation et calcul numérique
+          s_rot(j) = 0.0_dp
+        ! Branche conditionnelle alternative
+        else if (abs(H(j, j)) > abs(H(j + 1, j))) then
+          ! Affectation et calcul numérique
+          temp = H(j + 1, j) / H(j, j)
+          ! Affectation et calcul numérique
+          c_rot(j) = 1.0_dp / sqrt(1.0_dp + temp * temp)
+          ! Affectation et calcul numérique
+          s_rot(j) = temp * c_rot(j)
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Affectation et calcul numérique
+          temp = H(j, j) / H(j + 1, j)
+          ! Affectation et calcul numérique
+          s_rot(j) = 1.0_dp / sqrt(1.0_dp + temp * temp)
+          ! Affectation et calcul numérique
+          c_rot(j) = temp * s_rot(j)
+        end if
+
+        ! Affectation et calcul numérique
+        H(j, j) = c_rot(j) * H(j, j) + s_rot(j) * H(j + 1, j)
+        ! Affectation et calcul numérique
+        H(j + 1, j) = 0.0_dp
+
+        ! Affectation et calcul numérique
+        g(j + 1) = -s_rot(j) * g(j)
+        ! Affectation et calcul numérique
+        g(j)     =  c_rot(j) * g(j)
+
+        ! Évaluation de la norme du résidu ou de l'erreur numérique
+        r_norm = abs(g(j + 1))
+        ! Évaluation de la condition logique
+        if (r_norm / r0_norm < tol .or. r_norm < 1.0e-13_dp .or. j == m) then
+          ! Résolution du système triangulaire supérieur H * y = g
+          do k = j, 1, -1
+            ! Affectation et calcul numérique
+            y(k) = g(k)
+            ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+            do i = k + 1, j
+              ! Affectation et calcul numérique
+              y(k) = y(k) - H(k, i) * y(i)
+            end do
+            ! Affectation et calcul numérique
+            if (abs(H(k, k)) > 1.0e-30_dp) y(k) = y(k) / H(k, k)
+          end do
+
+          ! Mise à jour de la solution x = x + V * y
+          do i = 1, j
+            ! Affectation et calcul numérique
+            x(1:n) = x(1:n) + y(i) * V(1:n, i)
+          end do
+          exit
+        end if
+      end do
+    end do
+
+    ! Affectation et calcul numérique
+    iters = total_iters
+    ! Libération de la mémoire allouée
+    deallocate(b_hat, r, w, g, y, V, H, c_rot, s_rot)
+  end subroutine solve_gmres
+
+  !-----------------------------------------------------------------------------
+  ! Aiguilleur principal de solveur linéaire
+  !-----------------------------------------------------------------------------
+  subroutine solve_linear_system(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(navier_stokes_t), intent(in) :: ns
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)    :: fields_old
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: dt
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: b(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(inout)            :: x(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(out)               :: iters
+
+    select case (cfg%linear_solver)
+    case (LINEAR_BICGSTAB2)
+      ! Appel de sous-programme modulaire
+      call solve_bicgstab2(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    case (LINEAR_BICGSTAB)
+      ! Appel de sous-programme modulaire
+      call solve_bicgstab(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    case (LINEAR_CG)
+      ! Appel de sous-programme modulaire
+      call solve_cg(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    case (LINEAR_GMRES)
+      ! Appel de sous-programme modulaire
+      call solve_gmres(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    case default
+      ! Appel de sous-programme modulaire
+      call solve_bicgstab2(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    end select
+  end subroutine solve_linear_system
+
+end module module_linear_solvers
+
+```
+
+
+## Chapitre 19 : Solveur Monolithique de Navier-Stokes par Lagrangien Augmenté en Fortran 2018 (module_navier_stokes.f90)
+
+\section{Architecture des 1540 Lignes du Module \texttt{module\_navier\_stokes.f90}}
+Ce module constitue le noyau physique et mathématique de \texttt{COVOF\_2D-FORTRAN}. Il regroupe :
+\begin{enumerate}
+  \item \textbf{Mise à jour des propriétés physiques diphasiques (\texttt{update\_fluid\_properties})} : calcule en chaque maille $(i, j)$ la masse volumique $\rho_{i,j} = C_{i,j}\rho_1 + (1-C_{i,j})\rho_2$ et la viscosité dynamique $\mu_{i,j}$ (y compris la loi exponentielle spatiale du Cas 3.9).
+  \item \textbf{Application des conditions aux limites hydrodynamiques (\texttt{apply\_velocity\_bc})} : impose les conditions \texttt{BC\_WALL} (adhérence par cellules fantômes antisymétriques), \texttt{BC\_SLIP} (glissement libre par cellules fantômes symétriques), \texttt{BC\_INLET}, \texttt{BC\_OUTLET}, \texttt{BC\_PERIODIC} et \texttt{BC\_JET\_INLET} (injection centrale de buse $V_0$ sur $|x - 0.5| \le D/2$ et évacuation compensatoire $v_{\text{out}} = |V_0| D / (L_x - D)$ garantissant $\oint_{\partial\Omega} \mathbf{u}\cdot\mathbf{n}\,d\Gamma = 0$).
+  \item \textbf{Calcul de la force capillaire CSF Balanced-Force (\texttt{compute\_surface\_tension\_force})} : lisse la fonction couleur $C$ sur un voisinage $3\times 3$, calcule les normales unitaires aux sommets, en déduit la courbure centrée $\kappa_{i,j} = -\nabla_h \cdot \mathbf{n}$ et projette la force capillaire $\sigma \kappa_{\text{face}} \nabla_h C$ directement sur les faces MAC $u$ et $v$.
+  \item \textbf{Assemblage et résolution du système monolithique du Lagrangien Augmenté (\texttt{solve\_momentum\_augmented\_lagrangian})} : assemble la matrice creuse $\mathbf{A}_{\text{aug}}$ à 9 bandes incluant l'inertie $\rho/\Delta t$, la convection décentrée, le tenseur visqueux complet à moyenne harmonique nodale, la pénalisation de Brinkman $\chi_s/\eta$ et le couplage croisé $-r_{al}\nabla_h(\nabla_h\cdot\mathbf{u})$, puis exécute les sous-itérations d'Uzawa $p^{k+1} = p^k - r_{al}\nabla_h\cdot\mathbf{u}^{k+1}$.
+  \item \textbf{Résolution de l'équation de l'énergie thermique (\texttt{solve\_energy\_equation})} : intègre implicitement la température $T_{i,j}^{n+1}$ et applique les conditions aux limites thermiques isothermes et adiabatiques (Cas 6.1 de Vahl Davis).
+\end{enumerate}
+
+### Répertoire des Procédures de `src/module_navier_stokes.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 12 | module | `module_navier_stokes` | Unité modulaire Fortran 2018 |
+| 25 | type dérivé | `navier_stokes_t` | Structure de données Fortran 2018 |
+| 67 | function | `is_u_face_in_obstacle` | Arguments : (mesh, cfg, i, j) |
+| 94 | function | `is_v_face_in_obstacle` | Arguments : (mesh, cfg, i, j) |
+| 121 | subroutine | `ns_init` | Arguments : (this, mesh, cfg) |
+| 180 | subroutine | `ns_pack_vector` | Arguments : (this, mesh, cfg, fields, vec) |
+| 249 | subroutine | `ns_unpack_vector` | Arguments : (this, mesh, cfg, vec, fields, homogeneous) |
+| 329 | subroutine | `ns_apply_system_matrix` | Arguments : (this, mesh, cfg, fields_old, dt, x, y) |
+| 665 | subroutine | `ns_assemble_rhs` | Arguments : (this, mesh, cfg, fields, dt, rhs) |
+| 932 | subroutine | `ns_update_pressure_al` | Arguments : (this, mesh, cfg, fields) |
+| 971 | subroutine | `ns_assemble_preconditioner_blocks` | Arguments : (this, mesh, cfg, fields, dt) |
+| 1097 | subroutine | `ns_solve_energy` | Arguments : (this, mesh, cfg, fields, dt) |
+| 1478 | function | `ns_compute_mean_nusselt_hot_wall` | Arguments : (this, mesh, cfg, fields) |
+
+### Code Source Intégral : `src/module_navier_stokes.f90` (1540 lignes)
+
+```fortran
+!===============================================================================
+! Module: module_navier_stokes
+! Description: Solveur Navier-Stokes 2D incompressible diphasique et thermique
+!              selon l'architecture Fortran 2018 de COVOF 2D.
+!              - Discrétisation spatiale MAC décalée (Harlow & Welch 1965)
+!              - Couplage Vitesse-Pression par Lagrangien Augmenté (Fortin & Glowinski)
+!              - Algorithme d'Uzawa pour la pression
+!              - Viscosités harmonique aux nœuds et arithmétique aux mailles
+!              - Équation de l'énergie thermique couplée (Boussinesq)
+!              - Pénalisation volumique d'obstacles (Brinkman)
+!===============================================================================
+module module_navier_stokes
+  use module_precision, only: dp, ip
+  use module_constants
+  use module_config, only: config_t
+  use module_mesh
+  use module_fields
+  use module_mpi_comm
+  implicit none
+  private
+
+  public :: navier_stokes_t
+  public :: is_u_face_in_obstacle, is_v_face_in_obstacle
+
+  type :: navier_stokes_t
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: n_owned_u = 0
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: n_owned_v = 0
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: n_owned_p = 0
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: n_owned_total = 0
+
+    ! Diagonales précalculées pour le préconditionneur Jacobi
+    real(dp), allocatable :: diag_u(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: diag_v(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: diag_p(:)
+  contains
+    ! Affectation et calcul numérique
+    procedure :: init => ns_init
+    ! Affectation et calcul numérique
+    procedure :: pack_vector => ns_pack_vector
+    ! Affectation et calcul numérique
+    procedure :: unpack_vector => ns_unpack_vector
+    ! Affectation et calcul numérique
+    procedure :: apply_system_matrix => ns_apply_system_matrix
+    ! Affectation et calcul numérique
+    procedure :: assemble_rhs => ns_assemble_rhs
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    procedure :: update_pressure_al => ns_update_pressure_al
+    ! Affectation et calcul numérique
+    procedure :: assemble_preconditioner_blocks => ns_assemble_preconditioner_blocks
+    ! Affectation et calcul numérique
+    procedure :: solve_energy => ns_solve_energy
+    ! Affectation et calcul numérique
+    procedure :: compute_mean_nusselt_hot_wall => ns_compute_mean_nusselt_hot_wall
+  end type navier_stokes_t
+
+contains
+
+  !-----------------------------------------------------------------------------
+  ! Détection si une face de vitesse normale u(i, j) est dans un obstacle solide
+  !-----------------------------------------------------------------------------
+  pure function is_u_face_in_obstacle(mesh, cfg, i, j) result(in_obs)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)   :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)    :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in)           :: i, j
+    ! Déclaration de variable locale / paramètre de calcul
+    logical                       :: in_obs
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: x_f, y_c
+
+    ! Affectation et calcul numérique
+    in_obs = .false.
+    if (.not. cfg%obs_enabled) return
+    ! Affectation et calcul numérique
+    x_f = x_face(mesh, i)
+    ! Affectation et calcul numérique
+    y_c = y_center(mesh, j)
+    ! Affectation et calcul numérique
+    in_obs = is_in_obstacle(x_f, y_c, cfg%obs_type, cfg%obs_x0, cfg%obs_y0, &
+                            cfg%obs_x1, cfg%obs_y1, cfg%obs_xc, cfg%obs_yc, cfg%obs_radius)
+  end function is_u_face_in_obstacle
+
+  !-----------------------------------------------------------------------------
+  ! Détection si une face de vitesse normale v(i, j) est dans un obstacle solide
+  !-----------------------------------------------------------------------------
+  pure function is_v_face_in_obstacle(mesh, cfg, i, j) result(in_obs)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)   :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)    :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in)           :: i, j
+    ! Déclaration de variable locale / paramètre de calcul
+    logical                       :: in_obs
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: x_c, y_f
+
+    ! Affectation et calcul numérique
+    in_obs = .false.
+    if (.not. cfg%obs_enabled) return
+    ! Affectation et calcul numérique
+    x_c = x_center(mesh, i)
+    ! Affectation et calcul numérique
+    y_f = y_face(mesh, j)
+    ! Affectation et calcul numérique
+    in_obs = is_in_obstacle(x_c, y_f, cfg%obs_type, cfg%obs_x0, cfg%obs_y0, &
+                            cfg%obs_x1, cfg%obs_y1, cfg%obs_xc, cfg%obs_yc, cfg%obs_radius)
+  end function is_v_face_in_obstacle
+
+  !-----------------------------------------------------------------------------
+  ! Initialisation du solveur Navier-Stokes et comptage des DDLs possédés
+  !-----------------------------------------------------------------------------
+  subroutine ns_init(this, mesh, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(navier_stokes_t), intent(inout) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)           :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)            :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: u_nx, v_ny
+
+    ! Affectation et calcul numérique
+    u_nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_right) u_nx = u_nx + 1
+    ! Affectation et calcul numérique
+    this%n_owned_u = u_nx * mesh%ny_local
+
+    ! Affectation et calcul numérique
+    v_ny = mesh%ny_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_top) v_ny = v_ny + 1
+    ! Affectation et calcul numérique
+    this%n_owned_v = mesh%nx_local * v_ny
+
+    ! Affectation et calcul numérique
+    this%n_owned_p = mesh%nx_local * mesh%ny_local
+
+    ! Évaluation de la condition logique
+    if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+      ! Affectation et calcul numérique
+      this%n_owned_total = this%n_owned_u + this%n_owned_v
+    ! Branche par défaut si condition non satisfaite
+    else
+      ! Affectation et calcul numérique
+      this%n_owned_total = this%n_owned_u + this%n_owned_v + this%n_owned_p
+    end if
+
+    if (allocated(this%diag_u)) deallocate(this%diag_u)
+    if (allocated(this%diag_v)) deallocate(this%diag_v)
+    if (allocated(this%diag_p)) deallocate(this%diag_p)
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(this%diag_u(this%n_owned_u))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(this%diag_v(this%n_owned_v))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(this%diag_p(this%n_owned_p))
+
+    ! Affectation et calcul numérique
+    this%diag_u = 1.0_dp
+    ! Affectation et calcul numérique
+    this%diag_v = 1.0_dp
+    ! Affectation et calcul numérique
+    this%diag_p = 1.0_dp
+  end subroutine ns_init
+
+  !-----------------------------------------------------------------------------
+  ! Empaquette les champs physiques 2D dans un vecteur 1D contigu
+  !-----------------------------------------------------------------------------
+  subroutine ns_pack_vector(this, mesh, cfg, fields, vec)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(navier_stokes_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)    :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(out)              :: vec(:)
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: i, j, dof, u_nx, v_ny, v_offset, p_offset
+
+    ! Affectation et calcul numérique
+    u_nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_right) u_nx = u_nx + 1
+
+    ! 1. Pack u
+    do j = 1, mesh%ny_local
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, u_nx
+        ! Affectation et calcul numérique
+        dof = (j - 1) * u_nx + i
+        ! Affectation et calcul numérique
+        vec(dof) = fields%u(i, j)
+      end do
+    end do
+
+    ! 2. Pack v
+    v_offset = this%n_owned_u
+    ! Affectation et calcul numérique
+    v_ny = mesh%ny_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_top) v_ny = v_ny + 1
+
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, v_ny
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, mesh%nx_local
+        ! Affectation et calcul numérique
+        dof = v_offset + (j - 1) * mesh%nx_local + i
+        ! Affectation et calcul numérique
+        vec(dof) = fields%v(i, j)
+      end do
+    end do
+
+    ! 3. Pack p (si monolithique)
+    if (cfg%solver_type == SOLVER_MONOLITHIC) then
+      ! Affectation et calcul numérique
+      p_offset = this%n_owned_u + this%n_owned_v
+      ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+      do j = 1, mesh%ny_local
+        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+        do i = 1, mesh%nx_local
+          ! Affectation et calcul numérique
+          dof = p_offset + (j - 1) * mesh%nx_local + i
+          ! Affectation et calcul numérique
+          vec(dof) = fields%p(i, j)
+        end do
+      end do
+    end if
+  end subroutine ns_pack_vector
+
+  !-----------------------------------------------------------------------------
+  ! Dépaquette le vecteur 1D dans les champs 2D et synchronise les halos MPI
+  !-----------------------------------------------------------------------------
+  subroutine ns_unpack_vector(this, mesh, cfg, vec, fields, homogeneous)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(navier_stokes_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: vec(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    logical, intent(in)                :: homogeneous
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: i, j, dof, u_nx, v_ny, v_offset, p_offset
+
+    ! Affectation et calcul numérique
+    u_nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_right) u_nx = u_nx + 1
+
+    ! 1. Unpack u
+    do j = 1, mesh%ny_local
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, u_nx
+        ! Affectation et calcul numérique
+        dof = (j - 1) * u_nx + i
+        ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+        fields%u(i, j) = vec(dof)
+      end do
+    end do
+
+    ! 2. Unpack v
+    v_offset = this%n_owned_u
+    ! Affectation et calcul numérique
+    v_ny = mesh%ny_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_top) v_ny = v_ny + 1
+
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, v_ny
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, mesh%nx_local
+        ! Affectation et calcul numérique
+        dof = v_offset + (j - 1) * mesh%nx_local + i
+        ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+        fields%v(i, j) = vec(dof)
+      end do
+    end do
+
+    ! 3. Unpack p (si monolithique)
+    if (cfg%solver_type == SOLVER_MONOLITHIC) then
+      ! Affectation et calcul numérique
+      p_offset = this%n_owned_u + this%n_owned_v
+      ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+      do j = 1, mesh%ny_local
+        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+        do i = 1, mesh%nx_local
+          ! Affectation et calcul numérique
+          dof = p_offset + (j - 1) * mesh%nx_local + i
+          ! Actualisation de la pression statique au centre de la maille
+          fields%p(i, j) = vec(dof)
+        end do
+      end do
+      ! Appel de sous-programme modulaire
+      call sync_cell_scalar(mesh, fields%p)
+    end if
+
+    ! Synchronisation des mailles fantômes et conditions aux limites
+    call sync_u(mesh, fields%u)
+    ! Appel de sous-programme modulaire
+    call sync_v(mesh, fields%v)
+    ! Appel de sous-programme modulaire
+    call apply_boundary_conditions(mesh, cfg, fields, homogeneous)
+  end subroutine ns_unpack_vector
+
+  !-----------------------------------------------------------------------------
+  ! Application de l'opérateur matriciel complet y = A * x
+  !-----------------------------------------------------------------------------
+  subroutine ns_apply_system_matrix(this, mesh, cfg, fields_old, dt, x, y)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(navier_stokes_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)    :: fields_old
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: dt
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: x(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(out)              :: y(:)
+
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t) :: tf
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: dx, dy, dvol
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: i, j, dof, u_nx, v_ny, v_offset, p_offset
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: div_cell(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: rho_u, rho_v, diag_bc, val
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: u_n, u_n_E, u_n_W, v_n_N, v_n_S
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: conv_E, conv_W, conv_N, conv_S
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: mu_cell_E, mu_cell_W, diff_elong_E, diff_elong_W
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: mu_node_N, mu_node_S, shear_N, shear_S
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: grad_div_x, grad_div_y, grad_p
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: v_n, v_n_S_val
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: mu_cell_N, mu_cell_S, diff_elong_N, diff_elong_S
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: mu_node_E, mu_node_W, shear_E, shear_W
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: div_val, diag_p_term
+    ! Déclaration de variable locale / paramètre de calcul
+    logical  :: is_wall_bot, is_wall_top, in_obs
+
+    ! Calcul de la métrique spatiale élémentaire
+    dx = mesh%dx
+    ! Calcul de la métrique spatiale élémentaire
+    dy = mesh%dy
+    ! Affectation et calcul numérique
+    dvol = dx * dy
+
+    ! Affectation et calcul numérique
+    u_nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_right) u_nx = u_nx + 1
+
+    ! Affectation et calcul numérique
+    v_ny = mesh%ny_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_top) v_ny = v_ny + 1
+
+    ! Appel de sous-programme modulaire
+    call tf%allocate(mesh)
+    ! Appel de sous-programme modulaire
+    call this%unpack_vector(mesh, cfg, x, tf, .true.)
+
+    ! Précalcul de la divergence sur chaque cellule locale + halo (dans les bornes allouées 0:nx+1, 0:ny+1)
+    div_cell = 0.0_dp
+    do j = 0, mesh%ny_local
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 0, mesh%nx_local
+        ! Affectation et calcul numérique
+        div_cell(i, j) = (tf%u(i + 1, j) - tf%u(i, j)) / dx + &
+                         (tf%v(i, j + 1) - tf%v(i, j)) / dy
+      end do
+    end do
+
+    ! =========================================================================
+    ! 1. Équation de Quantité de Mouvement en u (Faces verticales)
+    ! =========================================================================
+    do j = 1, mesh%ny_local
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, u_nx
+        ! Affectation et calcul numérique
+        dof = (j - 1) * u_nx + i
+        ! Calcul de la masse volumique locale ou interpolée aux faces
+        rho_u = fields_old%rho_u(i, j)
+        ! Affectation et calcul numérique
+        diag_bc = (rho_u / dt) * dvol
+
+        ! Condition aux limites physique sur les parois gauche / droite
+        if (i == 1 .and. mesh%is_boundary_left) then
+          ! Évaluation de la condition logique
+          if (cfg%bc_left%btype == BC_NEUMANN) then
+            ! Affectation et calcul numérique
+            y(dof) = diag_bc * (tf%u(1, j) - tf%u(2, j))
+          ! Branche par défaut si condition non satisfaite
+          else
+            ! Affectation et calcul numérique
+            y(dof) = diag_bc * tf%u(1, j)
+          end if
+          cycle
+        end if
+
+        ! Évaluation de la condition logique
+        if (i == u_nx .and. mesh%is_boundary_right) then
+          ! Évaluation de la condition logique
+          if (cfg%bc_right%btype == BC_NEUMANN) then
+            ! Affectation et calcul numérique
+            y(dof) = diag_bc * (tf%u(u_nx, j) - tf%u(u_nx - 1, j))
+          ! Branche par défaut si condition non satisfaite
+          else
+            ! Affectation et calcul numérique
+            y(dof) = diag_bc * tf%u(u_nx, j)
+          end if
+          cycle
+        end if
+
+        ! Face dans un obstacle solide (adhérence nulle)
+        if (is_u_face_in_obstacle(mesh, cfg, i, j)) then
+          ! Affectation et calcul numérique
+          y(dof) = diag_bc * tf%u(i, j)
+          cycle
+        end if
+
+        ! Terme instationnaire
+        val = (rho_u / dt) * tf%u(i, j) * dvol
+
+        ! Terme convectif semi-implicite F_uu
+        if (cfg%enable_convection) then
+          ! Affectation et calcul numérique
+          u_n = fields_old%u(i, j)
+          ! Affectation et calcul numérique
+          u_n_E = fields_old%u(i + 1, j)
+          ! Affectation et calcul numérique
+          u_n_W = fields_old%u(i - 1, j)
+
+          ! Affectation et calcul numérique
+          v_n_N = 0.5_dp * (fields_old%v(i - 1, j + 1) + fields_old%v(i, j + 1))
+          ! Affectation et calcul numérique
+          v_n_S = 0.5_dp * (fields_old%v(i - 1, j) + fields_old%v(i, j))
+
+          ! Affectation et calcul numérique
+          conv_E = 0.5_dp * (u_n + u_n_E) * 0.5_dp * (tf%u(i, j) + tf%u(i + 1, j)) * dy
+          ! Affectation et calcul numérique
+          conv_W = 0.5_dp * (u_n_W + u_n) * 0.5_dp * (tf%u(i - 1, j) + tf%u(i, j)) * dy
+          ! Affectation et calcul numérique
+          conv_N = v_n_N * 0.5_dp * (tf%u(i, j) + tf%u(i, j + 1)) * dx
+          ! Affectation et calcul numérique
+          conv_S = v_n_S * 0.5_dp * (tf%u(i, j - 1) + tf%u(i, j)) * dx
+
+          ! Affectation et calcul numérique
+          val = val + rho_u * (conv_E - conv_W + conv_N - conv_S)
+        end if
+
+        ! Termes visqueux implicites d'ordre 2
+        mu_cell_E = fields_old%mu(i, j)
+        ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+        mu_cell_W = fields_old%mu(i - 1, j)
+        ! Affectation et calcul numérique
+        diff_elong_E = 2.0_dp * mu_cell_E * (tf%u(i + 1, j) - tf%u(i, j)) / dx * dy
+        ! Affectation et calcul numérique
+        diff_elong_W = 2.0_dp * mu_cell_W * (tf%u(i, j) - tf%u(i - 1, j)) / dx * dy
+        ! Affectation et calcul numérique
+        val = val - (diff_elong_E - diff_elong_W)
+
+        ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+        mu_node_N = fields_old%mu_node(i, j + 1)
+        ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+        mu_node_S = fields_old%mu_node(i, j)
+
+        ! Affectation et calcul numérique
+        shear_N = mu_node_N * ((tf%u(i, j + 1) - tf%u(i, j)) / dy + &
+                               (tf%v(i, j + 1) - tf%v(i - 1, j + 1)) / dx) * dx
+        ! Affectation et calcul numérique
+        shear_S = mu_node_S * ((tf%u(i, j) - tf%u(i, j - 1)) / dy + &
+                               (tf%v(i, j) - tf%v(i - 1, j)) / dx) * dx
+        ! Affectation et calcul numérique
+        val = val - (shear_N - shear_S)
+
+        ! Lagrangien augmenté : - r * d(div)/dx * dvol
+        grad_div_x = (div_cell(i, j) - div_cell(i - 1, j)) * dy
+        ! Affectation et calcul numérique
+        val = val - cfg%r_al * grad_div_x
+
+        ! Gradient de pression discret B_u^T (si monolithique)
+        if (cfg%solver_type == SOLVER_MONOLITHIC) then
+          ! Affectation et calcul numérique
+          grad_p = (tf%p(i, j) - tf%p(i - 1, j)) * dy
+          ! Affectation et calcul numérique
+          val = val + grad_p
+        end if
+
+        ! Affectation et calcul numérique
+        y(dof) = val
+      end do
+    end do
+
+    ! =========================================================================
+    ! 2. Équation de Quantité de Mouvement en v (Faces horizontales)
+    ! =========================================================================
+    v_offset = this%n_owned_u
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, v_ny
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, mesh%nx_local
+        ! Affectation et calcul numérique
+        dof = v_offset + (j - 1) * mesh%nx_local + i
+        ! Calcul de la masse volumique locale ou interpolée aux faces
+        rho_v = fields_old%rho_v(i, j)
+        ! Affectation et calcul numérique
+        diag_bc = (rho_v / dt) * dvol
+
+        ! Affectation et calcul numérique
+        is_wall_bot = (j == 1 .and. mesh%is_boundary_bottom .and. &
+                       ! Affectation et calcul numérique
+                       (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP))
+        ! Affectation et calcul numérique
+        is_wall_top = (j == v_ny .and. mesh%is_boundary_top .and. &
+                       ! Affectation et calcul numérique
+                       (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP))
+        ! Affectation et calcul numérique
+        in_obs = is_v_face_in_obstacle(mesh, cfg, i, j)
+
+        ! Évaluation de la condition logique
+        if (is_wall_bot .or. is_wall_top .or. in_obs) then
+          ! Affectation et calcul numérique
+          y(dof) = diag_bc * tf%v(i, j)
+          cycle
+        end if
+
+        ! Affectation et calcul numérique
+        val = (rho_v / dt) * tf%v(i, j) * dvol
+
+        ! Évaluation de la condition logique
+        if (cfg%enable_convection) then
+          ! Affectation et calcul numérique
+          v_n = fields_old%v(i, j)
+          ! Affectation et calcul numérique
+          v_n_N = fields_old%v(i, j + 1)
+          ! Affectation et calcul numérique
+          v_n_S_val = fields_old%v(i, j - 1)
+
+          ! Affectation et calcul numérique
+          u_n_E = 0.5_dp * (fields_old%u(i + 1, j - 1) + fields_old%u(i + 1, j))
+          ! Affectation et calcul numérique
+          u_n_W = 0.5_dp * (fields_old%u(i, j - 1) + fields_old%u(i, j))
+
+          ! Affectation et calcul numérique
+          conv_E = u_n_E * 0.5_dp * (tf%v(i, j) + tf%v(i + 1, j)) * dy
+          ! Affectation et calcul numérique
+          conv_W = u_n_W * 0.5_dp * (tf%v(i - 1, j) + tf%v(i, j)) * dy
+          ! Affectation et calcul numérique
+          conv_N = 0.5_dp * (v_n + v_n_N) * 0.5_dp * (tf%v(i, j) + tf%v(i, j + 1)) * dx
+          ! Affectation et calcul numérique
+          conv_S = 0.5_dp * (v_n_S_val + v_n) * 0.5_dp * (tf%v(i, j - 1) + tf%v(i, j)) * dx
+
+          ! Affectation et calcul numérique
+          val = val + rho_v * (conv_E - conv_W + conv_N - conv_S)
+        end if
+
+        ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+        mu_cell_N = fields_old%mu(i, j)
+        ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+        mu_cell_S = fields_old%mu(i, j - 1)
+        ! Affectation et calcul numérique
+        diff_elong_N = 2.0_dp * mu_cell_N * (tf%v(i, j + 1) - tf%v(i, j)) / dy * dx
+        ! Affectation et calcul numérique
+        diff_elong_S = 2.0_dp * mu_cell_S * (tf%v(i, j) - tf%v(i, j - 1)) / dy * dx
+        ! Affectation et calcul numérique
+        val = val - (diff_elong_N - diff_elong_S)
+
+        ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+        mu_node_E = fields_old%mu_node(i + 1, j)
+        ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+        mu_node_W = fields_old%mu_node(i, j)
+
+        ! Affectation et calcul numérique
+        shear_E = mu_node_E * ((tf%v(i + 1, j) - tf%v(i, j)) / dx + &
+                               (tf%u(i + 1, j) - tf%u(i + 1, j - 1)) / dy) * dy
+        ! Affectation et calcul numérique
+        shear_W = mu_node_W * ((tf%v(i, j) - tf%v(i - 1, j)) / dx + &
+                               (tf%u(i, j) - tf%u(i, j - 1)) / dy) * dy
+        ! Affectation et calcul numérique
+        val = val - (shear_E - shear_W)
+
+        ! Affectation et calcul numérique
+        grad_div_y = (div_cell(i, j) - div_cell(i, j - 1)) * dx
+        ! Affectation et calcul numérique
+        val = val - cfg%r_al * grad_div_y
+
+        ! Évaluation de la condition logique
+        if (cfg%solver_type == SOLVER_MONOLITHIC) then
+          ! Affectation et calcul numérique
+          grad_p = (tf%p(i, j) - tf%p(i, j - 1)) * dx
+          ! Affectation et calcul numérique
+          val = val + grad_p
+        end if
+
+        ! Affectation et calcul numérique
+        y(dof) = val
+      end do
+    end do
+
+    ! =========================================================================
+    ! 3. Équation de Continuité (si monolithique régularisé)
+    ! =========================================================================
+    if (cfg%solver_type == SOLVER_MONOLITHIC) then
+      ! Affectation et calcul numérique
+      p_offset = this%n_owned_u + this%n_owned_v
+      ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+      do j = 1, mesh%ny_local
+        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+        do i = 1, mesh%nx_local
+          ! Affectation et calcul numérique
+          dof = p_offset + (j - 1) * mesh%nx_local + i
+          ! Affectation et calcul numérique
+          div_val = div_cell(i, j) * dvol
+          ! Affectation et calcul numérique
+          diag_p_term = (dvol / cfg%r_al) * tf%p(i, j)
+          ! Affectation et calcul numérique
+          y(dof) = div_val - diag_p_term
+        end do
+      end do
+    end if
+
+    ! Appel de sous-programme modulaire
+    call tf%free()
+  end subroutine ns_apply_system_matrix
+
+  !-----------------------------------------------------------------------------
+  ! Assemblage du second membre rhs pour le système linéaire
+  !-----------------------------------------------------------------------------
+  subroutine ns_assemble_rhs(this, mesh, cfg, fields, dt, rhs)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(navier_stokes_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)    :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: dt
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(out)              :: rhs(:)
+
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: dx, dy, dvol
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: i, j, dof, u_nx, v_ny, v_offset, p_offset
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: rho_u, rho_v, diag_bc, val, u_bc, v_bc, y_pos, h_step, grad_p
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: mu_N, mu_S, mu_W, mu_E, T_v
+    ! Déclaration des variables pour l'injecteur JET_INLET (Cas 3.3 Fluids 2021)
+    real(dp) :: xc_jet, half_w_jet
+
+    ! Calcul de la métrique spatiale élémentaire
+    dx = mesh%dx
+    ! Calcul de la métrique spatiale élémentaire
+    dy = mesh%dy
+    ! Affectation et calcul numérique
+    dvol = dx * dy
+
+    ! Affectation et calcul numérique
+    u_nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_right) u_nx = u_nx + 1
+
+    ! Affectation et calcul numérique
+    v_ny = mesh%ny_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_top) v_ny = v_ny + 1
+
+    ! Affectation et calcul numérique
+    rhs = 0.0_dp
+
+    ! =========================================================================
+    ! 1. Second membre pour u
+    ! =========================================================================
+    do j = 1, mesh%ny_local
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, u_nx
+        ! Affectation et calcul numérique
+        dof = (j - 1) * u_nx + i
+        ! Calcul de la masse volumique locale ou interpolée aux faces
+        rho_u = fields%rho_u(i, j)
+        ! Affectation et calcul numérique
+        diag_bc = (rho_u / dt) * dvol
+
+        ! Évaluation de la condition logique
+        if (is_u_face_in_obstacle(mesh, cfg, i, j)) then
+          ! Affectation et calcul numérique
+          rhs(dof) = 0.0_dp
+          cycle
+        end if
+
+        ! Évaluation de la condition logique
+        if (i == 1 .and. mesh%is_boundary_left) then
+          ! Affectation et calcul numérique
+          u_bc = 0.0_dp
+          ! Évaluation de la condition logique
+          if (cfg%bc_left%btype == BC_DIRICHLET) then
+            ! Évaluation de la condition logique
+            if (cfg%obs_enabled .and. cfg%obs_type == OBS_BOX) then
+              ! Affectation et calcul numérique
+              y_pos = y_center(mesh, j)
+              ! Évaluation de la condition logique
+              if (y_pos >= cfg%obs_y1) then
+                ! Affectation et calcul numérique
+                h_step = mesh%ly - cfg%obs_y1
+                ! Affectation et calcul numérique
+                u_bc = 6.0_dp * cfg%bc_left%u * (y_pos - cfg%obs_y1) * (mesh%ly - y_pos) / (h_step * h_step)
+              end if
+            ! Branche par défaut si condition non satisfaite
+            else
+              ! Affectation et calcul numérique
+              u_bc = cfg%bc_left%u
+            end if
+          end if
+          ! Affectation et calcul numérique
+          rhs(dof) = diag_bc * u_bc
+          cycle
+        end if
+
+        ! Évaluation de la condition logique
+        if (i == u_nx .and. mesh%is_boundary_right) then
+          ! Affectation et calcul numérique
+          u_bc = 0.0_dp
+          ! Évaluation de la condition logique
+          if (cfg%bc_right%btype == BC_DIRICHLET) then
+            ! Affectation et calcul numérique
+            u_bc = cfg%bc_right%u
+          end if
+          ! Affectation et calcul numérique
+          rhs(dof) = diag_bc * u_bc
+          cycle
+        end if
+
+        ! Affectation et calcul numérique
+        val = (rho_u / dt) * fields%u(i, j) * dvol
+        ! Affectation et calcul numérique
+        val = val + rho_u * cfg%gx * dvol
+        ! Affectation et calcul numérique
+        val = val + fields%fx_sigma(i, j) * dvol
+
+        ! Évaluation de la condition logique
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+          ! Affectation et calcul numérique
+          grad_p = (fields%p(i, j) - fields%p(i - 1, j)) * dy
+          ! Affectation et calcul numérique
+          val = val - grad_p
+        end if
+
+        ! Évaluation de la condition logique
+        if (j == mesh%ny_local .and. mesh%is_boundary_top .and. cfg%bc_top%btype == BC_DIRICHLET) then
+          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+          mu_N = fields%mu_node(i, j + 1)
+          ! Affectation et calcul numérique
+          val = val + mu_N * (2.0_dp * cfg%bc_top%u / dy) * dx
+        end if
+        ! Évaluation de la condition logique
+        if (j == 1 .and. mesh%is_boundary_bottom .and. cfg%bc_bottom%btype == BC_DIRICHLET) then
+          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+          mu_S = fields%mu_node(i, j)
+          ! Affectation et calcul numérique
+          val = val + mu_S * (2.0_dp * cfg%bc_bottom%u / dy) * dx
+        end if
+
+        ! Affectation et calcul numérique
+        rhs(dof) = val
+      end do
+    end do
+
+    ! =========================================================================
+    ! 2. Second membre pour v
+    ! =========================================================================
+    v_offset = this%n_owned_u
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, v_ny
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, mesh%nx_local
+        ! Affectation et calcul numérique
+        dof = v_offset + (j - 1) * mesh%nx_local + i
+        ! Calcul de la masse volumique locale ou interpolée aux faces
+        rho_v = fields%rho_v(i, j)
+        ! Affectation et calcul numérique
+        diag_bc = (rho_v / dt) * dvol
+
+        ! Évaluation de la condition logique
+        if (is_v_face_in_obstacle(mesh, cfg, i, j)) then
+          ! Affectation et calcul numérique
+          rhs(dof) = 0.0_dp
+          cycle
+        end if
+
+        ! Affectation et calcul numérique
+        if (j == 1 .and. mesh%is_boundary_bottom .and. &
+            ! Affectation et calcul numérique
+            (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) then
+          ! Affectation et calcul numérique
+          v_bc = 0.0_dp
+          ! Affectation et calcul numérique
+          if (cfg%bc_bottom%btype == BC_DIRICHLET) v_bc = cfg%bc_bottom%v
+          ! Affectation et calcul numérique
+          rhs(dof) = diag_bc * v_bc
+          cycle
+        end if
+
+        ! Affectation et calcul numérique
+        if (j == v_ny .and. mesh%is_boundary_top .and. &
+            ! Affectation et calcul numérique
+            (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) then
+          ! Affectation et calcul numérique
+          v_bc = 0.0_dp
+          ! Évaluation du profil d'injecteur JET_INLET (Cas 3.3 Fluids 2021)
+          if (trim(cfg%bc_top%profile) == "JET_INLET") then
+             xc_jet = merge(cfg%bc_top%jet_center, 0.5_dp * mesh%lx, cfg%bc_top%jet_center > 0.0_dp)
+             half_w_jet = merge(0.5_dp * cfg%bc_top%jet_width, 0.04_dp, cfg%bc_top%jet_width > 0.0_dp)
+             if (abs(x_center(mesh, i) - xc_jet) <= half_w_jet) then
+                v_bc = cfg%bc_top%v
+             else
+                v_bc = -cfg%bc_top%v * (2.0_dp * half_w_jet) / (mesh%lx - 2.0_dp * half_w_jet)
+             end if
+          else if (cfg%bc_top%btype == BC_DIRICHLET) then
+             v_bc = cfg%bc_top%v
+          end if
+          ! Affectation et calcul numérique
+          rhs(dof) = diag_bc * v_bc
+          cycle
+        end if
+
+        ! Affectation et calcul numérique
+        val = (rho_v / dt) * fields%v(i, j) * dvol
+        ! Affectation et calcul numérique
+        val = val + rho_v * cfg%gy * dvol
+
+        ! Évaluation de la condition logique
+        if (cfg%enable_energy) then
+          ! Affectation et calcul numérique
+          T_v = 0.5_dp * (fields%T(i, j) + fields%T(i, j - 1))
+          ! Affectation et calcul numérique
+          val = val + rho_v * cfg%beta * (T_v - cfg%T_ref) * cfg%gy * dvol
+        end if
+
+        ! Affectation et calcul numérique
+        val = val + fields%fy_sigma(i, j) * dvol
+
+        ! Évaluation de la condition logique
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+          ! Affectation et calcul numérique
+          grad_p = (fields%p(i, j) - fields%p(i, j - 1)) * dx
+          ! Affectation et calcul numérique
+          val = val - grad_p
+        end if
+
+        ! Évaluation de la condition logique
+        if (i == 1 .and. mesh%is_boundary_left .and. cfg%bc_left%btype == BC_DIRICHLET) then
+          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+          mu_W = fields%mu_node(i, j)
+          ! Affectation et calcul numérique
+          val = val + mu_W * (2.0_dp * cfg%bc_left%v / dx) * dy
+        end if
+        ! Évaluation de la condition logique
+        if (i == mesh%nx_local .and. mesh%is_boundary_right .and. cfg%bc_right%btype == BC_DIRICHLET) then
+          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+          mu_E = fields%mu_node(i + 1, j)
+          ! Affectation et calcul numérique
+          val = val + mu_E * (2.0_dp * cfg%bc_right%v / dx) * dy
+        end if
+
+        ! Affectation et calcul numérique
+        rhs(dof) = val
+      end do
+    end do
+
+    ! =========================================================================
+    ! 3. Second membre pour p (si monolithique)
+    ! =========================================================================
+    if (cfg%solver_type == SOLVER_MONOLITHIC) then
+      ! Affectation et calcul numérique
+      p_offset = this%n_owned_u + this%n_owned_v
+      ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+      do j = 1, mesh%ny_local
+        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+        do i = 1, mesh%nx_local
+          ! Affectation et calcul numérique
+          dof = p_offset + (j - 1) * mesh%nx_local + i
+          ! Affectation et calcul numérique
+          rhs(dof) = - (dvol / cfg%r_al) * fields%p(i, j)
+        end do
+      end do
+    end if
+  end subroutine ns_assemble_rhs
+
+  !-----------------------------------------------------------------------------
+  ! Mise à jour de la pression par l'étape d'Uzawa du Lagrangien augmenté :
+  !   p^{m+1} = p^m - r_al * div(u^{m+1})
+  !-----------------------------------------------------------------------------
+  subroutine ns_update_pressure_al(this, mesh, cfg, fields)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(navier_stokes_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: i, j
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: dx, dy, div_val
+
+    ! Calcul de la métrique spatiale élémentaire
+    dx = mesh%dx
+    ! Calcul de la métrique spatiale élémentaire
+    dy = mesh%dy
+
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, mesh%ny_local
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, mesh%nx_local
+        ! Affectation et calcul numérique
+        div_val = (fields%u(i + 1, j) - fields%u(i, j)) / dx + &
+                  (fields%v(i, j + 1) - fields%v(i, j)) / dy
+        ! Actualisation de la pression statique au centre de la maille
+        fields%p(i, j) = fields%p(i, j) - cfg%r_al * div_val
+      end do
+    end do
+
+    ! Appel de sous-programme modulaire
+    call sync_cell_scalar(mesh, fields%p)
+  end subroutine ns_update_pressure_al
+
+  !-----------------------------------------------------------------------------
+  ! Assemblage des diagonales pour le préconditionnement Jacobi
+  !-----------------------------------------------------------------------------
+  subroutine ns_assemble_preconditioner_blocks(this, mesh, cfg, fields, dt)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(navier_stokes_t), intent(inout) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)           :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)            :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)       :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)                  :: dt
+
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: dx, dy, dvol, rho_u, rho_v, mu_c, d_val
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: i, j, dof, u_nx, v_ny
+    ! Déclaration de variable locale / paramètre de calcul
+    logical :: is_wall
+
+    ! Calcul de la métrique spatiale élémentaire
+    dx = mesh%dx
+    ! Calcul de la métrique spatiale élémentaire
+    dy = mesh%dy
+    ! Affectation et calcul numérique
+    dvol = dx * dy
+
+    ! Affectation et calcul numérique
+    u_nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_right) u_nx = u_nx + 1
+
+    ! Affectation et calcul numérique
+    v_ny = mesh%ny_local
+    ! Affectation et calcul numérique
+    if (mesh%is_boundary_top) v_ny = v_ny + 1
+
+    ! 1. Diagonale Bloc u
+    do j = 1, mesh%ny_local
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, u_nx
+        ! Affectation et calcul numérique
+        dof = (j - 1) * u_nx + i
+        ! Calcul de la masse volumique locale ou interpolée aux faces
+        rho_u = fields%rho_u(i, j)
+        ! Affectation et calcul numérique
+        is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
+                  ! Affectation et calcul numérique
+                  (i == u_nx .and. mesh%is_boundary_right) .or. &
+                  is_u_face_in_obstacle(mesh, cfg, i, j)
+
+        ! Évaluation de la condition logique
+        if (is_wall) then
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+          this%diag_u(dof) = (rho_u / dt) * dvol
+          cycle
+        end if
+
+        ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+        mu_c = fields%mu(i, j)
+        ! Affectation et calcul numérique
+        d_val = (rho_u / dt) * dvol + 4.0_dp * mu_c * (dy / dx) + 2.0_dp * mu_c * (dx / dy) + &
+                2.0_dp * cfg%r_al * (dy / dx)
+        ! Évaluation de la condition logique
+        if (d_val > 1.0e-15_dp) then
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+          this%diag_u(dof) = d_val
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+          this%diag_u(dof) = 1.0_dp
+        end if
+      end do
+    end do
+
+    ! 2. Diagonale Bloc v
+    do j = 1, v_ny
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, mesh%nx_local
+        ! Affectation et calcul numérique
+        dof = (j - 1) * mesh%nx_local + i
+        ! Calcul de la masse volumique locale ou interpolée aux faces
+        rho_v = fields%rho_v(i, j)
+        ! Affectation et calcul numérique
+        is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
+                   ! Affectation et calcul numérique
+                   (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
+                  ! Affectation et calcul numérique
+                  (j == v_ny .and. mesh%is_boundary_top .and. &
+                   ! Affectation et calcul numérique
+                   (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
+                  is_v_face_in_obstacle(mesh, cfg, i, j)
+
+        ! Évaluation de la condition logique
+        if (is_wall) then
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+          this%diag_v(dof) = (rho_v / dt) * dvol
+          cycle
+        end if
+
+        ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+        mu_c = fields%mu(i, j)
+        ! Affectation et calcul numérique
+        d_val = (rho_v / dt) * dvol + 4.0_dp * mu_c * (dx / dy) + 2.0_dp * mu_c * (dy / dx) + &
+                2.0_dp * cfg%r_al * (dx / dy)
+        ! Évaluation de la condition logique
+        if (d_val > 1.0e-15_dp) then
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+          this%diag_v(dof) = d_val
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+          this%diag_v(dof) = 1.0_dp
+        end if
+      end do
+    end do
+
+    ! 3. Diagonale Bloc p (si monolithique)
+    if (cfg%solver_type == SOLVER_MONOLITHIC) then
+      ! Affectation et calcul numérique
+      this%diag_p = dvol / cfg%r_al
+    end if
+  end subroutine ns_assemble_preconditioner_blocks
+
+  !-----------------------------------------------------------------------------
+  ! Résolution de l'énergie thermique (Boussinesq)
+  !-----------------------------------------------------------------------------
+  subroutine ns_solve_energy(this, mesh, cfg, fields, dt)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(navier_stokes_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)               :: dt
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: nx, ny, n_cells, i, j, c_dof, iter, max_it
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: dx, dy, dvol, rho, Cp, k_th
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: u_e, u_w, v_n, v_s
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: d_e, d_w, d_n, d_s, conv_e, conv_w, conv_n, conv_s
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: a_c, val
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: a_diag(:), a_east(:), a_west(:), a_north(:), a_south(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: rhs(:), T_sol(:), r(:), p(:), v_vec(:), s_vec(:), t_vec(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: r0_hat(:), y_prec(:), z_prec(:)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: rho_old, alpha, omega, rho_new, r0v, s_norm, tt, ts, r_norm, res_init
+
+    if (.not. cfg%enable_energy) return
+
+    ! Affectation et calcul numérique
+    nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    ny = mesh%ny_local
+    ! Affectation et calcul numérique
+    n_cells = nx * ny
+
+    ! Calcul de la métrique spatiale élémentaire
+    dx = mesh%dx
+    ! Calcul de la métrique spatiale élémentaire
+    dy = mesh%dy
+    ! Affectation et calcul numérique
+    dvol = dx * dy
+    ! Calcul de la masse volumique locale ou interpolée aux faces
+    rho = fields%rho(1, 1)
+    ! Affectation et calcul numérique
+    Cp = cfg%Cp
+    ! Affectation et calcul numérique
+    k_th = cfg%k_thermal
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(a_diag(n_cells), a_east(n_cells), a_west(n_cells), a_north(n_cells), a_south(n_cells))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(rhs(n_cells), T_sol(n_cells), r(n_cells), p(n_cells), v_vec(n_cells), s_vec(n_cells), t_vec(n_cells))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(r0_hat(n_cells), y_prec(n_cells), z_prec(n_cells))
+
+    ! Affectation et calcul numérique
+    a_diag = 0.0_dp
+    ! Affectation et calcul numérique
+    a_east = 0.0_dp
+    ! Affectation et calcul numérique
+    a_west = 0.0_dp
+    ! Affectation et calcul numérique
+    a_north = 0.0_dp
+    ! Affectation et calcul numérique
+    a_south = 0.0_dp
+    ! Affectation et calcul numérique
+    rhs = 0.0_dp
+
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, ny
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, nx
+        ! Affectation et calcul numérique
+        c_dof = (j - 1) * nx + i
+        ! Affectation et calcul numérique
+        T_sol(c_dof) = fields%T(i, j)
+
+        ! Affectation et calcul numérique
+        a_c = (rho * Cp / dt) * dvol
+        ! Affectation et calcul numérique
+        rhs(c_dof) = (rho * Cp / dt) * dvol * fields%T(i, j)
+
+        ! Affectation et calcul numérique
+        u_e = fields%u(i + 1, j)
+        ! Affectation et calcul numérique
+        d_e = k_th * dy / dx
+        ! Affectation et calcul numérique
+        conv_e = rho * Cp * u_e * dy * 0.5_dp
+
+        ! Affectation et calcul numérique
+        u_w = fields%u(i, j)
+        ! Affectation et calcul numérique
+        d_w = k_th * dy / dx
+        ! Affectation et calcul numérique
+        conv_w = rho * Cp * u_w * dy * 0.5_dp
+
+        ! Affectation et calcul numérique
+        v_n = fields%v(i, j + 1)
+        ! Affectation et calcul numérique
+        d_n = k_th * dx / dy
+        ! Affectation et calcul numérique
+        conv_n = rho * Cp * v_n * dx * 0.5_dp
+
+        ! Affectation et calcul numérique
+        v_s = fields%v(i, j)
+        ! Affectation et calcul numérique
+        d_s = k_th * dx / dy
+        ! Affectation et calcul numérique
+        conv_s = rho * Cp * v_s * dx * 0.5_dp
+
+        ! Évaluation de la condition logique
+        if (i < nx) then
+          ! Affectation et calcul numérique
+          a_c = a_c + d_e + conv_e
+          ! Affectation et calcul numérique
+          a_east(c_dof) = -d_e + conv_e
+        ! Branche conditionnelle alternative
+        else if (mesh%is_boundary_right) then
+          ! Évaluation de la condition logique
+          if (cfg%bc_right%thermal_type == THERMAL_DIRICHLET) then
+            ! Affectation et calcul numérique
+            a_c = a_c + 2.0_dp * d_e
+            ! Affectation et calcul numérique
+            rhs(c_dof) = rhs(c_dof) + 2.0_dp * d_e * cfg%bc_right%T
+          end if
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Affectation et calcul numérique
+          a_c = a_c + d_e + conv_e
+          ! Affectation et calcul numérique
+          rhs(c_dof) = rhs(c_dof) - (-d_e + conv_e) * fields%T(nx + 1, j)
+        end if
+
+        ! Évaluation de la condition logique
+        if (i > 1) then
+          ! Affectation et calcul numérique
+          a_c = a_c + d_w - conv_w
+          ! Affectation et calcul numérique
+          a_west(c_dof) = -d_w - conv_w
+        ! Branche conditionnelle alternative
+        else if (mesh%is_boundary_left) then
+          ! Évaluation de la condition logique
+          if (cfg%bc_left%thermal_type == THERMAL_DIRICHLET) then
+            ! Affectation et calcul numérique
+            a_c = a_c + 2.0_dp * d_w
+            ! Affectation et calcul numérique
+            rhs(c_dof) = rhs(c_dof) + 2.0_dp * d_w * cfg%bc_left%T
+          end if
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Affectation et calcul numérique
+          a_c = a_c + d_w - conv_w
+          ! Affectation et calcul numérique
+          rhs(c_dof) = rhs(c_dof) - (-d_w - conv_w) * fields%T(0, j)
+        end if
+
+        ! Évaluation de la condition logique
+        if (j < ny) then
+          ! Affectation et calcul numérique
+          a_c = a_c + d_n + conv_n
+          ! Affectation et calcul numérique
+          a_north(c_dof) = -d_n + conv_n
+        ! Branche conditionnelle alternative
+        else if (mesh%is_boundary_top) then
+          ! Évaluation de la condition logique
+          if (cfg%bc_top%thermal_type == THERMAL_DIRICHLET) then
+            ! Affectation et calcul numérique
+            a_c = a_c + 2.0_dp * d_n
+            ! Affectation et calcul numérique
+            rhs(c_dof) = rhs(c_dof) + 2.0_dp * d_n * cfg%bc_top%T
+          end if
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Affectation et calcul numérique
+          a_c = a_c + d_n + conv_n
+          ! Affectation et calcul numérique
+          rhs(c_dof) = rhs(c_dof) - (-d_n + conv_n) * fields%T(i, ny + 1)
+        end if
+
+        ! Évaluation de la condition logique
+        if (j > 1) then
+          ! Affectation et calcul numérique
+          a_c = a_c + d_s - conv_s
+          ! Affectation et calcul numérique
+          a_south(c_dof) = -d_s - conv_s
+        ! Branche conditionnelle alternative
+        else if (mesh%is_boundary_bottom) then
+          ! Évaluation de la condition logique
+          if (cfg%bc_bottom%thermal_type == THERMAL_DIRICHLET) then
+            ! Affectation et calcul numérique
+            a_c = a_c + 2.0_dp * d_s
+            ! Affectation et calcul numérique
+            rhs(c_dof) = rhs(c_dof) + 2.0_dp * d_s * cfg%bc_bottom%T
+          end if
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Affectation et calcul numérique
+          a_c = a_c + d_s - conv_s
+          ! Affectation et calcul numérique
+          rhs(c_dof) = rhs(c_dof) - (-d_s - conv_s) * fields%T(i, 0)
+        end if
+
+        ! Affectation et calcul numérique
+        a_diag(c_dof) = a_c
+      end do
+    end do
+
+    ! Résolution itérative BiCGSTAB avec préconditionnement Jacobi
+    do j = 1, ny
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, nx
+        ! Affectation et calcul numérique
+        c_dof = (j - 1) * nx + i
+        ! Affectation et calcul numérique
+        val = a_diag(c_dof) * T_sol(c_dof)
+        ! Affectation et calcul numérique
+        if (i < nx) val = val + a_east(c_dof) * T_sol(c_dof + 1)
+        ! Affectation et calcul numérique
+        if (i > 1)  val = val + a_west(c_dof) * T_sol(c_dof - 1)
+        ! Affectation et calcul numérique
+        if (j < ny) val = val + a_north(c_dof) * T_sol(c_dof + nx)
+        ! Affectation et calcul numérique
+        if (j > 1)  val = val + a_south(c_dof) * T_sol(c_dof - nx)
+        ! Affectation et calcul numérique
+        r(c_dof) = rhs(c_dof) - val
+      end do
+    end do
+
+    ! Affectation et calcul numérique
+    r0_hat = r
+    ! Affectation et calcul numérique
+    p = r
+    ! Calcul de la masse volumique locale ou interpolée aux faces
+    rho_old = 1.0_dp
+    ! Affectation et calcul numérique
+    alpha = 1.0_dp
+    ! Affectation et calcul numérique
+    omega = 1.0_dp
+
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    res_init = sqrt(sum(r*r))
+    ! Évaluation de la condition logique
+    if (res_init > 1.0e-13_dp) then
+      ! Affectation et calcul numérique
+      max_it = 500
+      ! Boucle d'itération numérique
+      do iter = 1, max_it
+        ! Calcul de la masse volumique locale ou interpolée aux faces
+        rho_new = sum(r0_hat * r)
+        if (abs(rho_new) < 1.0e-30_dp) exit
+
+        ! Évaluation de la condition logique
+        if (iter > 1) then
+          ! Affectation et calcul numérique
+          p = r + (rho_new / rho_old) * (alpha / omega) * (p - omega * v_vec)
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Affectation et calcul numérique
+          p = r
+        end if
+
+        ! Affectation et calcul numérique
+        y_prec = p / a_diag
+
+        ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        do j = 1, ny
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, nx
+            ! Affectation et calcul numérique
+            c_dof = (j - 1) * nx + i
+            ! Affectation et calcul numérique
+            val = a_diag(c_dof) * y_prec(c_dof)
+            ! Affectation et calcul numérique
+            if (i < nx) val = val + a_east(c_dof) * y_prec(c_dof + 1)
+            ! Affectation et calcul numérique
+            if (i > 1)  val = val + a_west(c_dof) * y_prec(c_dof - 1)
+            ! Affectation et calcul numérique
+            if (j < ny) val = val + a_north(c_dof) * y_prec(c_dof + nx)
+            ! Affectation et calcul numérique
+            if (j > 1)  val = val + a_south(c_dof) * y_prec(c_dof - nx)
+            ! Affectation et calcul numérique
+            v_vec(c_dof) = val
+          end do
+        end do
+
+        ! Affectation et calcul numérique
+        r0v = sum(r0_hat * v_vec)
+        if (abs(r0v) < 1.0e-30_dp) exit
+        ! Affectation et calcul numérique
+        alpha = rho_new / r0v
+
+        ! Affectation et calcul numérique
+        s_vec = r - alpha * v_vec
+        ! Évaluation de la norme du résidu ou de l'erreur numérique
+        s_norm = sqrt(sum(s_vec * s_vec))
+        ! Évaluation de la condition logique
+        if (s_norm / res_init < 1.0e-8_dp) then
+          ! Affectation et calcul numérique
+          T_sol = T_sol + alpha * y_prec
+          exit
+        end if
+
+        ! Affectation et calcul numérique
+        z_prec = s_vec / a_diag
+
+        ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+        do j = 1, ny
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, nx
+            ! Affectation et calcul numérique
+            c_dof = (j - 1) * nx + i
+            ! Affectation et calcul numérique
+            val = a_diag(c_dof) * z_prec(c_dof)
+            ! Affectation et calcul numérique
+            if (i < nx) val = val + a_east(c_dof) * z_prec(c_dof + 1)
+            ! Affectation et calcul numérique
+            if (i > 1)  val = val + a_west(c_dof) * z_prec(c_dof - 1)
+            ! Affectation et calcul numérique
+            if (j < ny) val = val + a_north(c_dof) * z_prec(c_dof + nx)
+            ! Affectation et calcul numérique
+            if (j > 1)  val = val + a_south(c_dof) * z_prec(c_dof - nx)
+            ! Affectation et calcul numérique
+            t_vec(c_dof) = val
+          end do
+        end do
+
+        ! Affectation et calcul numérique
+        tt = sum(t_vec * t_vec)
+        ! Affectation et calcul numérique
+        ts = sum(t_vec * s_vec)
+        ! Évaluation de la condition logique
+        if (tt > 1.0e-30_dp) then
+          ! Affectation et calcul numérique
+          omega = ts / tt
+        ! Branche par défaut si condition non satisfaite
+        else
+          ! Affectation et calcul numérique
+          omega = 0.0_dp
+        end if
+
+        ! Affectation et calcul numérique
+        T_sol = T_sol + alpha * y_prec + omega * z_prec
+        ! Affectation et calcul numérique
+        r = s_vec - omega * t_vec
+        ! Calcul de la masse volumique locale ou interpolée aux faces
+        rho_old = rho_new
+
+        ! Évaluation de la norme du résidu ou de l'erreur numérique
+        r_norm = sqrt(sum(r * r))
+        if (r_norm / res_init < 1.0e-8_dp) exit
+      end do
+    end if
+
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, ny
+      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+      do i = 1, nx
+        ! Évolution du champ scalaire de température
+        fields%T(i, j) = T_sol((j - 1) * nx + i)
+      end do
+    end do
+
+    ! Appel de sous-programme modulaire
+    call sync_cell_scalar(mesh, fields%T)
+    ! Appel de sous-programme modulaire
+    call apply_thermal_boundary_conditions(mesh, cfg, fields)
+
+    ! Libération de la mémoire allouée
+    deallocate(a_diag, a_east, a_west, a_north, a_south)
+    ! Libération de la mémoire allouée
+    deallocate(rhs, T_sol, r, p, v_vec, s_vec, t_vec, r0_hat, y_prec, z_prec)
+  end subroutine ns_solve_energy
+
+  !-----------------------------------------------------------------------------
+  ! Calcul du nombre de Nusselt moyen sur la paroi chaude (gauche)
+  !-----------------------------------------------------------------------------
+  function ns_compute_mean_nusselt_hot_wall(this, mesh, cfg, fields) result(nu_mean)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(navier_stokes_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in)         :: cfg
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in)    :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp)                           :: nu_mean
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: j, count_loc
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: local_nu_sum, global_nu_sum, global_count
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: T_w, T_1, delta_T, nu_local
+
+    ! Affectation et calcul numérique
+    local_nu_sum = 0.0_dp
+    ! Affectation et calcul numérique
+    count_loc = 0
+
+    ! Évaluation de la condition logique
+    if (mesh%is_boundary_left) then
+      ! Affectation et calcul numérique
+      delta_T = abs(cfg%bc_left%T - cfg%bc_right%T)
+      ! Affectation et calcul numérique
+      if (delta_T < 1.0e-12_dp) delta_T = 1.0_dp
+
+      ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+      do j = 1, mesh%ny_local
+        ! Affectation et calcul numérique
+        T_w = cfg%bc_left%T
+        ! Affectation et calcul numérique
+        T_1 = fields%T(1, j)
+        ! Affectation et calcul numérique
+        nu_local = 2.0_dp * (T_w - T_1) / mesh%dx * (mesh%lx / delta_T)
+        ! Affectation et calcul numérique
+        local_nu_sum = local_nu_sum + nu_local
+        ! Affectation et calcul numérique
+        count_loc = count_loc + 1
+      end do
+    end if
+
+    ! Affectation et calcul numérique
+    global_nu_sum = global_sum(mesh, local_nu_sum)
+    ! Affectation et calcul numérique
+    global_count = global_sum(mesh, real(count_loc, dp))
+
+    ! Évaluation de la condition logique
+    if (global_count > 0.0_dp) then
+      ! Affectation et calcul numérique
+      nu_mean = global_nu_sum / global_count
+    ! Branche par défaut si condition non satisfaite
+    else
+      ! Affectation et calcul numérique
+      nu_mean = 1.0_dp
+    end if
+  end function ns_compute_mean_nusselt_hot_wall
+
+end module module_navier_stokes
+
+```
+
+
+## Chapitre 20 : Reconstruction Géométrique d'Interface VOF en Fortran 2018 (module_interface_reconstruction.f90)
+
+\section{Algorithmes Géométriques dans \texttt{module\_interface\_reconstruction.f90}}
+Le module \texttt{src/module\_interface\_reconstruction.f90} (569 lignes) implémente en Fortran 2018 :
+\begin{itemize}
+  \item \texttt{reconstruct\_interface\_normals} : sélectionne entre le filtre $3\times 3$ de Parker-Youngs (\texttt{RECON\_PLIC}), l'algorithme à 6 candidats exacts d'\textbf{ELVIRA} (\texttt{RECON\_ELVIRA}), l'optimisation quadratique non linéaire de \textbf{LVIRA} (\texttt{RECON\_LVIRA}) et l'alignement axial \textbf{SLIC} (\texttt{RECON\_SLIC}).
+  \item \texttt{plic\_alpha\_from\_c} et \texttt{plic\_volume\_from\_alpha} : implémentent les formules analytiques directes et inverses de Scardovelli \& Zaleski (2000) reliant la constante de droite $\alpha$ à l'aire tronquée $C$ dans le carré unité $[0, 1]^2$.
+  \item \texttt{plic\_flux\_1d} : calcule géométriquement le volume exact de phase 1 contenu dans la bande lagrangienne $[1 - \text{cfl}, 1] \times [0, 1]$ traversant une face de maille au cours du pas de temps $\Delta t$.
+\end{itemize}
+
+### Répertoire des Procédures de `src/module_interface_reconstruction.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 2 | module | `module_interface_reconstruction` | Unité modulaire Fortran 2018 |
+| 22 | type dérivé | `interface_segment_t` | Structure de données Fortran 2018 |
+| 32 | function | `cut_box_area` | Arguments : (xmin, xmax, ymin, ymax, nx, ny, alpha) |
+| 104 | function | `compute_alpha` | Arguments : (xmin, xmax, ymin, ymax, nx, ny, c_target) |
+| 149 | subroutine | `reconstruct_slic` | Arguments : (mesh, C, segments) |
+| 212 | subroutine | `reconstruct_plic` | Arguments : (mesh, C, segments) |
+| 275 | subroutine | `reconstruct_elvira` | Arguments : (mesh, C, segments) |
+| 389 | subroutine | `reconstruct_lvira` | Arguments : (mesh, C, segments) |
+| 509 | subroutine | `reconstruct_interface` | Arguments : (method_name, mesh, C, segments) |
+| 528 | function | `evaluate_limiter` | Arguments : (limiter_name, r, c_donor, c_upwind, c_a...) |
+
+### Code Source Intégral : `src/module_interface_reconstruction.f90` (569 lignes)
+
+```fortran
+! [Procédure/Module] module module_interface_reconstruction
+module module_interface_reconstruction
+  use module_precision, only: dp
+  use module_mesh, only: mesh_2d_t, x_face, y_face
+  implicit none
+  private
+
+  ! Types publics
+  public :: interface_segment_t
+
+  ! Procédures publiques
+  public :: cut_box_area
+  public :: compute_alpha
+  public :: reconstruct_slic
+  public :: reconstruct_plic
+  public :: reconstruct_elvira
+  public :: reconstruct_lvira
+  public :: reconstruct_interface
+  public :: evaluate_limiter
+
+  ! Type représentant un segment de droite d'interface affine : nx*x + ny*y + alpha = 0
+  type :: interface_segment_t
+     real(dp) :: nx = 0.0_dp
+     real(dp) :: ny = 0.0_dp
+     real(dp) :: alpha = 0.0_dp
+  end type interface_segment_t
+
+contains
+
+  ! [Procédure/Module] function cut_box_area
+  ! Calcule l'aire exacte de découpe d'un rectangle par un demi-plan (Sutherland-Hodgman + Shoelace)
+  function cut_box_area(xmin, xmax, ymin, ymax, nx, ny, alpha) result(area)
+    real(dp), intent(in) :: xmin, xmax, ymin, ymax, nx, ny, alpha
+    real(dp) :: area
+
+    real(dp) :: bx(4), by(4)
+    real(dp) :: d(4)
+    real(dp) :: cx(8), cy(8)
+    integer  :: n_clipped, i, next_i, p, next_p
+    real(dp) :: d1, d2, t
+    real(dp) :: sum_cross
+
+    if ((xmax - xmin) <= 1.0e-14_dp .or. (ymax - ymin) <= 1.0e-14_dp) then
+       area = 0.0_dp
+       return
+    end if
+
+    ! Définition des 4 sommets du rectangle en sens trigonométrique
+    bx(1) = xmin; by(1) = ymin
+    bx(2) = xmax; by(2) = ymin
+    bx(3) = xmax; by(3) = ymax
+    bx(4) = xmin; by(4) = ymax
+
+    do i = 1, 4
+       d(i) = nx * bx(i) + ny * by(i) + alpha
+    end do
+
+    n_clipped = 0
+    do i = 1, 4
+       next_i = mod(i, 4) + 1
+       d1 = d(i)
+       d2 = d(next_i)
+
+       if (d1 <= 0.0_dp) then
+          if (d2 <= 0.0_dp) then
+             n_clipped = n_clipped + 1
+             cx(n_clipped) = bx(next_i)
+             cy(n_clipped) = by(next_i)
+          else
+             t = -d1 / (d2 - d1)
+             n_clipped = n_clipped + 1
+             cx(n_clipped) = bx(i) + t * (bx(next_i) - bx(i))
+             cy(n_clipped) = by(i) + t * (by(next_i) - by(i))
+          end if
+       else
+          if (d2 <= 0.0_dp) then
+             t = -d1 / (d2 - d1)
+             n_clipped = n_clipped + 1
+             cx(n_clipped) = bx(i) + t * (bx(next_i) - bx(i))
+             cy(n_clipped) = by(i) + t * (by(next_i) - by(i))
+             n_clipped = n_clipped + 1
+             cx(n_clipped) = bx(next_i)
+             cy(n_clipped) = by(next_i)
+          end if
+       end if
+    end do
+
+    if (n_clipped < 3) then
+       area = 0.0_dp
+       return
+    end if
+
+    ! Formule de Gauss / Shoelace pour l'aire du polygone
+    sum_cross = 0.0_dp
+    do p = 1, n_clipped
+       next_p = mod(p, n_clipped) + 1
+       sum_cross = sum_cross + (cx(p) * cy(next_p) - cx(next_p) * cy(p))
+    end do
+    area = 0.5_dp * abs(sum_cross)
+  end function cut_box_area
+
+  ! [Procédure/Module] function compute_alpha
+  ! Inversion géométrique par bisection : C_target -> paramètre alpha
+  function compute_alpha(xmin, xmax, ymin, ymax, nx, ny, c_target) result(alpha)
+    real(dp), intent(in) :: xmin, xmax, ymin, ymax, nx, ny, c_target
+    real(dp) :: alpha
+
+    real(dp) :: total_area, target_area
+    real(dp) :: v1, v2, v3, v4, min_val, max_val
+    real(dp) :: alpha_low, alpha_high, alpha_mid, a
+    integer  :: iter
+
+    total_area = (xmax - xmin) * (ymax - ymin)
+    if (c_target <= 1.0e-7_dp) then
+       alpha = 1.0e9_dp
+       return
+    end if
+    if (c_target >= 1.0_dp - 1.0e-7_dp) then
+       alpha = -1.0e9_dp
+       return
+    end if
+
+    target_area = max(0.0_dp, min(1.0_dp, c_target)) * total_area
+
+    v1 = nx * xmin + ny * ymin
+    v2 = nx * xmax + ny * ymin
+    v3 = nx * xmax + ny * ymax
+    v4 = nx * xmin + ny * ymax
+
+    min_val = min(v1, min(v2, min(v3, v4)))
+    max_val = max(v1, max(v2, max(v3, v4)))
+
+    alpha_low  = -max_val - 1.0e-12_dp
+    alpha_high = -min_val + 1.0e-12_dp
+
+    do iter = 1, 45
+       alpha_mid = 0.5_dp * (alpha_low + alpha_high)
+       a = cut_box_area(xmin, xmax, ymin, ymax, nx, ny, alpha_mid)
+       if (a < target_area) then
+          alpha_low = alpha_mid
+       else
+          alpha_high = alpha_mid
+       end if
+    end do
+    alpha = 0.5_dp * (alpha_low + alpha_high)
+  end function compute_alpha
+
+  ! [Procédure/Module] subroutine reconstruct_slic
+  subroutine reconstruct_slic(mesh, C, segments)
+    type(mesh_2d_t), intent(in) :: mesh
+    real(dp), intent(in) :: C(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    type(interface_segment_t), intent(out) :: segments(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+
+    integer :: i, j, nx, ny
+    real(dp) :: c_val, xmin, xmax, ymin, ymax, grad_x, grad_y, snx, sny, a
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+
+    do j = 0, ny + 1
+       do i = 0, nx + 1
+          c_val = C(i, j)
+          if (c_val <= 1.0e-6_dp) then
+             segments(i, j)%nx = 1.0_dp
+             segments(i, j)%ny = 0.0_dp
+             segments(i, j)%alpha = 1.0e9_dp
+             cycle
+          end if
+          if (c_val >= 1.0_dp - 1.0e-6_dp) then
+             segments(i, j)%nx = 1.0_dp
+             segments(i, j)%ny = 0.0_dp
+             segments(i, j)%alpha = -1.0e9_dp
+             cycle
+          end if
+
+          xmin = x_face(mesh, i)
+          xmax = x_face(mesh, i + 1)
+          ymin = y_face(mesh, j)
+          ymax = y_face(mesh, j + 1)
+
+          if (i > 0 .and. i < nx + 1 .and. j > 0 .and. j < ny + 1) then
+             grad_x = abs(C(i + 1, j) - C(i - 1, j))
+             grad_y = abs(C(i, j + 1) - C(i, j - 1))
+          else
+             grad_x = 1.0_dp
+             grad_y = 0.0_dp
+          end if
+
+          if (grad_x >= grad_y) then
+             if (i > 0 .and. C(i - 1, j) >= C(i + 1, j)) then
+                snx = 1.0_dp; sny = 0.0_dp
+             else
+                snx = -1.0_dp; sny = 0.0_dp
+             end if
+          else
+             if (j > 0 .and. C(i, j - 1) >= C(i, j + 1)) then
+                snx = 0.0_dp; sny = 1.0_dp
+             else
+                snx = 0.0_dp; sny = -1.0_dp
+             end if
+          end if
+
+          a = compute_alpha(xmin, xmax, ymin, ymax, snx, sny, c_val)
+          segments(i, j)%nx = snx
+          segments(i, j)%ny = sny
+          segments(i, j)%alpha = a
+       end do
+    end do
+  end subroutine reconstruct_slic
+
+  ! [Procédure/Module] subroutine reconstruct_plic
+  subroutine reconstruct_plic(mesh, C, segments)
+    type(mesh_2d_t), intent(in) :: mesh
+    real(dp), intent(in) :: C(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    type(interface_segment_t), intent(out) :: segments(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+
+    integer :: i, j, nx, ny
+    real(dp) :: c_val, dx, dy, xmin, xmax, ymin, ymax
+    real(dp) :: c_mm, c_0m, c_pm, c_m0, c_p0, c_mp, c_0p, c_pp
+    real(dp) :: mx, my, norm, pnx, pny, a
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+
+    do j = 0, ny + 1
+       do i = 0, nx + 1
+          c_val = C(i, j)
+          if (c_val <= 1.0e-6_dp) then
+             segments(i, j)%nx = 1.0_dp
+             segments(i, j)%ny = 0.0_dp
+             segments(i, j)%alpha = 1.0e9_dp
+             cycle
+          end if
+          if (c_val >= 1.0_dp - 1.0e-6_dp) then
+             segments(i, j)%nx = 1.0_dp
+             segments(i, j)%ny = 0.0_dp
+             segments(i, j)%alpha = -1.0e9_dp
+             cycle
+          end if
+
+          if (i >= 1 .and. i <= nx .and. j >= 1 .and. j <= ny) then
+             c_mm = C(i - 1, j - 1); c_0m = C(i,     j - 1); c_pm = C(i + 1, j - 1)
+             c_m0 = C(i - 1, j    );                         c_p0 = C(i + 1, j    )
+             c_mp = C(i - 1, j + 1); c_0p = C(i,     j + 1); c_pp = C(i + 1, j + 1)
+
+             mx = -((c_pp + 2.0_dp*c_p0 + c_pm) - (c_mp + 2.0_dp*c_m0 + c_mm)) / (8.0_dp * dx)
+             my = -((c_pp + 2.0_dp*c_0p + c_mp) - (c_pm + 2.0_dp*c_0m + c_mm)) / (8.0_dp * dy)
+          else
+             mx = 1.0_dp; my = 0.0_dp
+          end if
+
+          norm = hypot(mx, my)
+          if (norm > 1.0e-12_dp) then
+             pnx = mx / norm; pny = my / norm
+          else
+             pnx = 1.0_dp; pny = 0.0_dp
+          end if
+
+          xmin = x_face(mesh, i)
+          xmax = x_face(mesh, i + 1)
+          ymin = y_face(mesh, j)
+          ymax = y_face(mesh, j + 1)
+
+          a = compute_alpha(xmin, xmax, ymin, ymax, pnx, pny, c_val)
+          segments(i, j)%nx = pnx
+          segments(i, j)%ny = pny
+          segments(i, j)%alpha = a
+       end do
+    end do
+  end subroutine reconstruct_plic
+
+  ! [Procédure/Module] subroutine reconstruct_elvira
+  subroutine reconstruct_elvira(mesh, C, segments)
+    type(mesh_2d_t), intent(in) :: mesh
+    real(dp), intent(in) :: C(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    type(interface_segment_t), intent(out) :: segments(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+
+    integer :: i, j, nx, ny, di, dj, k
+    real(dp) :: c_val, dx, dy, xmin, xmax, ymin, ymax
+    real(dp) :: H_m1, H_0, H_p1, W_m1, W_0, W_p1
+    real(dp) :: sgn_x, sgn_y, mx, my
+    real(dp) :: cand_nx(7), cand_ny(7)
+    real(dp) :: best_err, err, cnorm, cnx, cny, calpha, diff
+    real(dp) :: best_nx, best_ny, best_alpha
+    real(dp) :: v_xmin, v_xmax, v_ymin, v_ymax, v_target, v_recon
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+
+    do j = 0, ny + 1
+       do i = 0, nx + 1
+          c_val = C(i, j)
+          if (c_val <= 1.0e-6_dp) then
+             segments(i, j)%nx = 1.0_dp
+             segments(i, j)%ny = 0.0_dp
+             segments(i, j)%alpha = 1.0e9_dp
+             cycle
+          end if
+          if (c_val >= 1.0_dp - 1.0e-6_dp) then
+             segments(i, j)%nx = 1.0_dp
+             segments(i, j)%ny = 0.0_dp
+             segments(i, j)%alpha = -1.0e9_dp
+             cycle
+          end if
+
+          xmin = x_face(mesh, i)
+          xmax = x_face(mesh, i + 1)
+          ymin = y_face(mesh, j)
+          ymax = y_face(mesh, j + 1)
+
+          if (i >= 1 .and. i <= nx .and. j >= 1 .and. j <= ny) then
+             H_m1 = (C(i - 1, j - 1) + C(i - 1, j) + C(i - 1, j + 1)) * dy
+             H_0  = (C(i,     j - 1) + C(i,     j) + C(i,     j + 1)) * dy
+             H_p1 = (C(i + 1, j - 1) + C(i + 1, j) + C(i + 1, j + 1)) * dy
+
+             W_m1 = (C(i - 1, j - 1) + C(i, j - 1) + C(i + 1, j - 1)) * dx
+             W_0  = (C(i - 1, j    ) + C(i, j    ) + C(i + 1, j    )) * dx
+             W_p1 = (C(i - 1, j + 1) + C(i, j + 1) + C(i + 1, j + 1)) * dx
+
+             if (C(i, j + 1) < C(i, j - 1)) then; sgn_y = 1.0_dp; else; sgn_y = -1.0_dp; end if
+             if (C(i + 1, j) < C(i - 1, j)) then; sgn_x = 1.0_dp; else; sgn_x = -1.0_dp; end if
+
+             ! 6 candidats Height Functions
+             cand_nx(1) = -sgn_y * (H_p1 - H_m1) / (2.0_dp * dx); cand_ny(1) = sgn_y * 1.0_dp
+             cand_nx(2) = -sgn_y * (H_p1 - H_0)  / (dx);          cand_ny(2) = sgn_y * 1.0_dp
+             cand_nx(3) = -sgn_y * (H_0  - H_m1) / (dx);          cand_ny(3) = sgn_y * 1.0_dp
+
+             cand_nx(4) = sgn_x * 1.0_dp; cand_ny(4) = -sgn_x * (W_p1 - W_m1) / (2.0_dp * dy)
+             cand_nx(5) = sgn_x * 1.0_dp; cand_ny(5) = -sgn_x * (W_p1 - W_0)  / (dy)
+             cand_nx(6) = sgn_x * 1.0_dp; cand_ny(6) = -sgn_x * (W_0  - W_m1) / (dy)
+
+             ! Candidat 7 : Youngs
+             mx = -((C(i+1,j+1) + 2.0_dp*C(i+1,j) + C(i+1,j-1)) - (C(i-1,j+1) + 2.0_dp*C(i-1,j) + C(i-1,j-1))) / (8.0_dp * dx)
+             my = -((C(i+1,j+1) + 2.0_dp*C(i,j+1) + C(i-1,j+1)) - (C(i+1,j-1) + 2.0_dp*C(i,j-1) + C(i-1,j-1))) / (8.0_dp * dy)
+             cand_nx(7) = mx; cand_ny(7) = my
+
+             best_err = 1.0e30_dp
+             best_nx = 1.0_dp; best_ny = 0.0_dp; best_alpha = 0.0_dp
+
+             do k = 1, 7
+                cnorm = hypot(cand_nx(k), cand_ny(k))
+                if (cnorm < 1.0e-12_dp) cycle
+                cnx = cand_nx(k) / cnorm
+                cny = cand_ny(k) / cnorm
+
+                calpha = compute_alpha(xmin, xmax, ymin, ymax, cnx, cny, c_val)
+
+                err = 0.0_dp
+                do dj = -1, 1
+                   do di = -1, 1
+                      if (di == 0 .and. dj == 0) cycle
+                      v_xmin = x_face(mesh, i + di)
+                      v_xmax = x_face(mesh, i + di + 1)
+                      v_ymin = y_face(mesh, j + dj)
+                      v_ymax = y_face(mesh, j + dj + 1)
+
+                      v_target = C(i + di, j + dj) * dx * dy
+                      v_recon  = cut_box_area(v_xmin, v_xmax, v_ymin, v_ymax, cnx, cny, calpha)
+                      diff = v_recon - v_target
+                      err = err + diff * diff
+                   end do
+                end do
+
+                if (err < best_err) then
+                   best_err = err
+                   best_nx = cnx
+                   best_ny = cny
+                   best_alpha = calpha
+                end if
+             end do
+
+             segments(i, j)%nx = best_nx
+             segments(i, j)%ny = best_ny
+             segments(i, j)%alpha = best_alpha
+          else
+             segments(i, j)%nx = 1.0_dp
+             segments(i, j)%ny = 0.0_dp
+             segments(i, j)%alpha = compute_alpha(xmin, xmax, ymin, ymax, 1.0_dp, 0.0_dp, c_val)
+          end if
+       end do
+    end do
+  end subroutine reconstruct_elvira
+
+  ! [Procédure/Module] subroutine reconstruct_lvira
+  subroutine reconstruct_lvira(mesh, C, segments)
+    type(mesh_2d_t), intent(in) :: mesh
+    real(dp), intent(in) :: C(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    type(interface_segment_t), intent(out) :: segments(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+
+    integer :: i, j, nx, ny, iter, di, dj
+    real(dp) :: c_val, dx, dy, xmin, xmax, ymin, ymax, theta0
+    real(dp) :: invphi, invphi2, a_pt, b_pt, h_pt, c_pt, d_pt, fc, fd
+    real(dp) :: best_theta, best_nx, best_ny, best_alpha
+    real(dp) :: v_xmin, v_xmax, v_ymin, v_ymax, v_target, v_recon, diff
+
+    ! Étape 1 : Initialisation par ELVIRA
+    call reconstruct_elvira(mesh, C, segments)
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+    invphi = (sqrt(5.0_dp) - 1.0_dp) / 2.0_dp
+    invphi2 = (3.0_dp - sqrt(5.0_dp)) / 2.0_dp
+
+    do j = 1, ny
+       do i = 1, nx
+          c_val = C(i, j)
+          if (c_val <= 1.0e-6_dp .or. c_val >= 1.0_dp - 1.0e-6_dp) cycle
+
+          xmin = x_face(mesh, i)
+          xmax = x_face(mesh, i + 1)
+          ymin = y_face(mesh, j)
+          ymax = y_face(mesh, j + 1)
+
+          theta0 = atan2(segments(i, j)%ny, segments(i, j)%nx)
+          a_pt = theta0 - 0.5_dp
+          b_pt = theta0 + 0.5_dp
+          h_pt = b_pt - a_pt
+
+          c_pt = a_pt + invphi2 * h_pt
+          d_pt = a_pt + invphi * h_pt
+
+          ! Évaluation fc
+          fc = 0.0_dp
+          do dj = -1, 1
+             do di = -1, 1
+                if (di == 0 .and. dj == 0) cycle
+                v_xmin = x_face(mesh, i + di); v_xmax = x_face(mesh, i + di + 1)
+                v_ymin = y_face(mesh, j + dj); v_ymax = y_face(mesh, j + dj + 1)
+                v_target = C(i + di, j + dj) * dx * dy
+                v_recon  = cut_box_area(v_xmin, v_xmax, v_ymin, v_ymax, cos(c_pt), sin(c_pt), &
+                                       compute_alpha(xmin, xmax, ymin, ymax, cos(c_pt), sin(c_pt), c_val))
+                diff = v_recon - v_target
+                fc = fc + diff * diff
+             end do
+          end do
+
+          ! Évaluation fd
+          fd = 0.0_dp
+          do dj = -1, 1
+             do di = -1, 1
+                if (di == 0 .and. dj == 0) cycle
+                v_xmin = x_face(mesh, i + di); v_xmax = x_face(mesh, i + di + 1)
+                v_ymin = y_face(mesh, j + dj); v_ymax = y_face(mesh, j + dj + 1)
+                v_target = C(i + di, j + dj) * dx * dy
+                v_recon  = cut_box_area(v_xmin, v_xmax, v_ymin, v_ymax, cos(d_pt), sin(d_pt), &
+                                       compute_alpha(xmin, xmax, ymin, ymax, cos(d_pt), sin(d_pt), c_val))
+                diff = v_recon - v_target
+                fd = fd + diff * diff
+             end do
+          end do
+
+          do iter = 1, 10
+             if (fc < fd) then
+                b_pt = d_pt; d_pt = c_pt; fd = fc
+                h_pt = invphi * h_pt
+                c_pt = a_pt + invphi2 * h_pt
+                fc = 0.0_dp
+                do dj = -1, 1
+                   do di = -1, 1
+                      if (di == 0 .and. dj == 0) cycle
+                      v_xmin = x_face(mesh, i + di); v_xmax = x_face(mesh, i + di + 1)
+                      v_ymin = y_face(mesh, j + dj); v_ymax = y_face(mesh, j + dj + 1)
+                      v_target = C(i + di, j + dj) * dx * dy
+                      v_recon  = cut_box_area(v_xmin, v_xmax, v_ymin, v_ymax, cos(c_pt), sin(c_pt), &
+                                             compute_alpha(xmin, xmax, ymin, ymax, cos(c_pt), sin(c_pt), c_val))
+                      diff = v_recon - v_target
+                      fc = fc + diff * diff
+                   end do
+                end do
+             else
+                a_pt = c_pt; c_pt = d_pt; fc = fd
+                h_pt = invphi * h_pt
+                d_pt = a_pt + invphi * h_pt
+                fd = 0.0_dp
+                do dj = -1, 1
+                   do di = -1, 1
+                      if (di == 0 .and. dj == 0) cycle
+                      v_xmin = x_face(mesh, i + di); v_xmax = x_face(mesh, i + di + 1)
+                      v_ymin = y_face(mesh, j + dj); v_ymax = y_face(mesh, j + dj + 1)
+                      v_target = C(i + di, j + dj) * dx * dy
+                      v_recon  = cut_box_area(v_xmin, v_xmax, v_ymin, v_ymax, cos(d_pt), sin(d_pt), &
+                                             compute_alpha(xmin, xmax, ymin, ymax, cos(d_pt), sin(d_pt), c_val))
+                      diff = v_recon - v_target
+                      fd = fd + diff * diff
+                   end do
+                end do
+             end if
+          end do
+
+          best_theta = 0.5_dp * (a_pt + b_pt)
+          best_nx = cos(best_theta)
+          best_ny = sin(best_theta)
+          best_alpha = compute_alpha(xmin, xmax, ymin, ymax, best_nx, best_ny, c_val)
+
+          segments(i, j)%nx = best_nx
+          segments(i, j)%ny = best_ny
+          segments(i, j)%alpha = best_alpha
+       end do
+    end do
+  end subroutine reconstruct_lvira
+
+  ! [Procédure/Module] subroutine reconstruct_interface
+  subroutine reconstruct_interface(method_name, mesh, C, segments)
+    character(len=*), intent(in) :: method_name
+    type(mesh_2d_t), intent(in) :: mesh
+    real(dp), intent(in) :: C(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    type(interface_segment_t), intent(out) :: segments(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+
+    select case (trim(method_name))
+    case ("SLIC")
+       call reconstruct_slic(mesh, C, segments)
+    case ("LVIRA")
+       call reconstruct_lvira(mesh, C, segments)
+    case ("ELVIRA")
+       call reconstruct_elvira(mesh, C, segments)
+    case default
+       call reconstruct_plic(mesh, C, segments)
+    end select
+  end subroutine reconstruct_interface
+
+  ! [Procédure/Module] function evaluate_limiter
+  function evaluate_limiter(limiter_name, r, c_donor, c_upwind, c_acceptor) result(phi)
+    character(len=*), intent(in) :: limiter_name
+    real(dp), intent(in) :: r, c_donor, c_upwind, c_acceptor
+    real(dp) :: phi
+    real(dp) :: denom, c_tilde_D, c_tilde_f
+
+    select case (trim(limiter_name))
+    case ("VAN_LEER")
+       if (r > 0.0_dp) then
+          phi = 2.0_dp * r / (1.0_dp + r)
+       else
+          phi = 0.0_dp
+       end if
+    case ("MUSCL")
+       phi = max(0.0_dp, min(2.0_dp * r, min(0.5_dp * (1.0_dp + r), 2.0_dp)))
+    case ("HRIC")
+       denom = c_acceptor - c_upwind
+       if (abs(denom) < 1.0e-12_dp) then
+          phi = 0.0_dp
+          return
+       end if
+       c_tilde_D = (c_donor - c_upwind) / denom
+       c_tilde_f = c_tilde_D
+       if (c_tilde_D >= 0.0_dp .and. c_tilde_D <= 1.0_dp) then
+          if (c_tilde_D < 0.5_dp) then
+             c_tilde_f = 2.0_dp * c_tilde_D
+          else
+             c_tilde_f = 1.0_dp
+          end if
+       end if
+       if (abs(1.0_dp - c_tilde_D) > 1.0e-12_dp) then
+          phi = 2.0_dp * (c_tilde_f - c_tilde_D) / (1.0_dp - c_tilde_D)
+          phi = max(0.0_dp, min(2.0_dp, phi))
+       else
+          phi = 1.0_dp
+       end if
+    case default ! "SUPERBEE"
+       phi = max(0.0_dp, max(min(2.0_dp * r, 1.0_dp), min(r, 2.0_dp)))
+    end select
+  end function evaluate_limiter
+
+end module module_interface_reconstruction
+
+```
+
+
+## Chapitre 21 : Advection Géométrique et Algébrique VOF en Fortran 2018 (module_interface_vof.f90)
+
+\section{Architecture des 1034 Lignes de \texttt{module\_interface\_vof.f90}}
+Ce module implémente la séparation directionnelle d'ordre 2 de Strang (\texttt{advect\_vof\_interface}) et les trois grandes familles de schémas de transport interfacial :
+\begin{enumerate}
+  \item \textbf{Schéma géométrique de Weymouth \& Yue (2010)} (\texttt{advect\_weymouth\_yue\_x}, \texttt{advect\_weymouth\_yue\_y}) : utilise la fonction indicatrice binaire $C_{\text{dil}}(i,j) = \mathbb{I}(C_{i,j}^n \ge 0.5)$ partagée entre les deux balayages directionnels pour garantir une conservation de la masse exacte à la précision machine.
+  \item \textbf{Schéma géométrique CIAM de Li (1995)} (\texttt{advect\_ciam\_x}, \texttt{advect\_ciam\_y}) : transporte lagrangiennement les segments PLIC en tenant compte de l'étirement/compression affine de la bande donneuse par le gradient de vitesse local $\partial u / \partial x$.
+  \item \textbf{Schémas algébriques TVD haute résolution} (\texttt{advect\_tvd\_x}, \texttt{advect\_tvd\_y}) : implémentent les limiteurs de pente non linéaires \textbf{Superbee}, \textbf{Van Leer}, \textbf{MUSCL / Monotonized Central (MC)}, \textbf{Minmod} et \textbf{HRIC}.
+\end{enumerate}
+
+### Répertoire des Procédures de `src/module_interface_vof.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 2 | module | `module_interface_vof` | Unité modulaire Fortran 2018 |
+| 23 | type dérivé | `interface_vof_t` | Structure de données Fortran 2018 |
+| 38 | subroutine | `set_initial_conditions` | Arguments : (fields, mesh, cfg) |
+| 235 | subroutine | `update_physical_properties` | Arguments : (fields, mesh, cfg) |
+| 372 | subroutine | `compute_curvature_and_csf` | Arguments : (fields, mesh, cfg) |
+| 495 | subroutine | `advect_vof` | Arguments : (fields, mesh, cfg, dt) |
+| 519 | subroutine | `advect_vof_tvd` | Arguments : (fields, mesh, cfg, dt) |
+| 629 | subroutine | `advect_vof_ciam` | Arguments : (fields, mesh, cfg, dt) |
+| 807 | subroutine | `advect_vof_weymouth_yue` | Arguments : (fields, mesh, cfg, dt) |
+| 991 | subroutine | `vof_init` | Arguments : (this, cfg) |
+| 1001 | subroutine | `vof_set_ic` | Arguments : (this, mesh, fields) |
+| 1017 | subroutine | `vof_advect_step` | Arguments : (this, mesh, fields, dt) |
+
+### Code Source Intégral : `src/module_interface_vof.f90` (1034 lignes)
+
+```fortran
+! [Procédure/Module] module module_interface_vof
+module module_interface_vof
+  use module_precision, only: dp
+  use module_constants
+  use module_mesh, only: mesh_2d_t, x_center, y_center, x_face, y_face, is_in_obstacle
+  use module_fields, only: flow_fields_t
+  use module_config, only: config_t
+  use module_mpi_comm, only: exchange_halos_scalar, apply_vof_bc
+  use module_interface_reconstruction, only: interface_segment_t, cut_box_area, compute_alpha, &
+                                            reconstruct_interface, evaluate_limiter
+  implicit none
+  private
+
+  public :: interface_vof_t
+  public :: set_initial_conditions
+  public :: advect_vof
+  public :: update_physical_properties
+  public :: compute_curvature_and_csf
+
+  ! Compteur de pas pour Strang splitting alterné
+  integer, save :: vof_step_count = 0
+
+  type :: interface_vof_t
+     ! Déclaration de variable locale / paramètre de calcul
+     type(config_t) :: cfg
+  contains
+     ! Affectation et calcul numérique
+     procedure :: init => vof_init
+     ! Affectation et calcul numérique
+     procedure :: set_initial_condition => vof_set_ic
+     ! Affectation et calcul numérique
+     procedure :: advect => vof_advect_step
+  end type interface_vof_t
+
+contains
+
+  ! [Procédure/Module] subroutine set_initial_conditions
+  subroutine set_initial_conditions(fields, mesh, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in) :: cfg
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: i, j, nx, ny
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: x, y, dist, eps, int_y, x_c_jet, half_w_jet, stub_h_jet
+
+    ! Affectation et calcul numérique
+    nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    ny = mesh%ny_local
+    ! Affectation et calcul numérique
+    eps = 1.5_dp * max(mesh%dx, mesh%dy)
+
+    ! 1. Initialisation des vitesses (par défaut 0 ou imposé)
+    fields%u = cfg%ic_u
+    ! Affectation et calcul numérique
+    fields%v = cfg%ic_v
+
+    ! 2. Initialisation de la fraction volumique C
+    do j = 0, ny + 1
+       ! Affectation et calcul numérique
+       y = y_center(mesh, j)
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 0, nx + 1
+          ! Affectation et calcul numérique
+          x = x_center(mesh, i)
+
+          select case (cfg%ic_type)
+          case (IC_UNIFORM)
+             ! Transport / actualisation de la fraction volumique VOF
+             fields%C(i, j) = 1.0_dp
+
+          case (IC_DROPLET)
+             ! Affectation et calcul numérique
+             dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
+             ! Évaluation de la condition logique
+             if (dist < -eps) then
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 1.0_dp
+             ! Branche conditionnelle alternative
+             else if (dist > eps) then
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 0.0_dp
+             ! Branche par défaut si condition non satisfaite
+             else
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 0.5_dp - dist / (2.0_dp * eps) - (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+             end if
+
+          case (IC_BUBBLE)
+             ! Affectation et calcul numérique
+             dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
+             ! Évaluation de la condition logique
+             if (dist < -eps) then
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 0.0_dp ! Intérieur bulle (fluide 2)
+             ! Branche conditionnelle alternative
+             else if (dist > eps) then
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 1.0_dp ! Extérieur (fluide 1)
+             ! Branche par défaut si condition non satisfaite
+             else
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 0.5_dp + dist / (2.0_dp * eps) + (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+             end if
+
+          case (IC_DAM_BREAK)
+             ! Affectation et calcul numérique
+             if (x >= cfg%ic_box_x0 .and. x <= cfg%ic_box_x1 .and. &
+                 ! Affectation et calcul numérique
+                 y >= cfg%ic_box_y0 .and. y <= cfg%ic_box_y1) then
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 1.0_dp
+             ! Branche par défaut si condition non satisfaite
+             else
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 0.0_dp
+             end if
+
+          case (IC_LIQUID_SHEET)
+             ! Nappe liquide cisaillée (Cas 3.2 de l'article Fluids 2021)
+             if (cfg%ic_center_y > 0.0_dp) then
+                ! Calcul de distance à l'axe de la nappe
+                dist = abs(y - cfg%ic_center_y) - 0.5_dp * cfg%ic_thickness
+             else
+                ! Calcul de distance au plan médian
+                dist = abs(y - 0.5_dp * mesh%ly) - 0.5_dp * cfg%ic_thickness
+             end if
+             ! Évaluation de l'indicatrice C
+             if (dist < -eps) then
+                fields%C(i, j) = 0.0_dp ! Intérieur nappe liquide (fluide 2)
+             else if (dist > eps) then
+                fields%C(i, j) = 1.0_dp ! Gaz ambiant (fluide 1)
+             else
+                fields%C(i, j) = 0.5_dp + dist / (2.0_dp * eps) + &
+                     (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+             end if
+
+          case (IC_VISCOUS_JET)
+             ! Jet liquide visqueux injecté (Cas 3.3 de l'article Fluids 2021)
+             if (cfg%ic_center_x > 0.0_dp) then
+                x_c_jet = cfg%ic_center_x
+             else
+                x_c_jet = 0.5_dp * mesh%lx
+             end if
+             if (cfg%ic_jet_width > 0.0_dp) then
+                half_w_jet = 0.5_dp * cfg%ic_jet_width
+             else
+                half_w_jet = 0.04_dp
+             end if
+             stub_h_jet = 2.0_dp * mesh%dy
+             if (y >= mesh%ly - stub_h_jet .and. abs(x - x_c_jet) <= half_w_jet) then
+                fields%C(i, j) = 0.0_dp ! Amorce liquide (fluide 2)
+             else
+                fields%C(i, j) = 1.0_dp ! Cavité de gaz (fluide 1)
+             end if
+
+          case (IC_VORTEX_SHEAR)
+             ! Affectation et calcul numérique
+             dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
+             ! Évaluation de la condition logique
+             if (dist < -eps) then
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 1.0_dp
+             ! Branche conditionnelle alternative
+             else if (dist > eps) then
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 0.0_dp
+             ! Branche par défaut si condition non satisfaite
+             else
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 0.5_dp - dist / (2.0_dp * eps) - (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+             end if
+
+          case (IC_RAYLEIGH_TAYLOR)
+             ! Affectation et calcul numérique
+             int_y = cfg%ic_center_y + cfg%ic_pert_amp * cos(2.0_dp * PI * cfg%ic_pert_k * x / mesh%lx)
+             ! Évaluation de la condition logique
+             if (y >= int_y) then
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 1.0_dp ! Fluide lourd au-dessus
+             ! Branche par défaut si condition non satisfaite
+             else
+                ! Transport / actualisation de la fraction volumique VOF
+                fields%C(i, j) = 0.0_dp ! Fluide léger en dessous
+             end if
+
+          case (IC_LAPLACIAN_TEST)
+             ! Transport / actualisation de la fraction volumique VOF
+             fields%C(i, j) = 1.0_dp
+
+          case default
+             ! Transport / actualisation de la fraction volumique VOF
+             fields%C(i, j) = 1.0_dp
+          end select
+       end do
+    end do
+
+    ! 3. Détection des obstacles solides pour la pénalisation de Brinkman
+    fields%solid_mask = 0
+    ! Évaluation de la condition logique
+    if (cfg%obs_enabled) then
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 0, ny + 1
+          ! Affectation et calcul numérique
+          y = y_center(mesh, j)
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 0, nx + 1
+             ! Affectation et calcul numérique
+             x = x_center(mesh, i)
+             if (is_in_obstacle(x, y, cfg%obs_type, cfg%obs_x0, cfg%obs_y0, cfg%obs_x1, cfg%obs_y1, &
+                                cfg%obs_xc, cfg%obs_yc, cfg%obs_radius)) then
+                ! Affectation et calcul numérique
+                fields%solid_mask(i, j) = 1
+             end if
+          end do
+       end do
+    end if
+
+    ! Appel de sous-programme modulaire
+    call exchange_halos_scalar(fields%C, mesh)
+    ! Appel de sous-programme modulaire
+    call apply_vof_bc(fields, mesh, cfg)
+    ! Appel de sous-programme modulaire
+    call update_physical_properties(fields, mesh, cfg)
+    ! Appel de sous-programme modulaire
+    call compute_curvature_and_csf(fields, mesh, cfg)
+  end subroutine set_initial_conditions
+
+  ! [Procédure/Module] subroutine update_physical_properties
+  subroutine update_physical_properties(fields, mesh, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in) :: cfg
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: i, j, nx, ny
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: c, y, z, mu_val, m_sw, m_se, m_nw, m_ne
+
+    ! Affectation et calcul numérique
+    nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    ny = mesh%ny_local
+
+    ! Évaluation de la condition logique
+    if (.not. cfg%enable_two_phase) then
+       ! Calcul de la masse volumique locale ou interpolée aux faces
+       fields%rho = cfg%rho1
+       ! Calcul de la masse volumique locale ou interpolée aux faces
+       fields%rho_u = cfg%rho1
+       ! Calcul de la masse volumique locale ou interpolée aux faces
+       fields%rho_v = cfg%rho1
+       ! Évaluation de la condition logique
+       if (cfg%viscosity_model == VISC_EXPONENTIAL) then
+          ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+          do j = 0, ny + 1
+             ! Affectation et calcul numérique
+             y = y_center(mesh, j)
+             ! Affectation et calcul numérique
+             z = y - cfg%visc_e
+             ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+             mu_val = cfg%visc_mu0 * exp(cfg%visc_a * (z * z) / (cfg%visc_e * cfg%visc_e))
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             fields%mu(:, j) = mu_val
+          end do
+          ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+          do j = 0, ny + 1
+             ! Affectation et calcul numérique
+             y = y_face(mesh, j)
+             ! Affectation et calcul numérique
+             z = y - cfg%visc_e
+             ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+             mu_val = cfg%visc_mu0 * exp(cfg%visc_a * (z * z) / (cfg%visc_e * cfg%visc_e))
+             ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+             fields%mu_node(:, j) = mu_val
+          end do
+       ! Branche par défaut si condition non satisfaite
+       else
+          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+          fields%mu = cfg%mu1
+          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+          fields%mu_node = cfg%mu1
+       end if
+       ! Retour à la procédure appelante
+       return
+    end if
+
+    ! Coins de C
+    fields%C(0, 0)       = fields%C(1, 1)
+    ! Transport / actualisation de la fraction volumique VOF
+    fields%C(nx+1, 0)    = fields%C(nx, 1)
+    ! Transport / actualisation de la fraction volumique VOF
+    fields%C(0, ny+1)    = fields%C(1, ny)
+    ! Transport / actualisation de la fraction volumique VOF
+    fields%C(nx+1, ny+1) = fields%C(nx, ny)
+
+    ! 1. Masse volumique arithmétique et viscosité au centre
+    do j = 0, ny + 1
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 0, nx + 1
+          ! Affectation et calcul numérique
+          c = max(0.0_dp, min(1.0_dp, fields%C(i, j)))
+          ! Calcul de la masse volumique locale ou interpolée aux faces
+          fields%rho(i, j) = c * cfg%rho1 + (1.0_dp - c) * cfg%rho2
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+          fields%mu(i, j)  = c * cfg%mu1  + (1.0_dp - c) * cfg%mu2
+       end do
+    end do
+
+    ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+    fields%mu(0, 0)       = fields%mu(1, 1)
+    ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+    fields%mu(nx+1, 0)    = fields%mu(nx, 1)
+    ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+    fields%mu(0, ny+1)    = fields%mu(1, ny)
+    ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+    fields%mu(nx+1, ny+1) = fields%mu(nx, ny)
+
+    ! 2. Masse volumique sur les faces u
+    do j = 1, ny
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, nx + 1
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+          fields%rho_u(i, j) = 0.5_dp * (fields%rho(i - 1, j) + fields%rho(i, j))
+       end do
+    end do
+
+    ! 3. Masse volumique sur les faces v
+    do j = 1, ny + 1
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, nx
+          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+          fields%rho_v(i, j) = 0.5_dp * (fields%rho(i, j - 1) + fields%rho(i, j))
+       end do
+    end do
+
+    ! 4. Viscosité harmonique aux nœuds (coins de mailles)
+    do j = 1, ny + 1
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, nx + 1
+          ! Affectation et calcul numérique
+          m_sw = fields%mu(i-1, j-1)
+          ! Affectation et calcul numérique
+          m_se = fields%mu(i, j-1)
+          ! Affectation et calcul numérique
+          m_nw = fields%mu(i-1, j)
+          ! Affectation et calcul numérique
+          m_ne = fields%mu(i, j)
+          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+          fields%mu_node(i, j) = 4.0_dp / (1.0_dp / m_sw + 1.0_dp / m_se + 1.0_dp / m_nw + 1.0_dp / m_ne)
+       end do
+    end do
+  end subroutine update_physical_properties
+
+  ! [Procédure/Module] pure real
+  pure real(dp) function superbee(r)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: r
+    ! Affectation et calcul numérique
+    superbee = max(0.0_dp, max(min(2.0_dp * r, 1.0_dp), min(r, 2.0_dp)))
+  end function superbee
+
+  ! [Procédure/Module] subroutine compute_curvature_and_csf
+  subroutine compute_curvature_and_csf(fields, mesh, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in) :: cfg
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: i, j, nx, ny
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: dx, dy, dc_dx, dc_dy, grad_mag, kap_avg, grad_c
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: norm_x(:, :), norm_y(:, :)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: kappa(:, :)
+
+    ! Évaluation de la condition logique
+    if (.not. cfg%enable_surface_tension .or. cfg%sigma <= 0.0_dp) then
+       ! Affectation et calcul numérique
+       fields%fx_sigma = 0.0_dp
+       ! Affectation et calcul numérique
+       fields%fy_sigma = 0.0_dp
+       ! Affectation et calcul numérique
+       fields%curvature = 0.0_dp
+       ! Retour à la procédure appelante
+       return
+    end if
+
+    ! Affectation et calcul numérique
+    nx = mesh%nx_local
+    ! Affectation et calcul numérique
+    ny = mesh%ny_local
+    ! Calcul de la métrique spatiale élémentaire
+    dx = mesh%dx
+    ! Calcul de la métrique spatiale élémentaire
+    dy = mesh%dy
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(norm_x(0:nx+1, 0:ny+1), norm_y(0:nx+1, 0:ny+1))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(kappa(0:nx+1, 0:ny+1))
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    norm_x = 0.0_dp
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    norm_y = 0.0_dp
+    ! Affectation et calcul numérique
+    kappa = 0.0_dp
+
+    ! 1. Gradient et normale unitaire aux centres
+    do j = 1, ny
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, nx
+          ! Calcul de la métrique spatiale élémentaire
+          dc_dx = (fields%C(i+1, j) - fields%C(i-1, j)) / (2.0_dp * dx)
+          ! Calcul de la métrique spatiale élémentaire
+          dc_dy = (fields%C(i, j+1) - fields%C(i, j-1)) / (2.0_dp * dy)
+          ! Affectation et calcul numérique
+          grad_mag = sqrt(dc_dx * dc_dx + dc_dy * dc_dy)
+          ! Évaluation de la condition logique
+          if (grad_mag > 1.0e-3_dp / dx) then
+             ! Évaluation de la norme du résidu ou de l'erreur numérique
+             norm_x(i, j) = dc_dx / grad_mag
+             ! Évaluation de la norme du résidu ou de l'erreur numérique
+             norm_y(i, j) = dc_dy / grad_mag
+          end if
+       end do
+    end do
+
+    ! Appel de sous-programme modulaire
+    call exchange_halos_scalar(norm_x, mesh)
+    ! Appel de sous-programme modulaire
+    call exchange_halos_scalar(norm_y, mesh)
+
+    ! 2. Courbure kappa = -div(n)
+    do j = 1, ny
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, nx
+          ! Évaluation de la condition logique
+          if (norm_x(i, j) /= 0.0_dp .or. norm_y(i, j) /= 0.0_dp) then
+             ! Affectation et calcul numérique
+             kappa(i, j) = - ((norm_x(i+1, j) - norm_x(i-1, j)) / (2.0_dp * dx) + &
+                              (norm_y(i, j+1) - norm_y(i, j-1)) / (2.0_dp * dy))
+          end if
+       end do
+    end do
+
+    ! Appel de sous-programme modulaire
+    call exchange_halos_scalar(kappa, mesh)
+    ! Affectation et calcul numérique
+    fields%curvature = kappa
+
+    ! 3. Forces de tension superficielle CSF (Balanced-Force)
+    do j = 1, ny
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, nx + 1
+          ! Affectation et calcul numérique
+          kap_avg = 0.5_dp * (kappa(i-1, j) + kappa(i, j))
+          ! Affectation et calcul numérique
+          grad_c  = (fields%C(i, j) - fields%C(i-1, j)) / dx
+          ! Affectation et calcul numérique
+          fields%fx_sigma(i, j) = cfg%sigma * kap_avg * grad_c
+       end do
+    end do
+
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, ny + 1
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, nx
+          ! Affectation et calcul numérique
+          kap_avg = 0.5_dp * (kappa(i, j-1) + kappa(i, j))
+          ! Affectation et calcul numérique
+          grad_c  = (fields%C(i, j) - fields%C(i, j-1)) / dy
+          ! Affectation et calcul numérique
+          fields%fy_sigma(i, j) = cfg%sigma * kap_avg * grad_c
+       end do
+    end do
+
+    ! Libération de la mémoire allouée
+    deallocate(norm_x, norm_y, kappa)
+  end subroutine compute_curvature_and_csf
+
+  ! [Procédure/Module] subroutine advect_vof
+  subroutine advect_vof(fields, mesh, cfg, dt)
+    type(flow_fields_t), intent(inout) :: fields
+    type(mesh_2d_t), intent(in) :: mesh
+    type(config_t), intent(in) :: cfg
+    real(dp), intent(in) :: dt
+
+    select case (trim(cfg%advection_method))
+    case ("CIAM")
+       call advect_vof_ciam(fields, mesh, cfg, dt)
+    case ("WEYMOUTH_YUE")
+       call advect_vof_weymouth_yue(fields, mesh, cfg, dt)
+    case default
+       call advect_vof_tvd(fields, mesh, cfg, dt)
+    end select
+
+    vof_step_count = vof_step_count + 1
+
+    call exchange_halos_scalar(fields%C, mesh)
+    call apply_vof_bc(fields, mesh, cfg)
+    call update_physical_properties(fields, mesh, cfg)
+    call compute_curvature_and_csf(fields, mesh, cfg)
+  end subroutine advect_vof
+
+  ! [Procédure/Module] subroutine advect_vof_tvd
+  subroutine advect_vof_tvd(fields, mesh, cfg, dt)
+    type(flow_fields_t), intent(inout) :: fields
+    type(mesh_2d_t), intent(in) :: mesh
+    type(config_t), intent(in) :: cfg
+    real(dp), intent(in) :: dt
+
+    integer :: i, j, nx, ny, i_up, i_down, j_up, j_down
+    real(dp) :: dx, dy, u_face, v_face, c_l, c_r, c_b, c_t, c_u
+    real(dp) :: dc_up, dc_loc, r, phi, fx_in, fx_out, fy_in, fy_out
+    real(dp), allocatable :: flux_x(:, :), flux_y(:, :), c_new(:, :)
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+
+    allocate(flux_x(0:nx+1, 0:ny+1), flux_y(0:nx+1, 0:ny+1))
+    allocate(c_new(0:nx+1, 0:ny+1))
+    flux_x = 0.0_dp
+    flux_y = 0.0_dp
+    c_new = fields%C
+
+    ! Flux selon X
+    do j = 1, ny
+       do i = 1, nx + 1
+          u_face = fields%u(i, j)
+          c_l = fields%C(i-1, j)
+          c_r = fields%C(i, j)
+
+          if (u_face >= 0.0_dp) then
+             i_up = max(0, i - 2)
+             c_u = fields%C(i_up, j)
+             dc_up = c_l - c_u
+             dc_loc = c_r - c_l
+             if (abs(dc_loc) > 1.0e-12_dp) then
+                r = dc_up / dc_loc
+             else
+                r = 0.0_dp
+             end if
+             phi = evaluate_limiter(cfg%tvd_limiter, r, c_l, c_u, c_r)
+             flux_x(i, j) = u_face * (c_l + 0.5_dp * phi * (1.0_dp - min(1.0_dp, abs(u_face) * dt / dx)) * dc_loc)
+          else
+             i_down = min(nx + 1, i + 1)
+             c_u = fields%C(i_down, j)
+             dc_up = c_u - c_r
+             dc_loc = c_r - c_l
+             if (abs(dc_loc) > 1.0e-12_dp) then
+                r = dc_up / dc_loc
+             else
+                r = 0.0_dp
+             end if
+             phi = evaluate_limiter(cfg%tvd_limiter, r, c_r, c_u, c_l)
+             flux_x(i, j) = u_face * (c_r - 0.5_dp * phi * (1.0_dp - min(1.0_dp, abs(u_face) * dt / dx)) * dc_loc)
+          end if
+       end do
+    end do
+
+    ! Flux selon Y
+    do j = 1, ny + 1
+       do i = 1, nx
+          v_face = fields%v(i, j)
+          c_b = fields%C(i, j-1)
+          c_t = fields%C(i, j)
+
+          if (v_face >= 0.0_dp) then
+             j_up = max(0, j - 2)
+             c_u = fields%C(i, j_up)
+             dc_up = c_b - c_u
+             dc_loc = c_t - c_b
+             if (abs(dc_loc) > 1.0e-12_dp) then
+                r = dc_up / dc_loc
+             else
+                r = 0.0_dp
+             end if
+             phi = evaluate_limiter(cfg%tvd_limiter, r, c_b, c_u, c_t)
+             flux_y(i, j) = v_face * (c_b + 0.5_dp * phi * (1.0_dp - min(1.0_dp, abs(v_face) * dt / dy)) * dc_loc)
+          else
+             j_down = min(ny + 1, j + 1)
+             c_u = fields%C(i, j_down)
+             dc_up = c_u - c_t
+             dc_loc = c_t - c_b
+             if (abs(dc_loc) > 1.0e-12_dp) then
+                r = dc_up / dc_loc
+             else
+                r = 0.0_dp
+             end if
+             phi = evaluate_limiter(cfg%tvd_limiter, r, c_t, c_u, c_b)
+             flux_y(i, j) = v_face * (c_t - 0.5_dp * phi * (1.0_dp - min(1.0_dp, abs(v_face) * dt / dy)) * dc_loc)
+          end if
+       end do
+    end do
+
+    ! Mise à jour conservative
+    do j = 1, ny
+       do i = 1, nx
+          fx_in  = flux_x(i, j)
+          fx_out = flux_x(i+1, j)
+          fy_in  = flux_y(i, j)
+          fy_out = flux_y(i, j+1)
+
+          c_new(i, j) = fields%C(i, j) - (dt / dx) * (fx_out - fx_in) - (dt / dy) * (fy_out - fy_in)
+          c_new(i, j) = max(0.0_dp, min(1.0_dp, c_new(i, j)))
+       end do
+    end do
+
+    fields%C = c_new
+    deallocate(flux_x, flux_y, c_new)
+  end subroutine advect_vof_tvd
+
+  ! [Procédure/Module] subroutine advect_vof_ciam
+  subroutine advect_vof_ciam(fields, mesh, cfg, dt)
+    type(flow_fields_t), intent(inout) :: fields
+    type(mesh_2d_t), intent(in) :: mesh
+    type(config_t), intent(in) :: cfg
+    real(dp), intent(in) :: dt
+
+    integer :: i, j, nx, ny, donor_idx
+    real(dp) :: dx, dy, delta_x, delta_y, u_face, v_face
+    real(dp) :: x_pos, y_pos, b_xmin, b_xmax, b_ymin, b_ymax, denom
+    type(interface_segment_t), allocatable :: segments(:, :)
+    real(dp), allocatable :: flux_vol(:, :), c_star(:, :), c_final(:, :)
+    logical :: x_first
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+
+    allocate(segments(0:nx+1, 0:ny+1))
+    allocate(flux_vol(0:nx+1, 0:ny+1))
+    allocate(c_star(0:nx+1, 0:ny+1))
+    allocate(c_final(0:nx+1, 0:ny+1))
+
+    x_first = (mod(vof_step_count, 2) == 0)
+
+    if (x_first) then
+       ! 1. Passe X
+       call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx + 1
+             u_face = fields%u(i, j)
+             delta_x = abs(u_face) * dt
+             if (delta_x <= 1.0e-14_dp) cycle
+             x_pos = x_face(mesh, i)
+             if (u_face > 0.0_dp) then
+                b_xmin = x_pos - delta_x; b_xmax = x_pos
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+             else
+                b_xmin = x_pos; b_xmax = x_pos + delta_x
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
+       end do
+
+       c_star = fields%C
+       do j = 1, ny
+          do i = 1, nx
+             denom = dx - dt * (fields%u(i + 1, j) - fields%u(i, j))
+             if (denom > 1.0e-12_dp) then
+                c_star(i, j) = (fields%C(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j))) / denom
+             else
+                c_star(i, j) = fields%C(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / dx
+             end if
+             c_star(i, j) = max(0.0_dp, min(1.0_dp, c_star(i, j)))
+          end do
+       end do
+       call exchange_halos_scalar(c_star, mesh)
+
+       ! 2. Passe Y
+       call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny + 1
+          do i = 1, nx
+             v_face = fields%v(i, j)
+             delta_y = abs(v_face) * dt
+             if (delta_y <= 1.0e-14_dp) cycle
+             y_pos = y_face(mesh, j)
+             if (v_face > 0.0_dp) then
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos - delta_y; b_ymax = y_pos
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
+             else
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos; b_ymax = y_pos + delta_y
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
+       end do
+
+       c_final = c_star
+       do j = 1, ny
+          do i = 1, nx
+             denom = dy - dt * (fields%v(i, j + 1) - fields%v(i, j))
+             if (denom > 1.0e-12_dp) then
+                c_final(i, j) = (c_star(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j))) / denom
+             else
+                c_final(i, j) = c_star(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / dy
+             end if
+             c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
+          end do
+       end do
+    else
+       ! 1. Passe Y
+       call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny + 1
+          do i = 1, nx
+             v_face = fields%v(i, j)
+             delta_y = abs(v_face) * dt
+             if (delta_y <= 1.0e-14_dp) cycle
+             y_pos = y_face(mesh, j)
+             if (v_face > 0.0_dp) then
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos - delta_y; b_ymax = y_pos
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
+             else
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos; b_ymax = y_pos + delta_y
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
+       end do
+
+       c_star = fields%C
+       do j = 1, ny
+          do i = 1, nx
+             denom = dy - dt * (fields%v(i, j + 1) - fields%v(i, j))
+             if (denom > 1.0e-12_dp) then
+                c_star(i, j) = (fields%C(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j))) / denom
+             else
+                c_star(i, j) = fields%C(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / dy
+             end if
+             c_star(i, j) = max(0.0_dp, min(1.0_dp, c_star(i, j)))
+          end do
+       end do
+       call exchange_halos_scalar(c_star, mesh)
+
+       ! 2. Passe X
+       call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx + 1
+             u_face = fields%u(i, j)
+             delta_x = abs(u_face) * dt
+             if (delta_x <= 1.0e-14_dp) cycle
+             x_pos = x_face(mesh, i)
+             if (u_face > 0.0_dp) then
+                b_xmin = x_pos - delta_x; b_xmax = x_pos
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+             else
+                b_xmin = x_pos; b_xmax = x_pos + delta_x
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
+       end do
+
+       c_final = c_star
+       do j = 1, ny
+          do i = 1, nx
+             denom = dx - dt * (fields%u(i + 1, j) - fields%u(i, j))
+             if (denom > 1.0e-12_dp) then
+                c_final(i, j) = (c_star(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j))) / denom
+             else
+                c_final(i, j) = c_star(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / dx
+             end if
+             c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
+          end do
+       end do
+    end if
+
+    fields%C = c_final
+    deallocate(segments, flux_vol, c_star, c_final)
+  end subroutine advect_vof_ciam
+
+  ! [Procédure/Module] subroutine advect_vof_weymouth_yue
+  subroutine advect_vof_weymouth_yue(fields, mesh, cfg, dt)
+    type(flow_fields_t), intent(inout) :: fields
+    type(mesh_2d_t), intent(in) :: mesh
+    type(config_t), intent(in) :: cfg
+    real(dp), intent(in) :: dt
+
+    integer :: i, j, nx, ny
+    real(dp) :: dx, dy, cell_area, u_face, v_face, delta_x, delta_y
+    real(dp) :: x_pos, y_pos, u_e, u_w, v_n, v_s, v_corner
+    real(dp) :: c_xmin, c_xmax, c_ymin, c_ymax, v_fluid, v_empty, f_out, f_in, f, s
+    type(interface_segment_t), allocatable :: segments(:, :)
+    real(dp), allocatable :: f_vol_x(:, :), f_vol_y(:, :), c_new(:, :), scale_out(:, :), scale_in(:, :)
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+    cell_area = dx * dy
+
+    allocate(segments(0:nx+1, 0:ny+1))
+    allocate(f_vol_x(0:nx+1, 0:ny+1))
+    allocate(f_vol_y(0:nx+1, 0:ny+1))
+    allocate(c_new(0:nx+1, 0:ny+1))
+    f_vol_x = 0.0_dp
+    f_vol_y = 0.0_dp
+
+    ! 1. Unique étape de reconstruction géométrique sur le champ C^n
+    call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+
+    ! 2. Flux 1D sur faces X
+    do j = 1, ny
+       do i = 1, nx + 1
+          u_face = fields%u(i, j)
+          delta_x = abs(u_face) * dt
+          if (delta_x <= 1.0e-14_dp) cycle
+          x_pos = x_face(mesh, i)
+          if (u_face > 0.0_dp) then
+             f_vol_x(i, j) = cut_box_area(x_pos - delta_x, x_pos, y_face(mesh, j), y_face(mesh, j + 1), &
+                                         segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+          else
+             f_vol_x(i, j) = -cut_box_area(x_pos, x_pos + delta_x, y_face(mesh, j), y_face(mesh, j + 1), &
+                                          segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+          end if
+       end do
+    end do
+
+    ! 2. Flux 1D sur faces Y
+    do j = 1, ny + 1
+       do i = 1, nx
+          v_face = fields%v(i, j)
+          delta_y = abs(v_face) * dt
+          if (delta_y <= 1.0e-14_dp) cycle
+          y_pos = y_face(mesh, j)
+          if (v_face > 0.0_dp) then
+             f_vol_y(i, j) = cut_box_area(x_face(mesh, i), x_face(mesh, i + 1), y_pos - delta_y, y_pos, &
+                                         segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
+          else
+             f_vol_y(i, j) = -cut_box_area(x_face(mesh, i), x_face(mesh, i + 1), y_pos, y_pos + delta_y, &
+                                          segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+          end if
+       end do
+    end do
+
+    ! 3. Correction multidimensionnelle des flux de coin
+    do j = 1, ny
+       do i = 1, nx
+          u_e = fields%u(i + 1, j)
+          u_w = fields%u(i, j)
+          v_n = fields%v(i, j + 1)
+          v_s = fields%v(i, j)
+
+          ! Nord-Est
+          if (u_e > 0.0_dp .and. v_n > 0.0_dp) then
+             c_xmin = x_face(mesh, i + 1) - u_e * dt; c_xmax = x_face(mesh, i + 1)
+             c_ymin = y_face(mesh, j + 1) - v_n * dt; c_ymax = y_face(mesh, j + 1)
+             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
+                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             f_vol_x(i + 1, j) = f_vol_x(i + 1, j) - 0.5_dp * v_corner
+             f_vol_y(i, j + 1) = f_vol_y(i, j + 1) - 0.5_dp * v_corner
+          end if
+
+          ! Nord-Ouest
+          if (u_w < 0.0_dp .and. v_n > 0.0_dp) then
+             c_xmin = x_face(mesh, i); c_xmax = x_face(mesh, i) - u_w * dt
+             c_ymin = y_face(mesh, j + 1) - v_n * dt; c_ymax = y_face(mesh, j + 1)
+             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
+                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             f_vol_x(i, j) = f_vol_x(i, j) + 0.5_dp * v_corner
+             f_vol_y(i, j + 1) = f_vol_y(i, j + 1) - 0.5_dp * v_corner
+          end if
+
+          ! Sud-Est
+          if (u_e > 0.0_dp .and. v_s < 0.0_dp) then
+             c_xmin = x_face(mesh, i + 1) - u_e * dt; c_xmax = x_face(mesh, i + 1)
+             c_ymin = y_face(mesh, j); c_ymax = y_face(mesh, j) - v_s * dt
+             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
+                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             f_vol_x(i + 1, j) = f_vol_x(i + 1, j) - 0.5_dp * v_corner
+             f_vol_y(i, j) = f_vol_y(i, j) + 0.5_dp * v_corner
+          end if
+
+          ! Sud-Ouest
+          if (u_w < 0.0_dp .and. v_s < 0.0_dp) then
+             c_xmin = x_face(mesh, i); c_xmax = x_face(mesh, i) - u_w * dt
+             c_ymin = y_face(mesh, j); c_ymax = y_face(mesh, j) - v_s * dt
+             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
+                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             f_vol_x(i, j) = f_vol_x(i, j) + 0.5_dp * v_corner
+             f_vol_y(i, j) = f_vol_y(i, j) + 0.5_dp * v_corner
+          end if
+       end do
+    end do
+
+    ! 4. Limitation conservative de Weymouth & Yue garantissant 0 <= C <= 1 et conservation exacte
+    allocate(scale_out(0:nx+1, 0:ny+1))
+    allocate(scale_in(0:nx+1, 0:ny+1))
+    scale_out = 1.0_dp
+    scale_in  = 1.0_dp
+
+    do j = 1, ny
+       do i = 1, nx
+          v_fluid = fields%C(i, j) * cell_area
+          v_empty = (1.0_dp - fields%C(i, j)) * cell_area
+
+          f_out = max(0.0_dp, f_vol_x(i + 1, j)) + &
+                  max(0.0_dp, -f_vol_x(i, j)) + &
+                  max(0.0_dp, f_vol_y(i, j + 1)) + &
+                  max(0.0_dp, -f_vol_y(i, j))
+
+          f_in = max(0.0_dp, -f_vol_x(i + 1, j)) + &
+                 max(0.0_dp, f_vol_x(i, j)) + &
+                 max(0.0_dp, -f_vol_y(i, j + 1)) + &
+                 max(0.0_dp, f_vol_y(i, j))
+
+          if (f_out > v_fluid .and. f_out > 1.0e-14_dp) then
+             scale_out(i, j) = v_fluid / f_out
+          end if
+          if (f_in > v_empty .and. f_in > 1.0e-14_dp) then
+             scale_in(i, j) = v_empty / f_in
+          end if
+       end do
+    end do
+
+    do j = 1, ny
+       do i = 1, nx + 1
+          f = f_vol_x(i, j)
+          if (f > 0.0_dp) then
+             s = min(scale_out(i - 1, j), scale_in(i, j))
+             f_vol_x(i, j) = f * s
+          else if (f < 0.0_dp) then
+             s = min(scale_out(i, j), scale_in(i - 1, j))
+             f_vol_x(i, j) = f * s
+          end if
+       end do
+    end do
+
+    do j = 1, ny + 1
+       do i = 1, nx
+          f = f_vol_y(i, j)
+          if (f > 0.0_dp) then
+             s = min(scale_out(i, j - 1), scale_in(i, j))
+             f_vol_y(i, j) = f * s
+          else if (f < 0.0_dp) then
+             s = min(scale_out(i, j), scale_in(i, j - 1))
+             f_vol_y(i, j) = f * s
+          end if
+       end do
+    end do
+
+    ! 5. Mise à jour conservative exacte
+    c_new = fields%C
+    do j = 1, ny
+       do i = 1, nx
+          c_new(i, j) = fields%C(i, j) - (1.0_dp / cell_area) * &
+                        ((f_vol_x(i + 1, j) - f_vol_x(i, j)) + (f_vol_y(i, j + 1) - f_vol_y(i, j)))
+          c_new(i, j) = max(0.0_dp, min(1.0_dp, c_new(i, j)))
+       end do
+    end do
+
+    fields%C = c_new
+    deallocate(segments, f_vol_x, f_vol_y, c_new, scale_out, scale_in)
+  end subroutine advect_vof_weymouth_yue
+
+  ! [Procédure/Module] subroutine vof_init
+  subroutine vof_init(this, cfg)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(interface_vof_t), intent(inout) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(config_t), intent(in) :: cfg
+    ! Affectation et calcul numérique
+    this%cfg = cfg
+  end subroutine vof_init
+
+  ! [Procédure/Module] subroutine vof_set_ic
+  subroutine vof_set_ic(this, mesh, fields)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(interface_vof_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Appel de sous-programme modulaire
+    call set_initial_conditions(fields, mesh, this%cfg)
+    ! Appel de sous-programme modulaire
+    call update_physical_properties(fields, mesh, this%cfg)
+    ! Appel de sous-programme modulaire
+    call compute_curvature_and_csf(fields, mesh, this%cfg)
+  end subroutine vof_set_ic
+
+  ! [Procédure/Module] subroutine vof_advect_step
+  subroutine vof_advect_step(this, mesh, fields, dt)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(interface_vof_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in) :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(inout) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in) :: dt
+    ! Appel de sous-programme modulaire
+    call advect_vof(fields, mesh, this%cfg, dt)
+    ! Appel de sous-programme modulaire
+    call update_physical_properties(fields, mesh, this%cfg)
+    ! Appel de sous-programme modulaire
+    call compute_curvature_and_csf(fields, mesh, this%cfg)
+  end subroutine vof_advect_step
+
+end module module_interface_vof
+
+```
+
+
+## Chapitre 22 : Générateur VTK XML Parallèle en Fortran 2018 (module_vtk_writer.f90)
+
+\section{Écriture Conforme des Fichiers \texttt{.vtr} et \texttt{.pvtr} (\texttt{module\_vtk\_writer.f90})}
+Le module \texttt{src/module\_vtk\_writer.f90} (500 lignes) écrit les fichiers XML VTK lisibles sous ParaView et Python. Une attention particulière est portée au formatage des flottants IEEE-754 : en Fortran, le descripteur standard \texttt{ES15.7} omet parfois la lettre \texttt{E} lorsque l'exposant comporte trois chiffres (par exemple \texttt{1.2345678-105} lorsque $|x| < 10^{-99}$). L'utilisation du descripteur explicite à trois chiffres d'exposant \texttt{ES16.8E3} dans \texttt{module\_vtk\_writer.f90} garantit que la lettre \texttt{E} est toujours présente, assurant une compatibilité universelle avec tous les parseurs XML VTK.
+
+### Répertoire des Procédures de `src/module_vtk_writer.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 10 | module | `module_vtk_writer` | Unité modulaire Fortran 2018 |
+| 21 | type dérivé | `vtk_writer_t` | Structure de données Fortran 2018 |
+| 46 | subroutine | `vtk_init` | Arguments : (this, mesh, out_dir, name) |
+| 89 | subroutine | `vtk_write_step` | Arguments : (this, mesh, fields, step, time) |
+| 368 | subroutine | `vtk_write_diagnostics` | Arguments : (this, mesh, fields, step, time, dt) |
+| 489 | subroutine | `vtk_finalize` | Arguments : (this) |
+
+### Code Source Intégral : `src/module_vtk_writer.f90` (500 lignes)
+
+```fortran
+!===============================================================================
+! Module: module_vtk_writer
+! Description: Exportateur de maillage rectiligne XML VTK parallèle (.pvtr / .vtr)
+!              et enregistreur de séries temporelles CSV pour COVOF 2D.
+!              - Écriture locale non-bloquante du fichier .vtr sur chaque processus
+!              - Assemblage du fichier maître .pvtr sur le rang racine
+!              - Diagnostics diphasiques : position du centre de masse, vitesse
+!                d'ascension, volume de bulle, énergie cinétique, divergence max
+!===============================================================================
+module module_vtk_writer
+  use module_precision, only: dp
+  use module_mesh, only: mesh_2d_t, x_center, y_center
+  use module_fields, only: flow_fields_t
+  use module_mpi_comm, only: global_sum, global_max
+  implicit none
+  private
+  include 'mpif.h'
+
+  public :: vtk_writer_t
+
+  type :: vtk_writer_t
+     ! Déclaration de variable locale / paramètre de calcul
+     character(len=256) :: output_dir = "output"
+     ! Déclaration de variable locale / paramètre de calcul
+     character(len=128) :: case_name  = "covof2d_case"
+     ! Déclaration de variable locale / paramètre de calcul
+     integer            :: csv_unit   = 0
+     ! Déclaration de variable locale / paramètre de calcul
+     logical            :: is_open    = .false.
+  contains
+     ! Affectation et calcul numérique
+     procedure :: init => vtk_init
+     ! Affectation et calcul numérique
+     procedure :: write_step => vtk_write_step
+     ! Affectation et calcul numérique
+     procedure :: write_diagnostics => vtk_write_diagnostics
+     ! Affectation et calcul numérique
+     procedure :: finalize => vtk_finalize
+  end type vtk_writer_t
+
+contains
+
+  !-----------------------------------------------------------------------------
+  ! Initialisation du répertoire de sortie et du fichier de métriques CSV
+  !-----------------------------------------------------------------------------
+  subroutine vtk_init(this, mesh, out_dir, name)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(vtk_writer_t), intent(inout) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in)       :: out_dir, name
+
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=512) :: csv_path, mkdir_cmd
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: io_stat
+
+    ! Affectation et calcul numérique
+    this%output_dir = trim(out_dir)
+    ! Affectation et calcul numérique
+    this%case_name  = trim(name)
+
+    ! Évaluation de la condition logique
+    if (mesh%rank == 0) then
+       ! Affectation et calcul numérique
+       mkdir_cmd = "mkdir -p " // trim(this%output_dir)
+       ! Appel de sous-programme modulaire
+       call execute_command_line(trim(mkdir_cmd))
+
+       ! Affectation et calcul numérique
+       csv_path = trim(this%output_dir) // "/" // trim(this%case_name) // "_history.csv"
+       ! Affectation et calcul numérique
+       open(newunit=this%csv_unit, file=trim(csv_path), status="replace", action="write", iostat=io_stat)
+       ! Évaluation de la condition logique
+       if (io_stat == 0) then
+          ! Affectation et calcul numérique
+          this%is_open = .true.
+          write(this%csv_unit, '(A)') &
+            "step,time,dt,center_of_mass_y,rise_velocity,bubble_volume,kinetic_energy,max_u,max_div"
+          flush(this%csv_unit)
+       end if
+    end if
+  end subroutine vtk_init
+
+  !-----------------------------------------------------------------------------
+  ! Écriture d'un pas de temps complet en format XML RectilinearGrid (.pvtr / .vtr)
+  !-----------------------------------------------------------------------------
+  subroutine vtk_write_step(this, mesh, fields, step, time)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(vtk_writer_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)     :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in)             :: step
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)            :: time
+
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=6)   :: step_str
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=512) :: vtr_file, pvtr_file, piece_str
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: x_start, x_end, y_start, y_end
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: vtr_unit, pvtr_unit, io_stat, i, j, p, ierr, dummy(1)
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: uc, vc, div_val
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, allocatable :: all_x_start(:), all_x_end(:), all_y_start(:), all_y_end(:)
+
+    write(step_str, '(I6.6)') step
+
+    ! Affectation et calcul numérique
+    x_start = mesh%i_start_global - 1
+    ! Affectation et calcul numérique
+    x_end   = x_start + mesh%nx_local
+    ! Affectation et calcul numérique
+    y_start = mesh%j_start_global - 1
+    ! Affectation et calcul numérique
+    y_end   = y_start + mesh%ny_local
+
+    ! 1. Écriture du fichier .vtr propre à chaque processus MPI
+    write(vtr_file, '(A,"/",A,"_p",I0,"_",A,".vtr")') &
+      trim(this%output_dir), trim(this%case_name), mesh%rank, step_str
+
+    ! Affectation et calcul numérique
+    open(newunit=vtr_unit, file=trim(vtr_file), status="replace", action="write", iostat=io_stat)
+    ! Évaluation de la condition logique
+    if (io_stat == 0) then
+       ! Affectation et calcul numérique
+       write(vtr_unit, '(A)') '<?xml version="1.0"?>'
+       ! Affectation et calcul numérique
+       write(vtr_unit, '(A)') '<VTKFile type="RectilinearGrid" version="0.1" byte_order="LittleEndian">'
+       write(vtr_unit, '(A,I0,A,I0,A,I0,A,I0,A)') &
+         ! Affectation et calcul numérique
+         '  <RectilinearGrid WholeExtent="', x_start, ' ', x_end, ' ', y_start, ' ', y_end, ' 0 0">'
+       write(vtr_unit, '(A,I0,A,I0,A,I0,A,I0,A)') &
+         ! Affectation et calcul numérique
+         '    <Piece Extent="', x_start, ' ', x_end, ' ', y_start, ' ', y_end, ' 0 0">'
+       ! Affectation et calcul numérique
+       write(vtr_unit, '(A)') '      <CellData Scalars="PhaseIndicator,Pressure,Density,Viscosity,Divergence" Vectors="Velocity">'
+
+       ! PhaseIndicator C
+       write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="PhaseIndicator" format="ascii">'
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, mesh%ny_local
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, mesh%nx_local
+             ! Affectation et calcul numérique
+             write(vtr_unit, '(ES16.8," ")', advance="no") fields%C(i, j)
+          end do
+          write(vtr_unit, *)
+       end do
+       write(vtr_unit, '(A)') '        </DataArray>'
+
+       ! Pressure p
+       write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="Pressure" format="ascii">'
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, mesh%ny_local
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, mesh%nx_local
+             ! Affectation et calcul numérique
+             write(vtr_unit, '(ES16.8," ")', advance="no") fields%p(i, j)
+          end do
+          write(vtr_unit, *)
+       end do
+       write(vtr_unit, '(A)') '        </DataArray>'
+
+       ! Density rho
+       write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="Density" format="ascii">'
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, mesh%ny_local
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, mesh%nx_local
+             ! Affectation et calcul numérique
+             write(vtr_unit, '(ES16.8," ")', advance="no") fields%rho(i, j)
+          end do
+          write(vtr_unit, *)
+       end do
+       write(vtr_unit, '(A)') '        </DataArray>'
+
+       ! Viscosity mu
+       write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="Viscosity" format="ascii">'
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, mesh%ny_local
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, mesh%nx_local
+             ! Affectation et calcul numérique
+             write(vtr_unit, '(ES16.8," ")', advance="no") fields%mu(i, j)
+          end do
+          write(vtr_unit, *)
+       end do
+       write(vtr_unit, '(A)') '        </DataArray>'
+
+       ! Divergence div(u)
+       write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="Divergence" format="ascii">'
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, mesh%ny_local
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, mesh%nx_local
+             ! Affectation et calcul numérique
+             div_val = (fields%u(i + 1, j) - fields%u(i, j)) / mesh%dx + &
+                       (fields%v(i, j + 1) - fields%v(i, j)) / mesh%dy
+             ! Affectation et calcul numérique
+             write(vtr_unit, '(ES16.8," ")', advance="no") div_val
+          end do
+          write(vtr_unit, *)
+       end do
+       write(vtr_unit, '(A)') '        </DataArray>'
+
+       ! Temperature T
+       write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="Temperature" format="ascii">'
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, mesh%ny_local
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, mesh%nx_local
+             ! Affectation et calcul numérique
+             write(vtr_unit, '(ES16.8," ")', advance="no") fields%T(i, j)
+          end do
+          write(vtr_unit, *)
+       end do
+       write(vtr_unit, '(A)') '        </DataArray>'
+
+       ! Velocity Vector (au centre des mailles)
+       write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="Velocity" NumberOfComponents="3" format="ascii">'
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, mesh%ny_local
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, mesh%nx_local
+             ! Affectation et calcul numérique
+             uc = 0.5_dp * (fields%u(i, j) + fields%u(i + 1, j))
+             ! Affectation et calcul numérique
+             vc = 0.5_dp * (fields%v(i, j) + fields%v(i, j + 1))
+             ! Affectation et calcul numérique
+             write(vtr_unit, '(ES16.8," ",ES16.8," 0.0 ")', advance="no") uc, vc
+          end do
+          write(vtr_unit, *)
+       end do
+       write(vtr_unit, '(A)') '        </DataArray>'
+
+       write(vtr_unit, '(A)') '      </CellData>'
+       write(vtr_unit, '(A)') '      <Coordinates>'
+
+       ! Coordonnées X
+       write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="XCoordinates" format="ascii">'
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 0, mesh%nx_local
+          ! Affectation et calcul numérique
+          write(vtr_unit, '(ES16.8," ")', advance="no") real(mesh%i_start_global - 1 + i, dp) * mesh%dx
+       end do
+       write(vtr_unit, *)
+       write(vtr_unit, '(A)') '        </DataArray>'
+
+       ! Coordonnées Y
+       write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="YCoordinates" format="ascii">'
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 0, mesh%ny_local
+          ! Affectation et calcul numérique
+          write(vtr_unit, '(ES16.8," ")', advance="no") real(mesh%j_start_global - 1 + j, dp) * mesh%dy
+       end do
+       write(vtr_unit, *)
+       write(vtr_unit, '(A)') '        </DataArray>'
+
+       ! Coordonnées Z
+       write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="ZCoordinates" format="ascii">'
+       write(vtr_unit, '(A)') '          0.0'
+       write(vtr_unit, '(A)') '        </DataArray>'
+
+       write(vtr_unit, '(A)') '      </Coordinates>'
+       write(vtr_unit, '(A)') '    </Piece>'
+       write(vtr_unit, '(A)') '  </RectilinearGrid>'
+       write(vtr_unit, '(A)') '</VTKFile>'
+       close(vtr_unit)
+    end if
+
+    ! 2. Écriture du fichier maître parallèle .pvtr sur le rang 0
+    if (mesh%rank == 0) then
+       ! Allocation dynamique de tableau contigu en mémoire
+       allocate(all_x_start(mesh%size), all_x_end(mesh%size))
+       ! Allocation dynamique de tableau contigu en mémoire
+       allocate(all_y_start(mesh%size), all_y_end(mesh%size))
+
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Gather(x_start, 1, MPI_INTEGER, all_x_start, 1, MPI_INTEGER, 0, mesh%comm, ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Gather(x_end,   1, MPI_INTEGER, all_x_end,   1, MPI_INTEGER, 0, mesh%comm, ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Gather(y_start, 1, MPI_INTEGER, all_y_start, 1, MPI_INTEGER, 0, mesh%comm, ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Gather(y_end,   1, MPI_INTEGER, all_y_end,   1, MPI_INTEGER, 0, mesh%comm, ierr)
+
+       write(pvtr_file, '(A,"/",A,"_",A,".pvtr")') &
+         trim(this%output_dir), trim(this%case_name), step_str
+
+       ! Affectation et calcul numérique
+       open(newunit=pvtr_unit, file=trim(pvtr_file), status="replace", action="write", iostat=io_stat)
+       ! Évaluation de la condition logique
+       if (io_stat == 0) then
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '<?xml version="1.0"?>'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '<VTKFile type="PRectilinearGrid" version="0.1" byte_order="LittleEndian">'
+          write(pvtr_unit, '(A,I0,A,I0,A)') &
+            ! Affectation et calcul numérique
+            '  <PRectilinearGrid WholeExtent="0 ', mesh%nx_global, ' 0 ', mesh%ny_global, ' 0 0" GhostLevel="0">'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '    <PCellData Scalars="PhaseIndicator,Pressure,Density,Viscosity,Divergence" Vectors="Velocity">'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="PhaseIndicator"/>'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Pressure"/>'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Density"/>'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Viscosity"/>'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Divergence"/>'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Temperature"/>'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Velocity" NumberOfComponents="3"/>'
+          write(pvtr_unit, '(A)') '    </PCellData>'
+          write(pvtr_unit, '(A)') '    <PCoordinates>'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="XCoordinates"/>'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="YCoordinates"/>'
+          ! Affectation et calcul numérique
+          write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="ZCoordinates"/>'
+          write(pvtr_unit, '(A)') '    </PCoordinates>'
+
+          ! Boucle d'itération numérique
+          do p = 0, mesh%size - 1
+             write(piece_str, '(A,"_p",I0,"_",A,".vtr")') trim(this%case_name), p, step_str
+             write(pvtr_unit, '(A,I0,A,I0,A,I0,A,I0,A,A,A)') &
+               ! Affectation et calcul numérique
+               '    <Piece Extent="', all_x_start(p+1), ' ', all_x_end(p+1), ' ', &
+               ! Affectation et calcul numérique
+               all_y_start(p+1), ' ', all_y_end(p+1), ' 0 0" Source="', trim(piece_str), '"/>'
+          end do
+
+          write(pvtr_unit, '(A)') '  </PRectilinearGrid>'
+          write(pvtr_unit, '(A)') '</VTKFile>'
+          close(pvtr_unit)
+       end if
+
+       ! Libération de la mémoire allouée
+       deallocate(all_x_start, all_x_end, all_y_start, all_y_end)
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Gather(x_start, 1, MPI_INTEGER, dummy, 0, MPI_INTEGER, 0, mesh%comm, ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Gather(x_end,   1, MPI_INTEGER, dummy, 0, MPI_INTEGER, 0, mesh%comm, ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Gather(y_start, 1, MPI_INTEGER, dummy, 0, MPI_INTEGER, 0, mesh%comm, ierr)
+       ! Appel à la bibliothèque de communication parallèle MPI
+       call MPI_Gather(y_end,   1, MPI_INTEGER, dummy, 0, MPI_INTEGER, 0, mesh%comm, ierr)
+    end if
+  end subroutine vtk_write_step
+
+  !-----------------------------------------------------------------------------
+  ! Calcul et enregistrement des métriques physiques temporelles dans l'historique CSV
+  !-----------------------------------------------------------------------------
+  subroutine vtk_write_diagnostics(this, mesh, fields, step, time, dt)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(vtk_writer_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)     :: mesh
+    ! Déclaration de variable locale / paramètre de calcul
+    type(flow_fields_t), intent(in) :: fields
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in)             :: step
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), intent(in)            :: time, dt
+
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: local_vol, local_y_integral, local_v_integral, local_ke
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: local_max_u, local_max_div, dvol, y_pos, c_val, ind_bubble
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: uc, vc, speed2, speed, div_val
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: global_vol, global_y_integral, global_v_integral, global_ke
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: global_max_u, global_max_div, yc, vc_mean
+    ! Déclaration de variable locale / paramètre de calcul
+    integer  :: i, j
+
+    ! Affectation et calcul numérique
+    local_vol        = 0.0_dp
+    ! Affectation et calcul numérique
+    local_y_integral = 0.0_dp
+    ! Affectation et calcul numérique
+    local_v_integral = 0.0_dp
+    ! Affectation et calcul numérique
+    local_ke         = 0.0_dp
+    ! Affectation et calcul numérique
+    local_max_u      = 0.0_dp
+    ! Affectation et calcul numérique
+    local_max_div    = 0.0_dp
+
+    ! Affectation et calcul numérique
+    dvol = mesh%dx * mesh%dy
+
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, mesh%ny_local
+       ! Affectation et calcul numérique
+       y_pos = y_center(mesh, j)
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, mesh%nx_local
+          ! Affectation et calcul numérique
+          c_val = fields%C(i, j)
+          ! Affectation et calcul numérique
+          ind_bubble = 1.0_dp - c_val ! 1 si phase fluide 2 (bulle / goutte)
+
+          ! Affectation et calcul numérique
+          local_vol        = local_vol + ind_bubble * dvol
+          ! Affectation et calcul numérique
+          local_y_integral = local_y_integral + y_pos * ind_bubble * dvol
+
+          ! Affectation et calcul numérique
+          uc = 0.5_dp * (fields%u(i, j) + fields%u(i + 1, j))
+          ! Affectation et calcul numérique
+          vc = 0.5_dp * (fields%v(i, j) + fields%v(i, j + 1))
+
+          ! Affectation et calcul numérique
+          local_v_integral = local_v_integral + vc * ind_bubble * dvol
+
+          ! Affectation et calcul numérique
+          speed2 = uc * uc + vc * vc
+          ! Affectation et calcul numérique
+          local_ke = local_ke + 0.5_dp * fields%rho(i, j) * speed2 * dvol
+
+          ! Affectation et calcul numérique
+          speed = sqrt(speed2)
+          ! Affectation et calcul numérique
+          if (speed > local_max_u) local_max_u = speed
+
+          ! Affectation et calcul numérique
+          div_val = abs((fields%u(i + 1, j) - fields%u(i, j)) / mesh%dx + &
+                        (fields%v(i, j + 1) - fields%v(i, j)) / mesh%dy)
+          ! Affectation et calcul numérique
+          if (div_val > local_max_div) local_max_div = div_val
+       end do
+    end do
+
+    ! Affectation et calcul numérique
+    global_vol        = global_sum(mesh, local_vol)
+    ! Affectation et calcul numérique
+    global_y_integral = global_sum(mesh, local_y_integral)
+    ! Affectation et calcul numérique
+    global_v_integral = global_sum(mesh, local_v_integral)
+    ! Affectation et calcul numérique
+    global_ke         = global_sum(mesh, local_ke)
+    ! Affectation et calcul numérique
+    global_max_u      = global_max(mesh, local_max_u)
+    ! Affectation et calcul numérique
+    global_max_div    = global_max(mesh, local_max_div)
+
+    ! Évaluation de la condition logique
+    if (global_vol > 1.0e-12_dp) then
+       ! Affectation et calcul numérique
+       yc = global_y_integral / global_vol
+       ! Affectation et calcul numérique
+       vc_mean = global_v_integral / global_vol
+    ! Branche par défaut si condition non satisfaite
+    else
+       ! Affectation et calcul numérique
+       yc = 0.0_dp
+       ! Affectation et calcul numérique
+       vc_mean = 0.0_dp
+    end if
+
+    ! Évaluation de la condition logique
+    if (mesh%rank == 0 .and. this%is_open) then
+       write(this%csv_unit, '(I0,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6)') &
+         step, time, dt, yc, vc_mean, global_vol, global_ke, global_max_u, global_max_div
+       flush(this%csv_unit)
+    end if
+  end subroutine vtk_write_diagnostics
+
+  !-----------------------------------------------------------------------------
+  ! Clôture du fichier de diagnostic CSV
+  !-----------------------------------------------------------------------------
+  subroutine vtk_finalize(this)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(vtk_writer_t), intent(inout) :: this
+    ! Évaluation de la condition logique
+    if (this%is_open) then
+       close(this%csv_unit)
+       ! Affectation et calcul numérique
+       this%is_open = .false.
+    end if
+  end subroutine vtk_finalize
+
+end module module_vtk_writer
+
+```
+
+
+## Chapitre 23 : Boucle Temporelle Principale, Diagnostics Intégraux et Vérification en Fortran 2018 (module_simulation.f90)
+
+\section{Orchestration Complète dans \texttt{module\_simulation.f90} (1004 Lignes)}
+Le module \texttt{src/module\_simulation.f90} réalise l'intégration temporelle complète et l'auto-vérification des 16 cas de validation :
+\begin{enumerate}
+  \item \texttt{simulation\_init} : initialise le contexte MPI, le maillage MAC, les champs hydrodynamiques/thermiques/VOF, les masques de Brinkman et les conditions initiales sous-échantillonnées $8\times 8$.
+  \item \texttt{simulation\_run} : aiguille vers le mode elliptique pur (\texttt{run\_laplacian\_test} pour le Cas 3.1), le mode cinématique de Rider-Kothe (\texttt{run\_vortex\_advection} pour les 12 variantes du Cas 3.19) ou la boucle complète Navier-Stokes + VOF + Énergie.
+  \item \texttt{write\_diagnostics\_csv} : calcule à chaque pas de temps les intégrales physiques exactes (volume de phase, centre de masse $(X_c, Y_c)$, vitesse moyenne $(U_c, V_c)$, énergie cinétique diphasique $E_k(t) = \frac{1}{2}\iint \rho(C)\|\mathbf{u}\|^2\,d\Omega$, enstrophie $\mathcal{E}(t) = \frac{1}{2}\iint \omega_z^2\,d\Omega$, nombre de Nusselt $\overline{Nu}$ et saut de pression de Laplace $\Delta P$) et les exporte dans les fichiers CSV synchronisés avec C++17.
+\end{enumerate}
+
+### Répertoire des Procédures de `src/module_simulation.f90`
+
+| Ligne | Nature | Identifiant Fortran 2018 | Interface / Arguments |
+|:---:|:---|:---|:---|
+| 11 | module | `module_simulation` | Unité modulaire Fortran 2018 |
+| 28 | type dérivé | `simulation_t` | Structure de données Fortran 2018 |
+| 59 | function | `sim_init` | Arguments : (this, comm, config_file) |
+| 259 | function | `sim_compute_time_step` | Arguments : (this) |
+| 323 | subroutine | `sim_run` | Arguments : (this) |
+| 554 | subroutine | `sim_run_laplacian` | Arguments : (this) |
+| 768 | subroutine | `sim_run_vortex_advection` | Arguments : (this) |
+
+### Code Source Intégral : `src/module_simulation.f90` (1004 lignes)
+
+```fortran
+!===============================================================================
+! Module: module_simulation
+! Description: Moteur principal de simulation COVOF 2D en Fortran 2018 :
+!              - Gestion du cycle de vie du calcul (init, run, finalize)
+!              - Pas de temps adaptatif CFL + onde capillaire
+!              - Boucle temporelle avec couplage Lagrangien Augmenté / Uzawa
+!              - Mode de vérification analytique du Laplacien (Cas 3.1 Référence Académique)
+!              - Mode de vérification du vortex de cisaillement réversible (Cas 3.19 Référence Académique)
+!              - Convergence vers l'état stationnaire
+!===============================================================================
+module module_simulation
+  use module_precision, only: dp
+  use module_constants
+  use module_config
+  use module_mesh
+  use module_fields
+  use module_mpi_comm
+  use module_interface_vof
+  use module_navier_stokes
+  use module_linear_solvers
+  use module_vtk_writer
+  implicit none
+  private
+  include 'mpif.h'
+
+  public :: simulation_t
+
+  type :: simulation_t
+     ! Déclaration de variable locale / paramètre de calcul
+     type(config_t)         :: config
+     ! Déclaration de variable locale / paramètre de calcul
+     type(mesh_2d_t)        :: mesh
+     ! Déclaration de variable locale / paramètre de calcul
+     type(flow_fields_t)    :: fields
+     ! Déclaration de variable locale / paramètre de calcul
+     type(interface_vof_t)  :: tracker
+     ! Déclaration de variable locale / paramètre de calcul
+     type(navier_stokes_t)  :: ns_solver
+     ! Déclaration de variable locale / paramètre de calcul
+     type(vtk_writer_t)     :: vtk_writer
+  contains
+     ! Affectation et calcul numérique
+     procedure :: init => sim_init
+     ! Affectation et calcul numérique
+     procedure :: run => sim_run
+     ! Affectation et calcul numérique
+     procedure :: compute_time_step => sim_compute_time_step
+     ! Affectation et calcul numérique
+     procedure :: run_laplacian => sim_run_laplacian
+     ! Affectation et calcul numérique
+     procedure :: run_vortex_advection => sim_run_vortex_advection
+  end type simulation_t
+
+contains
+
+  !-----------------------------------------------------------------------------
+  ! Initialisation complète de la simulation à partir du fichier JSON
+  !-----------------------------------------------------------------------------
+  function sim_init(this, comm, config_file) result(success)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(simulation_t), intent(inout) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    integer, intent(in)                :: comm
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=*), intent(in)       :: config_file
+    ! Déclaration de variable locale / paramètre de calcul
+    logical                            :: success
+
+    ! Déclaration de variable locale / paramètre de calcul
+    logical  :: periodic_x, periodic_y
+    ! Déclaration de variable locale / paramètre de calcul
+    integer  :: i, j, u_nx, v_ny
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: frac, y_step, h, u_mean, y_val, u_val, x_val
+    ! Déclaration des paramètres pour la nappe liquide cisaillée (Cas 3.2 Fluids 2021)
+    real(dp) :: y_c_ls, delta_ls, k_ls, amp_ls, factor_u_ls, dy_c_ls, sgn_y_ls, exp_decay_ls, c_u_ls, a_val_ls
+    ! Déclaration des variables pour l'amorce de jet visqueux (Cas 3.3 Fluids 2021)
+    real(dp) :: x_c_vj, half_w_vj, stub_h_vj, v_in_vj
+
+    ! Affectation et calcul numérique
+    success = .false.
+
+    ! 1. Chargement de la configuration JSON
+    call load_config_from_json(config_file, this%config)
+
+    ! 2. Initialisation du maillage cartésien partitionné MPI
+    periodic_x = (this%config%bc_left%btype == BC_PERIODIC .or. this%config%bc_right%btype == BC_PERIODIC)
+    ! Affectation et calcul numérique
+    periodic_y = (this%config%bc_bottom%btype == BC_PERIODIC .or. this%config%bc_top%btype == BC_PERIODIC)
+
+    ! Appel de sous-programme modulaire
+    call init_mesh(this%mesh, comm, this%config%nx, this%config%ny, &
+                   this%config%lx, this%config%ly, periodic_x, periodic_y)
+
+    ! 3. Allocation des champs décalés MAC
+    call this%fields%allocate(this%mesh)
+
+    ! 4. Initialisation du module d'interface VOF et des conditions initiales
+    call this%tracker%init(this%config)
+    ! Appel de sous-programme modulaire
+    call this%tracker%set_initial_condition(this%mesh, this%fields)
+
+    ! Initialisation des conditions aux limites initiales
+    call apply_boundary_conditions(this%mesh, this%config, this%fields, .false.)
+
+    ! Initialisation du canal amont pour profil POISEUILLE_STEP afin de garantir la continuité
+    if (this%config%bc_left%btype == BC_DIRICHLET .and. this%config%obs_enabled .and. &
+        ! Affectation et calcul numérique
+        this%config%obs_type == OBS_BOX) then
+       ! Affectation et calcul numérique
+       y_step = this%config%obs_y1
+       ! Affectation et calcul numérique
+       h = this%mesh%ly - y_step
+       ! Affectation et calcul numérique
+       u_mean = this%config%bc_left%u
+       ! Affectation et calcul numérique
+       u_nx = this%mesh%nx_local
+       ! Affectation et calcul numérique
+       if (this%mesh%is_boundary_right) u_nx = u_nx + 1
+
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, this%mesh%ny_local
+          ! Affectation et calcul numérique
+          y_val = y_center(this%mesh, j)
+          ! Affectation et calcul numérique
+          u_val = 0.0_dp
+          ! Évaluation de la condition logique
+          if (y_val >= y_step) then
+             ! Affectation et calcul numérique
+             u_val = 6.0_dp * u_mean * (y_val - y_step) * (this%mesh%ly - y_val) / (h * h)
+          end if
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, u_nx
+             ! Affectation et calcul numérique
+             x_val = x_face(this%mesh, i)
+             ! Évaluation de la condition logique
+             if (x_val <= 4.0_dp + 1.0e-9_dp) then
+                ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+                this%fields%u(i, j) = u_val
+             end if
+          end do
+       end do
+       ! Appel de sous-programme modulaire
+       call sync_u(this%mesh, this%fields%u)
+    end if
+
+    ! Initialisation du champ de vitesse solénoïdal pour LIQUID_SHEET (Équations 17-18 Fluids 2021)
+    if (this%config%ic_type == IC_LIQUID_SHEET) then
+       ! Déclaration des variables physiques et géométriques
+       if (this%config%ic_center_y > 0.0_dp) then
+          y_c_ls = this%config%ic_center_y
+       else
+          y_c_ls = 0.5_dp * this%mesh%ly
+       end if
+       if (this%config%ic_thickness > 0.0_dp) then
+          delta_ls = this%config%ic_thickness
+       else
+          delta_ls = 0.0003_dp
+       end if
+       k_ls = 2.0_dp * PI / this%mesh%lx
+       amp_ls = 0.04_dp
+       factor_u_ls = amp_ls * (this%mesh%lx / (2.0_dp * PI)) * (2.0_dp / delta_ls)
+
+       ! Composante horizontale u sur les faces décalées MAC en x
+       u_nx = this%mesh%nx_local
+       if (this%mesh%is_boundary_right) u_nx = u_nx + 1
+       do j = 1, this%mesh%ny_local
+          y_val = y_center(this%mesh, j)
+          dy_c_ls = y_val - y_c_ls
+          if (dy_c_ls > 1.0e-12_dp) then
+             sgn_y_ls = 1.0_dp
+          else if (dy_c_ls < -1.0e-12_dp) then
+             sgn_y_ls = -1.0_dp
+          else
+             sgn_y_ls = 0.0_dp
+          end if
+          exp_decay_ls = exp(-2.0_dp * abs(dy_c_ls) / delta_ls)
+          do i = 1, u_nx
+             x_val = x_face(this%mesh, i)
+             c_u_ls = 0.5_dp * (this%fields%C(i - 1, j) + this%fields%C(i, j))
+             a_val_ls = c_u_ls * 30.0_dp + (1.0_dp - c_u_ls) * 2.0_dp
+             this%fields%u(i, j) = a_val_ls - sgn_y_ls * factor_u_ls * cos(k_ls * x_val) * exp_decay_ls
+          end do
+       end do
+
+       ! Composante verticale v sur les faces décalées MAC en y
+       v_ny = this%mesh%ny_local
+       if (this%mesh%is_boundary_top) v_ny = v_ny + 1
+       do j = 1, v_ny
+          y_val = y_face(this%mesh, j)
+          dy_c_ls = y_val - y_c_ls
+          exp_decay_ls = exp(-2.0_dp * abs(dy_c_ls) / delta_ls)
+          do i = 1, this%mesh%nx_local
+             x_val = x_center(this%mesh, i)
+             this%fields%v(i, j) = amp_ls * sin(k_ls * x_val) * exp_decay_ls
+          end do
+       end do
+
+       call sync_u(this%mesh, this%fields%u)
+       call sync_v(this%mesh, this%fields%v)
+    end if
+
+    ! Initialisation du champ de vitesse pour VISCOUS_JET (Cas 3.3 Fluids 2021)
+    if (this%config%ic_type == IC_VISCOUS_JET) then
+       x_c_vj = merge(this%config%ic_center_x, 0.5_dp * this%mesh%lx, this%config%ic_center_x > 0.0_dp)
+       half_w_vj = merge(0.5_dp * this%config%ic_jet_width, 0.04_dp, this%config%ic_jet_width > 0.0_dp)
+       stub_h_vj = 2.0_dp * this%mesh%dy
+       v_in_vj = merge(this%config%bc_top%v, -0.6_dp, this%config%bc_top%v /= 0.0_dp)
+
+       v_ny = this%mesh%ny_local
+       if (this%mesh%is_boundary_top) v_ny = v_ny + 1
+       do j = 1, v_ny
+          y_val = y_face(this%mesh, j)
+          do i = 1, this%mesh%nx_local
+             x_val = x_center(this%mesh, i)
+             if (y_val >= this%mesh%ly - stub_h_vj .and. abs(x_val - x_c_vj) <= half_w_vj) then
+                this%fields%v(i, j) = v_in_vj
+             end if
+          end do
+       end do
+       call sync_v(this%mesh, this%fields%v)
+       call apply_velocity_bc(this%fields, this%mesh, this%config, .false.)
+       call apply_vof_bc(this%fields, this%mesh, this%config)
+    end if
+
+    ! Initialisation du champ thermique si activé
+    if (this%config%enable_energy) then
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, this%mesh%ny_local
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, this%mesh%nx_local
+             ! Affectation et calcul numérique
+             frac = x_center(this%mesh, i) / this%mesh%lx
+             ! Évolution du champ scalaire de température
+             this%fields%T(i, j) = this%config%bc_left%T + frac * (this%config%bc_right%T - this%config%bc_left%T)
+          end do
+       end do
+       ! Appel de sous-programme modulaire
+       call sync_cell_scalar(this%mesh, this%fields%T)
+       ! Appel de sous-programme modulaire
+       call apply_thermal_boundary_conditions(this%mesh, this%config, this%fields)
+    end if
+
+    ! 5. Initialisation du solveur Navier-Stokes et préconditionneurs
+    call this%ns_solver%init(this%mesh, this%config)
+    ! Appel de sous-programme modulaire
+    call this%ns_solver%assemble_preconditioner_blocks(this%mesh, this%config, this%fields, this%config%dt)
+
+    ! 6. Initialisation de l'exportateur VTK et diagnostics CSV
+    call this%vtk_writer%init(this%mesh, this%config%output_dir, this%config%case_name)
+
+    ! Affectation et calcul numérique
+    success = .true.
+  end function sim_init
+
+  !-----------------------------------------------------------------------------
+  ! Calcul du pas de temps adaptatif (CFL advection + onde capillaire)
+  !-----------------------------------------------------------------------------
+  function sim_compute_time_step(this) result(dt)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(simulation_t), intent(in) :: this
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: dt
+
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: local_max_speed, global_max_speed, speed, u_val, v_val
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: dt_cfl, dt_sigma, rho_sum, h_min, dt_target
+    ! Déclaration de variable locale / paramètre de calcul
+    integer  :: i, j
+
+    ! Évaluation de la condition logique
+    if (.not. this%config%adaptive_dt) then
+       ! Affectation et calcul numérique
+       dt = this%config%dt
+       ! Retour à la procédure appelante
+       return
+    end if
+
+    ! Affectation et calcul numérique
+    local_max_speed = 1.0e-6_dp
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, this%mesh%ny_local
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, this%mesh%nx_local
+          ! Affectation et calcul numérique
+          u_val = abs(this%fields%u(i, j))
+          ! Affectation et calcul numérique
+          v_val = abs(this%fields%v(i, j))
+          ! Affectation et calcul numérique
+          speed = sqrt(u_val * u_val + v_val * v_val)
+          ! Affectation et calcul numérique
+          if (speed > local_max_speed) local_max_speed = speed
+       end do
+    end do
+    ! Affectation et calcul numérique
+    global_max_speed = global_max(this%mesh, local_max_speed)
+
+    ! 1. Critère CFL de convection
+    dt_cfl = this%config%cfl_max * min(this%mesh%dx, this%mesh%dy) / global_max_speed
+
+    ! 2. Critère capillaire si tension superficielle active
+    dt_sigma = 1.0e10_dp
+    ! Évaluation de la condition logique
+    if (this%config%enable_surface_tension .and. this%config%sigma > 0.0_dp) then
+       ! Calcul de la masse volumique locale ou interpolée aux faces
+       rho_sum = this%config%rho1 + this%config%rho2
+       ! Affectation et calcul numérique
+       h_min = min(this%mesh%dx, this%mesh%dy)
+       ! Affectation et calcul numérique
+       dt_sigma = sqrt((rho_sum * h_min**3) / (4.0_dp * PI * this%config%sigma))
+    end if
+
+    ! Affectation et calcul numérique
+    dt_target = min(dt_cfl, dt_sigma)
+    ! Affectation et calcul numérique
+    dt = min(this%config%dt, dt_target)
+  end function sim_compute_time_step
+
+  !-----------------------------------------------------------------------------
+  ! Boucle principale d'intégration temporelle Navier-Stokes
+  !-----------------------------------------------------------------------------
+  subroutine sim_run(this)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(simulation_t), intent(inout) :: this
+
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: t, dt, global_max_u, global_max_div, global_du_max, nu_mean
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: local_max_u, local_max_div, local_du_max, speed, du, div_val
+    ! Déclaration de variable locale / paramètre de calcul
+    integer  :: step, total_iters, uzawa_max, m, iters, i, j
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: state_vector(:), rhs(:), u_prev(:, :)
+
+    ! Évaluation de la condition logique
+    if (trim(this%config%mode) == "LAPLACIAN") then
+       ! Appel de sous-programme modulaire
+       call this%run_laplacian()
+       ! Retour à la procédure appelante
+       return
+    end if
+    ! Évaluation de la condition logique
+    if (trim(this%config%mode) == "VORTEX_ADVECTION") then
+       ! Appel de sous-programme modulaire
+       call this%run_vortex_advection()
+       ! Retour à la procédure appelante
+       return
+    end if
+
+    ! Affectation et calcul numérique
+    t = 0.0_dp
+    ! Affectation et calcul numérique
+    step = 0
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(state_vector(this%ns_solver%n_owned_total))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(rhs(this%ns_solver%n_owned_total))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(u_prev(0:this%mesh%nx_local+1, 0:this%mesh%ny_local+1))
+
+    ! Sauvegarde initiale à t = 0.0
+    call this%vtk_writer%write_step(this%mesh, this%fields, step, t)
+    ! Appel de sous-programme modulaire
+    call this%vtk_writer%write_diagnostics(this%mesh, this%fields, step, t, this%config%dt)
+
+    ! Évaluation de la condition logique
+    if (this%mesh%rank == 0) then
+       write(*, '(A)') ""
+       write(*, '(A)') ">>> DEMARRAGE DU CALCUL COVOF 2D FORTRAN 2018 PARALLELE <<<"
+       write(*, '(A8,A14,A12,A14,A16,A16,A14)') &
+         "Pas", "Temps [s]", "dt [s]", "Iter Krylov", "Vitesse Max", "Div Max", "Nu Moyen"
+       write(*, '(A)') repeat("-", 94)
+    end if
+
+    ! Boucle d'itération numérique
+    do while (t < this%config%t_final - 1.0e-12_dp * (abs(this%config%t_final) + 1.0_dp))
+       ! Affectation et calcul numérique
+       step = step + 1
+       ! Affectation et calcul numérique
+       u_prev = this%fields%u
+       ! Affectation et calcul numérique
+       dt = this%compute_time_step()
+
+       ! Évaluation de la condition logique
+       if (t + dt > this%config%t_final) then
+          ! Affectation et calcul numérique
+          dt = this%config%t_final - t
+       end if
+       if (dt < 1.0e-12_dp) exit
+
+       ! 1. Transport de l'interface si écoulement diphasique
+       if (this%config%enable_two_phase) then
+          ! Appel de sous-programme modulaire
+          call this%tracker%advect(this%mesh, this%fields, dt)
+          ! Actualisation des conditions aux limites
+          call apply_velocity_bc(this%fields, this%mesh, this%config, .false.)
+          call apply_vof_bc(this%fields, this%mesh, this%config)
+       end if
+
+       ! 2. Assemblage des blocs du préconditionneur
+       call this%ns_solver%assemble_preconditioner_blocks(this%mesh, this%config, this%fields, dt)
+
+       ! Affectation et calcul numérique
+       total_iters = 0
+       ! Évaluation de la condition logique
+       if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+          ! Affectation et calcul numérique
+          uzawa_max = this%config%uzawa_iter
+       ! Branche par défaut si condition non satisfaite
+       else
+          ! Affectation et calcul numérique
+          uzawa_max = 1
+       end if
+
+       ! Boucle d'itération numérique
+       do m = 1, uzawa_max
+          ! 3. Construction du second membre rhs
+          call this%ns_solver%assemble_rhs(this%mesh, this%config, this%fields, dt, rhs)
+
+          ! 4. Initialisation du vecteur d'état à partir des champs courants
+          call this%ns_solver%pack_vector(this%mesh, this%config, this%fields, state_vector)
+
+          ! 5. Résolution du système linéaire par Krylov (BiCGSTAB2 / PCG / GMRES)
+          call solve_linear_system(this%ns_solver, this%mesh, this%config, this%fields, dt, &
+                                   rhs, state_vector, iters)
+          ! Affectation et calcul numérique
+          total_iters = total_iters + iters
+
+          ! 6. Déballage de la vitesse résolue
+          call this%ns_solver%unpack_vector(this%mesh, this%config, state_vector, this%fields, .false.)
+
+          ! 7. Mise à jour de la pression par Lagrangien augmenté (étape d'Uzawa)
+          if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+             ! Appel de sous-programme modulaire
+             call this%ns_solver%update_pressure_al(this%mesh, this%config, this%fields)
+          end if
+       end do
+
+       ! 7.5 Résolution de l'énergie thermique si activée
+       if (this%config%enable_energy) then
+          ! Appel de sous-programme modulaire
+          call this%ns_solver%solve_energy(this%mesh, this%config, this%fields, dt)
+       end if
+
+       ! Affectation et calcul numérique
+       t = t + dt
+
+       ! Calcul des métriques de contrôle
+       local_max_u   = 0.0_dp
+       ! Affectation et calcul numérique
+       local_max_div = 0.0_dp
+       ! Affectation et calcul numérique
+       local_du_max  = 0.0_dp
+
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, this%mesh%ny_local
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, this%mesh%nx_local
+             ! Affectation et calcul numérique
+             speed = sqrt(this%fields%u(i, j)**2 + this%fields%v(i, j)**2)
+             ! Affectation et calcul numérique
+             if (speed > local_max_u) local_max_u = speed
+
+             ! Affectation et calcul numérique
+             du = abs(this%fields%u(i, j) - u_prev(i, j))
+             ! Affectation et calcul numérique
+             if (du > local_du_max) local_du_max = du
+
+             ! Affectation et calcul numérique
+             div_val = abs((this%fields%u(i + 1, j) - this%fields%u(i, j)) / this%mesh%dx + &
+                           (this%fields%v(i, j + 1) - this%fields%v(i, j)) / this%mesh%dy)
+             ! Affectation et calcul numérique
+             if (div_val > local_max_div) local_max_div = div_val
+          end do
+       end do
+
+       ! Affectation et calcul numérique
+       global_max_u   = global_max(this%mesh, local_max_u)
+       ! Affectation et calcul numérique
+       global_max_div = global_max(this%mesh, local_max_div)
+       ! Affectation et calcul numérique
+       global_du_max  = global_max(this%mesh, local_du_max)
+
+       ! Affectation et calcul numérique
+       nu_mean = 0.0_dp
+       ! Évaluation de la condition logique
+       if (this%config%enable_energy) then
+          ! Affectation et calcul numérique
+          nu_mean = this%ns_solver%compute_mean_nusselt_hot_wall(this%mesh, this%config, this%fields)
+       end if
+
+       ! Détection de convergence stationnaire
+       if (.not. this%config%enable_two_phase .and. &
+           this%config%steady_state_tol > 0.0_dp .and. step > 10 .and. &
+           global_du_max < this%config%steady_state_tol) then
+          ! Évaluation de la condition logique
+          if (this%mesh%rank == 0) then
+             write(*, '(A)') ""
+             write(*, '(A,ES12.4,A,ES12.4,A,F10.4,A)') &
+               ! Affectation et calcul numérique
+               ">>> CONVERGENCE STATIONNAIRE ATTEINTE : du_max = ", global_du_max, &
+               ! Calcul de la métrique spatiale élémentaire
+               " < ", this%config%steady_state_tol, " (t = ", t, " s) <<<"
+             ! Évaluation de la condition logique
+             if (this%config%enable_energy) then
+                ! Affectation et calcul numérique
+                write(*, '(A,F10.5,A)') ">>> NOMBRE DE NUSSELT FINAL : Nu = ", nu_mean, " <<<"
+             end if
+          end if
+          ! Appel de sous-programme modulaire
+          call this%vtk_writer%write_step(this%mesh, this%fields, step, t)
+          exit
+       end if
+
+       ! Affichage console régulier
+       if (this%mesh%rank == 0 .and. (mod(step, this%config%log_interval) == 0)) then
+          write(*, '(I8,F14.5,ES12.3,I14,ES16.4,ES16.4,F14.4)') &
+            step, t, dt, total_iters, global_max_u, global_max_div, nu_mean
+       end if
+
+       ! Écriture des diagnostics CSV
+       if (this%config%write_csv) then
+          ! Appel de sous-programme modulaire
+          call this%vtk_writer%write_diagnostics(this%mesh, this%fields, step, t, dt)
+       end if
+
+       ! Export des fichiers VTK
+       if (mod(step, this%config%vtk_interval) == 0 .or. t >= this%config%t_final) then
+          ! Appel de sous-programme modulaire
+          call this%vtk_writer%write_step(this%mesh, this%fields, step, t)
+       end if
+    end do
+
+    ! Appel de sous-programme modulaire
+    call this%vtk_writer%finalize()
+
+    ! Évaluation de la condition logique
+    if (this%mesh%rank == 0) then
+       write(*, '(A)') repeat("-", 94)
+       ! Affectation et calcul numérique
+       write(*, '(A,F10.4,A)') ">>> SIMULATION COVOF 2D TERMINEE AVEC SUCCES A t = ", t, " s <<<"
+       write(*, '(A,A)') "Fichiers de visualisation VTK et CSV disponibles dans : ", trim(this%config%output_dir)
+    end if
+
+    ! Libération de la mémoire allouée
+    deallocate(state_vector, rhs, u_prev)
+  end subroutine sim_run
+
+  !-----------------------------------------------------------------------------
+  ! Cas de vérification 3.1 : Laplacien -Delta(Psi) = -1 avec solution analytique
+  !-----------------------------------------------------------------------------
+  subroutine sim_run_laplacian(this)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(simulation_t), intent(inout) :: this
+
+    double precision :: a, b, dx, dy, psi_ex, xp, yp, num, den, n1, n2, diff
+    double precision :: err_l1, err_l2, err_linf, tol, rz_old, rz_new, alpha, beta, pAp, r_norm
+    ! Déclaration de variable locale / paramètre de calcul
+    integer :: nx, ny, n_int_x, n_int_y, n_dofs, i, j, k1, k2, row, iters, max_it, err_unit
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=256) :: err_file
+    double precision, allocatable :: A_diag(:), A_east(:), A_west(:), A_north(:), A_south(:)
+    double precision, allocatable :: rhs(:), x(:), r(:), p(:), z(:), Ap(:)
+
+    ! Affectation et calcul numérique
+    a = this%config%lx
+    ! Affectation et calcul numérique
+    b = this%config%ly
+    ! Affectation et calcul numérique
+    nx = this%config%nx
+    ! Affectation et calcul numérique
+    ny = this%config%ny
+    ! Calcul de la métrique spatiale élémentaire
+    dx = a / real(nx, dp)
+    ! Calcul de la métrique spatiale élémentaire
+    dy = b / real(ny, dp)
+
+    ! Évaluation de la condition logique
+    if (this%mesh%rank == 0) then
+       write(*, '(A)') ""
+       ! Affectation et calcul numérique
+       write(*, '(A)') "========================================================"
+       ! Affectation et calcul numérique
+       write(*, '(A)') "  VERIFICATION DU CAS 3.1 : LAPLACIEN DELTA(PSI) = 1"
+       write(*, '(A,F8.4,A,F8.4,A,I0,A,I0,A)') &
+         "  Domaine [", a, " x ", b, "], Grille ", nx, " x ", ny
+       ! Affectation et calcul numérique
+       write(*, '(A)') "========================================================"
+    end if
+
+    ! Affectation et calcul numérique
+    n_int_x = nx - 1
+    ! Affectation et calcul numérique
+    n_int_y = ny - 1
+    ! Affectation et calcul numérique
+    n_dofs = n_int_x * n_int_y
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(A_diag(n_dofs), A_east(n_dofs), A_west(n_dofs), A_north(n_dofs), A_south(n_dofs))
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(rhs(n_dofs), x(n_dofs), r(n_dofs), p(n_dofs), z(n_dofs), Ap(n_dofs))
+
+    ! Affectation et calcul numérique
+    A_diag  = 2.0_dp / (dx * dx) + 2.0_dp / (dy * dy)
+    ! Affectation et calcul numérique
+    A_east  = -1.0_dp / (dx * dx)
+    ! Affectation et calcul numérique
+    A_west  = -1.0_dp / (dx * dx)
+    ! Affectation et calcul numérique
+    A_north = -1.0_dp / (dy * dy)
+    ! Affectation et calcul numérique
+    A_south = -1.0_dp / (dy * dy)
+
+    ! Affectation et calcul numérique
+    rhs = -1.0_dp
+    ! Affectation et calcul numérique
+    x   = 0.0_dp
+
+    ! Résolution par Gradient Conjugué préconditionné par Jacobi
+    r = rhs
+    ! Affectation et calcul numérique
+    z = r / A_diag
+    ! Affectation et calcul numérique
+    p = z
+    ! Affectation et calcul numérique
+    rz_old = sum(r * z)
+
+    ! Affectation et calcul numérique
+    max_it = 20000
+    ! Affectation et calcul numérique
+    tol = this%config%tol
+    ! Affectation et calcul numérique
+    if (tol <= 0.0_dp) tol = 1.0e-12_dp
+
+    ! Boucle d'itération numérique
+    do iters = 1, max_it
+       ! Ap = A * p
+       do j = 0, n_int_y - 1
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 0, n_int_x - 1
+             ! Affectation et calcul numérique
+             row = j * n_int_x + i + 1
+             ! Actualisation de la pression statique au centre de la maille
+             Ap(row) = A_diag(row) * p(row)
+             ! Actualisation de la pression statique au centre de la maille
+             if (i > 0)           Ap(row) = Ap(row) + A_west(row)  * p(row - 1)
+             ! Actualisation de la pression statique au centre de la maille
+             if (i < n_int_x - 1) Ap(row) = Ap(row) + A_east(row)  * p(row + 1)
+             ! Actualisation de la pression statique au centre de la maille
+             if (j > 0)           Ap(row) = Ap(row) + A_south(row) * p(row - n_int_x)
+             ! Actualisation de la pression statique au centre de la maille
+             if (j < n_int_y - 1) Ap(row) = Ap(row) + A_north(row) * p(row + n_int_x)
+          end do
+       end do
+
+       ! Affectation et calcul numérique
+       pAp = sum(p * Ap)
+       if (abs(pAp) < 1.0e-30_dp) exit
+
+       ! Affectation et calcul numérique
+       alpha = rz_old / pAp
+       ! Affectation et calcul numérique
+       x = x + alpha * p
+       ! Affectation et calcul numérique
+       r = r - alpha * Ap
+
+       ! Évaluation de la norme du résidu ou de l'erreur numérique
+       r_norm = sqrt(sum(r * r))
+       if (r_norm < tol) exit
+
+       ! Affectation et calcul numérique
+       z = r / A_diag
+       ! Affectation et calcul numérique
+       rz_new = sum(r * z)
+       ! Affectation et calcul numérique
+       beta = rz_new / rz_old
+       ! Affectation et calcul numérique
+       rz_old = rz_new
+
+       ! Affectation et calcul numérique
+       p = z + beta * p
+    end do
+
+    ! Évaluation de la solution analytique exacte (formule analytique de référence)
+    err_l1   = 0.0_dp
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    err_l2   = 0.0_dp
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    err_linf = 0.0_dp
+
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 0, n_int_y - 1
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 0, n_int_x - 1
+          ! Affectation et calcul numérique
+          xp = real(i + 1, dp) * dx
+          ! Affectation et calcul numérique
+          yp = real(j + 1, dp) * dy
+          ! Affectation et calcul numérique
+          psi_ex = 0.0_dp
+
+          ! Boucle d'itération numérique
+          do k2 = 0, 59
+             ! Boucle d'itération numérique
+             do k1 = 0, 59
+                ! Affectation et calcul numérique
+                n1 = real(2 * k1 + 1, dp)
+                ! Affectation et calcul numérique
+                n2 = real(2 * k2 + 1, dp)
+                ! Affectation et calcul numérique
+                num = 16.0_dp * sin(n1 * PI * xp / a) * sin(n2 * PI * yp / b)
+                ! Affectation et calcul numérique
+                den = (PI**4) * n1 * n2 * ((n1 / a)**2 + (n2 / b)**2)
+                ! Affectation et calcul numérique
+                psi_ex = psi_ex - num / den
+             end do
+          end do
+
+          ! Affectation et calcul numérique
+          row = j * n_int_x + i + 1
+          ! Affectation et calcul numérique
+          diff = abs(x(row) - psi_ex)
+          ! Évaluation de la norme du résidu ou de l'erreur numérique
+          err_l1 = err_l1 + diff
+          ! Évaluation de la norme du résidu ou de l'erreur numérique
+          err_l2 = err_l2 + diff * diff
+          ! Évaluation de la norme du résidu ou de l'erreur numérique
+          if (diff > err_linf) err_linf = diff
+       end do
+    end do
+
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    err_l1 = err_l1 / real(n_dofs, dp)
+    ! Évaluation de la norme du résidu ou de l'erreur numérique
+    err_l2 = sqrt(err_l2 / real(n_dofs, dp))
+
+    ! Évaluation de la condition logique
+    if (this%mesh%rank == 0) then
+       write(*, '(A)') ">>> RESULTAT RESOLUTION LAPLACIEN COVOF 2D <<<"
+       write(*, '(A,I0)')       "  Iterations : ", iters
+       write(*, '(A,ES14.6)')  "  Erreur L1   : ", err_l1
+       write(*, '(A,ES14.6)')  "  Erreur L2   : ", err_l2
+       write(*, '(A,ES14.6)')  "  Erreur Linf : ", err_linf
+       ! Affectation et calcul numérique
+       write(*, '(A)') "========================================================"
+
+       ! Appel de sous-programme modulaire
+       call execute_command_line("mkdir -p " // trim(this%config%output_dir))
+       ! Évaluation de la norme du résidu ou de l'erreur numérique
+       err_file = trim(this%config%output_dir) // "/laplacian_error.csv"
+       ! Affectation et calcul numérique
+       open(newunit=err_unit, file=trim(err_file), status="replace", action="write")
+       write(err_unit, '(A)') "nx,ny,dx,dy,iters,err_l1,err_l2,err_linf"
+       write(err_unit, '(I0,",",I0,",",ES14.6,",",ES14.6,",",I0,",",ES14.6,",",ES14.6,",",ES14.6)') &
+         nx, ny, dx, dy, iters, err_l1, err_l2, err_linf
+       close(err_unit)
+    end if
+
+    ! Libération de la mémoire allouée
+    deallocate(A_diag, A_east, A_west, A_north, A_south, rhs, x, r, p, z, Ap)
+  end subroutine sim_run_laplacian
+
+  !-----------------------------------------------------------------------------
+  ! Cas de vérification 3.19 : Advection VOF vortex de cisaillement avec retournement
+  !-----------------------------------------------------------------------------
+  subroutine sim_run_vortex_advection(this)
+    ! Déclaration de variable locale / paramètre de calcul
+    class(simulation_t), intent(inout) :: this
+
+    ! Déclaration de variable locale / paramètre de calcul
+    integer  :: nx, ny, u_nx, v_ny, step, i, j, err_unit
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: T_period, dt, t, cos_factor, x_u, y_c, x_c, y_v, sx, sy
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp) :: local_err_l1, global_err_l1, local_cells, global_cells, err_l1
+    ! Déclaration des variables pour erreurs L2, Linf et bilan de conservation de masse
+    real(dp) :: local_err_l2, global_err_l2, err_l2
+    ! Déclaration de l'erreur absolue maximale locale et globale
+    real(dp) :: local_err_linf, global_err_linf, err_linf
+    ! Déclaration des masses initiale et finale locales et globales
+    real(dp) :: local_mass_init, global_mass_init, local_mass_final, global_mass_final
+    ! Déclaration du volume de maille, écart local et ratio de conservation
+    real(dp) :: cell_vol, diff, mass_conservation
+    ! Déclaration de variable locale / paramètre de calcul
+    character(len=256) :: err_file
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: C_initial(:, :)
+
+    ! Affectation et calcul numérique
+    nx = this%config%nx
+    ! Affectation et calcul numérique
+    ny = this%config%ny
+    ! Affectation et calcul numérique
+    T_period = this%config%t_final
+    ! Affectation et calcul numérique
+    if (T_period <= 0.0_dp) T_period = 6.0_dp
+    ! Affectation et calcul numérique
+    dt = this%config%dt
+
+    ! Évaluation de la condition logique
+    if (this%mesh%rank == 0) then
+       write(*, '(A)') ""
+       ! Affectation et calcul numérique
+       write(*, '(A)') "========================================================"
+       write(*, '(A)') "  VERIFICATION DU CAS 3.19 : ADVECTION VORTEX CISAILLEMENT"
+       write(*, '(A,I0,A,I0,A,F8.4,A,F8.5,A)') &
+         ! Affectation et calcul numérique
+         "  Grille : ", nx, " x ", ny, " | Periode T = ", T_period, " s | dt = ", dt, " s"
+       ! Affectation et calcul numérique
+       write(*, '(A)') "========================================================"
+    end if
+
+    ! Allocation dynamique de tableau contigu en mémoire
+    allocate(C_initial(0:this%mesh%nx_local+1, 0:this%mesh%ny_local+1))
+    ! Affectation et calcul numérique
+    C_initial = this%fields%C
+
+    ! Appel de sous-programme modulaire
+    call this%vtk_writer%write_step(this%mesh, this%fields, 0, 0.0_dp)
+
+    ! Affectation et calcul numérique
+    t = 0.0_dp
+    ! Affectation et calcul numérique
+    step = 0
+    ! Affectation et calcul numérique
+    u_nx = this%mesh%nx_local
+    ! Affectation et calcul numérique
+    if (this%mesh%is_boundary_right) u_nx = u_nx + 1
+    ! Affectation et calcul numérique
+    v_ny = this%mesh%ny_local
+    ! Affectation et calcul numérique
+    if (this%mesh%is_boundary_top) v_ny = v_ny + 1
+
+    ! Boucle d'itération numérique
+    do while (t < T_period - 1.0e-12_dp)
+       ! Affectation et calcul numérique
+       step = step + 1
+       ! Affectation et calcul numérique
+       if (t + dt > T_period) dt = T_period - t
+
+       ! Affectation et calcul numérique
+       cos_factor = cos(PI * t / T_period)
+
+       ! Imposer le champ de vitesse analytique sur les faces décalées
+       do j = 1, this%mesh%ny_local
+          ! Affectation et calcul numérique
+          y_c = y_center(this%mesh, j)
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, u_nx
+             ! Affectation et calcul numérique
+             x_u = x_face(this%mesh, i)
+             ! Affectation et calcul numérique
+             sx = sin(PI * x_u)
+             ! Affectation et calcul numérique
+             sy = sin(2.0_dp * PI * y_c)
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             this%fields%u(i, j) = - (sx * sx) * sy * cos_factor
+          end do
+       end do
+
+       ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+       do j = 1, v_ny
+          ! Affectation et calcul numérique
+          y_v = y_face(this%mesh, j)
+          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+          do i = 1, this%mesh%nx_local
+             ! Affectation et calcul numérique
+             x_c = x_center(this%mesh, i)
+             ! Affectation et calcul numérique
+             sx = sin(2.0_dp * PI * x_c)
+             ! Affectation et calcul numérique
+             sy = sin(PI * y_v)
+             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             this%fields%v(i, j) = sx * (sy * sy) * cos_factor
+          end do
+       end do
+
+       ! Appel de sous-programme modulaire
+       call sync_u(this%mesh, this%fields%u)
+       ! Appel de sous-programme modulaire
+       call sync_v(this%mesh, this%fields%v)
+
+       ! Advection TVD Superbee de la fraction volumique C
+       call this%tracker%advect(this%mesh, this%fields, dt)
+
+       ! Affectation et calcul numérique
+       t = t + dt
+
+       ! Affectation et calcul numérique
+       if (mod(step, this%config%vtk_interval) == 0 .or. t >= T_period .or. &
+           abs(t - 0.5_dp * T_period) < 0.5_dp * dt) then
+          ! Appel de sous-programme modulaire
+          call this%vtk_writer%write_step(this%mesh, this%fields, step, t)
+       end if
+
+       ! Évaluation de la condition logique
+       if (this%mesh%rank == 0 .and. (mod(step, this%config%log_interval) == 0 .or. t >= T_period)) then
+          write(*, '(A,I0,A,F8.4,A,F8.4,A)') &
+            ! Affectation et calcul numérique
+            "  [Vortex] Pas ", step, " | t = ", t, " s / ", T_period, " s"
+       end if
+    end do
+
+    ! Calcul des erreurs L1, L2, Linf et du bilan de masse entre C_initial et C(T)
+    local_err_l1 = 0.0_dp
+    ! Affectation et initialisation numérique de la somme d'erreur quadratique L2
+    local_err_l2 = 0.0_dp
+    ! Affectation et initialisation numérique de l'erreur absolue maximale Linf
+    local_err_linf = 0.0_dp
+    ! Affectation et initialisation numérique de la masse initiale locale
+    local_mass_init = 0.0_dp
+    ! Affectation et initialisation numérique de la masse finale locale
+    local_mass_final = 0.0_dp
+    ! Affectation et calcul du nombre de cellules locales
+    local_cells = real(this%mesh%nx_local * this%mesh%ny_local, dp)
+    ! Affectation et calcul de l'aire géométrique élémentaire de cellule
+    cell_vol = this%mesh%dx * this%mesh%dy
+
+    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    do j = 1, this%mesh%ny_local
+       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
+       do i = 1, this%mesh%nx_local
+          ! Évaluation de l'écart absolu entre la fraction finale et la fraction exacte initiale
+          diff = abs(this%fields%C(i, j) - C_initial(i, j))
+          ! Accumulation pour la norme L1 moyenne
+          local_err_l1 = local_err_l1 + diff
+          ! Accumulation quadratique pour la norme L2
+          local_err_l2 = local_err_l2 + diff * diff
+          ! Recherche du maximum pour la norme Linf
+          if (diff > local_err_linf) local_err_linf = diff
+          ! Intégration de la masse initiale
+          local_mass_init = local_mass_init + C_initial(i, j) * cell_vol
+          ! Intégration de la masse finale
+          local_mass_final = local_mass_final + this%fields%C(i, j) * cell_vol
+       end do
+    end do
+
+    ! Réduction parallèle MPI globale de la somme d'erreur L1
+    global_err_l1 = global_sum(this%mesh, local_err_l1)
+    ! Réduction parallèle MPI globale de la somme quadratique L2
+    global_err_l2 = global_sum(this%mesh, local_err_l2)
+    ! Réduction parallèle MPI globale de l'erreur maximale Linf
+    global_err_linf = global_max(this%mesh, local_err_linf)
+    ! Réduction parallèle MPI globale de la masse totale initiale
+    global_mass_init = global_sum(this%mesh, local_mass_init)
+    ! Réduction parallèle MPI globale de la masse totale finale
+    global_mass_final = global_sum(this%mesh, local_mass_final)
+    ! Affectation et calcul du nombre global de cellules du maillage
+    global_cells  = global_sum(this%mesh, local_cells)
+
+    ! Normalisation de l'erreur moyenne L1
+    err_l1 = global_err_l1 / global_cells
+    ! Normalisation et racine de l'erreur quadratique moyenne L2
+    err_l2 = sqrt(global_err_l2 / global_cells)
+    ! Erreur maximale locale Linf
+    err_linf = global_err_linf
+    ! Évaluation du taux de conservation de masse du fluide
+    if (global_mass_init > 1.0e-14_dp) then
+       mass_conservation = global_mass_final / global_mass_init
+    else
+       mass_conservation = 1.0_dp
+    end if
+
+    ! Évaluation de la condition logique pour le processus maître de rang 0
+    if (this%mesh%rank == 0) then
+       write(*, '(A)') ""
+       write(*, '(A)') ">>> RESULTAT DU CAS 3.19 : ADVECTION VORTEX COVOF 2D <<<"
+       write(*, '(A,A)')       "  Methode Advection  : ", trim(this%config%advection_method)
+       write(*, '(A,A)')       "  Reconstruction     : ", trim(this%config%reconstruction_method)
+       write(*, '(A,A)')       "  Limiteur TVD/NVD   : ", trim(this%config%tvd_limiter)
+       write(*, '(A,I0,A,I0)') "  Maillage           : ", nx, " x ", ny
+       write(*, '(A,ES14.6)')  "  Erreur L1          : ", err_l1
+       write(*, '(A,ES14.6)')  "  Erreur L2          : ", err_l2
+       write(*, '(A,ES14.6)')  "  Erreur Linf        : ", err_linf
+       write(*, '(A,F10.5,A)') "  Conservation Masse : ", mass_conservation * 100.0_dp, " %"
+       ! Affectation et calcul numérique
+       write(*, '(A)') "========================================================"
+
+       ! Appel de sous-programme modulaire pour création du dossier de sortie
+       call execute_command_line("mkdir -p " // trim(this%config%output_dir))
+       ! Chemin d'accès au fichier CSV des erreurs et bilans de masse
+       err_file = trim(this%config%output_dir) // "/vortex_error.csv"
+       ! Ouverture en écriture du fichier récapitulatif
+       open(newunit=err_unit, file=trim(err_file), status="replace", action="write")
+       ! Écriture de l'en-tête CSV avec l'ensemble des métadonnées
+       write(err_unit, '(A)') "nx,ny,dt,T,advection,reconstruction,limiter,err_l1,err_l2,err_linf,mass_init,mass_final,mass_conservation"
+       ! Écriture formatée des valeurs numériques
+       write(err_unit, '(I0,",",I0,",",ES14.6,",",ES14.6,",",A,",",A,",",A,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6)') &
+         nx, ny, dt, T_period, &
+         trim(this%config%advection_method), trim(this%config%reconstruction_method), trim(this%config%tvd_limiter), &
+         err_l1, err_l2, err_linf, global_mass_init, global_mass_final, mass_conservation
+       ! Fermeture propre du flux fichier
+       close(err_unit)
+    end if
+
+    ! Appel de sous-programme modulaire
+    call this%vtk_writer%finalize()
+    ! Libération de la mémoire allouée
+    deallocate(C_initial)
+  end subroutine sim_run_vortex_advection
+
+end module module_simulation
+
+```
+

@@ -14,10 +14,10 @@
     "viscosity_model": "EXPONENTIAL",
     "visc_a": 2.0,
     "visc_e": 0.01,
-    "visc_mu0": 1.85e-5,
+    "visc_mu0": 1.85e-05,
     "fluid1": {
       "rho": 1.0,
-      "mu": 1.85e-5
+      "mu": 1.85e-05
     }
   },
   "time": {
@@ -26,21 +26,37 @@
     "adaptive_dt": false
   },
   "boundary_conditions": {
-    "left":   { "type": "PERIODIC", "u": 0.0, "v": 0.0 },
-    "right":  { "type": "PERIODIC", "u": 0.0, "v": 0.0 },
-    "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
-    "top":    { "type": "DIRICHLET", "u": 0.0, "v": 0.0 }
+    "left": {
+      "type": "PERIODIC",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "right": {
+      "type": "PERIODIC",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "bottom": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "top": {
+      "type": "DIRICHLET",
+      "u": 0.0,
+      "v": 0.0
+    }
   },
   "solver": {
     "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1e-8,
+    "tol": 1e-08,
     "max_iter": 500,
     "r_al": 0.0,
     "uzawa_iter": 1,
     "use_precond": true,
     "precond_type": "JACOBI"
   },
-  "steady_state_tol": 1e-7,
+  "steady_state_tol": 1e-07,
   "output": {
     "output_dir": "output_poiseuille_variable_viscosity",
     "case_name": "poiseuille_var_mu",

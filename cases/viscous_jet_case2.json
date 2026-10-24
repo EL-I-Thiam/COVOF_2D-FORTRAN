@@ -1,0 +1,82 @@
+{
+  "mesh": {
+    "nx": 80,
+    "ny": 80,
+    "lx": 1.0,
+    "ly": 1.0
+  },
+  "physics": {
+    "enable_two_phase": true,
+    "enable_surface_tension": false,
+    "enable_convection": true,
+    "sigma": 0.0,
+    "gx": 0.0,
+    "gy": -9.81,
+    "fluid1": {
+      "rho": 1.1768,
+      "mu": 0.00185
+    },
+    "fluid2": {
+      "rho": 1800.0,
+      "mu": 300.0
+    }
+  },
+  "time": {
+    "dt": 0.001,
+    "t_final": 2.0,
+    "cfl_max": 0.5,
+    "adaptive_dt": false
+  },
+  "boundary_conditions": {
+    "left": {
+      "type": "FREE_SLIP",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "right": {
+      "type": "FREE_SLIP",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "bottom": {
+      "type": "FREE_SLIP",
+      "u": 0.0,
+      "v": 0.0
+    },
+    "top": {
+      "type": "DIRICHLET",
+      "profile": "JET_INLET",
+      "jet_width": 0.1,
+      "jet_center": 0.5,
+      "u": 0.0,
+      "v": -1.0
+    }
+  },
+  "initial_condition": {
+    "type": "VISCOUS_JET",
+    "center_x": 0.5,
+    "jet_width": 0.1
+  },
+  "solver": {
+    "type": "AUGMENTED_LAGRANGIAN",
+    "tol": 1e-05,
+    "max_iter": 250,
+    "r_al": 10000.0,
+    "uzawa_iter": 1,
+    "use_precond": true,
+    "precond_type": "JACOBI"
+  },
+  "vof": {
+    "reconstruction_method": "PLIC",
+    "advection_method": "VOF_TVD",
+    "tvd_limiter": "SUPERBEE",
+    "cfl_vof": 0.5
+  },
+  "output": {
+    "output_dir": "output_viscous_jet_case2",
+    "case_name": "viscous_jet_case2",
+    "vtk_interval": 250,
+    "log_interval": 250,
+    "write_csv_history": true
+  }
+}

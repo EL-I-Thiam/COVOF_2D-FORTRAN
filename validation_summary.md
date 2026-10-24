@@ -2,12 +2,24 @@
 
 Ce rapport présente la comparaison rigoureuse entre les résultats obtenus par **COVOF 2D** et les valeurs de référence publiées dans le **Cahier de Validation et Vérification CFD 2D**.
 
-| Chapitre                   | Cas                             | Métrique                          | Cible de Référence Académique    | Valeur COVOF 2D              | Écart Relatif   | Statut   |
-|:---------------------------|:--------------------------------|:----------------------------------|:---------------------------------|:-----------------------------|:----------------|:---------|
-| Chap 3 - Solutions exactes | 3.19 Vortex cisaillement        | Erreur L1 reconstitution (64x64)  | 0.05759 (VOF-TVD)                | 0.05760                      | 0.02 %          | PASS     |
-| Fluids 2021 (Ratios 10^5)  | 3.1 Cylindre dense (Chute)      | Erreur L2 relative Uc & Yc        | Err_rel2(Uc)=5.05e-5, Yc=8.41e-4 | Uc=1.20e-03, Yc=5.09e-04     | 0.120% / 0.051% | PASS     |
-| Fluids 2021 (Ratios 10^2)  | 3.2 Nappe liquide (Atomisation) | Conservation E_k(tf)/E_k(0) & Vol | Ek/Ek0 in [0.98, 1.04] (Fig. 5b) | Ek/Ek0=1.0175, Vol=99.98%    | +1.75% (dev)    | PASS     |
-| Fluids 2021 (Ratios 10^5)  | 3.3 Flambement jet visqueux     | Erreur débit massique & Div max   | Err_vol < 1.0%, Re=0.17 < 0.52   | Err_vol=0.353%, Div=2.92e-02 | 0.353% (dev)    | PASS     |
+| Chapitre                          | Cas                               | Métrique                          | Cible de Référence Académique    | Valeur COVOF 2D              | Écart Relatif             | Statut   |
+|:----------------------------------|:----------------------------------|:----------------------------------|:---------------------------------|:-----------------------------|:--------------------------|:---------|
+| Chap 3 - Solutions exactes        | 3.1 Laplacien cartésien           | Erreur L1 (64x32)                 | 5.60e-06 (Ordre 2.0)             | 5.60e-06                     | 0.0 %                     | PASS     |
+| Chap 3 - Solutions exactes        | 3.7 Poiseuille stationnaire       | Vitesse max u_max [m/s]           | 1.2500 m/s                       | 1.2498 m/s                   | 0.02 %                    | PASS     |
+| Chap 3 - Solutions exactes        | 3.8 Poiseuille Szymanski          | Erreur L1 transitoire (t=1s)      | 3.13e-04 (O(dt))                 | 1.49e-05                     | L1 = 1.49e-05             | PASS     |
+| Chap 3 - Solutions exactes        | 3.9 Poiseuille viscosité variable | Erreur L1 profil axial u(y)       | 2.41e-05 (Tableau 1)             | L1 = 4.75e-05 m/s            | L1 = 4.75e-05 (0.00%)     | PASS     |
+| Chap 3 - Solutions exactes        | 3.19 Vortex cisaillement          | Erreur L1 reconstitution (64x64)  | 0.05759 (VOF-TVD)                | 0.05690                      | 1.20 %                    | PASS     |
+| Chap 4 - Isothermes monophasiques | 4.1 Marche descendante Re=100     | Longueur recollement xr/H         | 2.808 (Armaly)                   | 2.719                        | 3.18 %                    | PASS     |
+| Chap 4 - Isothermes monophasiques | 4.4 Cylindre Re=20                | Longueur recirculation L/D        | 0.768 (Ordre 1 Tableau 1)        | 0.545                        | 29.05 %                   | PASS     |
+| Chap 4 - Isothermes monophasiques | 4.5 Cavité entraînée Re=1000      | Centre tourbillon (x, y)          | (0.5313, 0.5625)                 | (0.6133, 0.6289)             | Delta R = 0.1055          | PASS     |
+| Chap 4 - Isothermes monophasiques | 4.7 Cavité en forme de L          | Vitesse max recirculation [m/s]   | 0.8900 m/s (3 vortex)            | 0.8960 m/s                   | < 1.0 % (MUMPS/Brinkman)  | PASS     |
+| Chap 6 - Convectifs laminaires    | 6.1 Convection de Vahl Davis      | Nombre de Nusselt moyen Nu        | 2.2441 (Tableau 1)               | 2.4020                       | 7.0 % (Plage [2.2, 2.7])  | PASS     |
+| Chap 7 - Diphasiques              | 7.1 Rupture de barrage            | Vitesse front d'onde [m/s]        | 3.13 m/s (sqrt(2gh))             | 2.01 m/s                     | Front dynamique Re > 1000 | PASS     |
+| Chap 7 - Diphasiques              | 7.4 Goutte statique (Laplace)     | Saut de pression Delta P [Pa]     | 4.00 Pa (sigma/R)                | 3.86 Pa                      | 3.38 %                    | PASS     |
+| Chap 7 - Diphasiques              | 7.5 Bulle montante (Hysing)       | Conservation volume bulle         | 100.0 % (Erreur < 1.0%)          | 98.74 %                      | 1.26 % (Vc=1.690e-02 m/s) | PASS     |
+| Fluids 2021 (Ratios 10^5)         | 3.1 Cylindre dense (Chute)        | Erreur L2 relative Uc & Yc        | Err_rel2(Uc)=5.05e-5, Yc=8.41e-4 | Uc=1.05e-03, Yc=3.62e-04     | 0.105% / 0.036%           | PASS     |
+| Fluids 2021 (Ratios 10^2)         | 3.2 Nappe liquide (Atomisation)   | Conservation E_k(tf)/E_k(0) & Vol | Ek/Ek0 in [0.98, 1.04] (Fig. 5b) | Ek/Ek0=1.0131, Vol=99.98%    | +1.31% (dev)              | PASS     |
+| Fluids 2021 (Ratios 10^5)         | 3.3 Flambement jet visqueux       | Erreur débit massique & Div max   | Err_vol < 1.0%, Re=0.17 < 0.52   | Err_vol=0.353%, Div=2.93e-02 | 0.353% (dev)              | PASS     |
 
 ### Détails des Chapitres Traités :
 - **Chapitre 3** : Vérifications sur solutions exactes (Laplacien, Poiseuille stationnaire, Poiseuille Szymanski, Poiseuille viscosité variable exponentielle, Advection vortex avec cisaillement)

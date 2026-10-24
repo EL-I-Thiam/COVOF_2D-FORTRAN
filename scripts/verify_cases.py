@@ -30,11 +30,12 @@ def parse_vtr_scalars(vtr_path, array_name):
     if not data_match:
         return None, None, None
         
-    vals = [float(v) for v in data_match.group(1).split()]
-    if len(vals) == ny * nx * 3:
-        arr = np.array(vals).reshape((ny, nx, 3))
+    raw_txt = re.sub(r'([0-9])([+-][0-9]{2,3})', r'\1E\2', data_match.group(1))
+    vals = np.fromstring(raw_txt, sep=' ', dtype=np.float64)
+    if vals.size == ny * nx * 3:
+        arr = vals.reshape((ny, nx, 3))
     else:
-        arr = np.array(vals).reshape((ny, nx))
+        arr = vals.reshape((ny, nx))
     return arr, (x0, x1), (y0, y1)
 
 def reconstruct_global_field(output_dir, case_name, array_name, step=None):

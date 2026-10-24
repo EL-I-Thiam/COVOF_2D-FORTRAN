@@ -2,7 +2,7 @@
 module module_mpi_comm
   use module_precision, only: dp
   use module_constants
-  use module_mesh, only: mesh_2d_t, x_center, y_center
+  use module_mesh, only: mesh_2d_t, x_center, y_center, x_face
   use module_fields, only: flow_fields_t
   use module_config, only: config_t
   implicit none
@@ -460,12 +460,17 @@ contains
              x_c = x_center(mesh, i)
              if (abs(x_c - xc_top) <= half_w_top) then
                 if (.not. homogeneous) fields%v(i, ny+1) = v_t
-                fields%u(i, ny+1) = 0.0_dp
              else
                 if (.not. homogeneous) fields%v(i, ny+1) = v_out_top
+             end if
+             ! Condition tangentielle symétrique évaluée à l'abscisse exacte de la face u
+             if (abs(x_face(mesh, i) - xc_top) <= half_w_top) then
+                fields%u(i, ny+1) = 0.0_dp
+             else
                 fields%u(i, ny+1) = fields%u(i, ny)
              end if
           end do
+          fields%u(nx+1, ny+1) = fields%u(nx+1, ny)
        else
           ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
           do i = 1, nx
