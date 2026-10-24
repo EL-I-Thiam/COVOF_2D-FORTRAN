@@ -69,9 +69,11 @@ contains
     ! Déclaration de variable locale / paramètre de calcul
     logical  :: periodic_x, periodic_y
     ! Déclaration de variable locale / paramètre de calcul
-    integer  :: i, j, u_nx
+    integer  :: i, j, u_nx, v_ny
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: frac, y_step, h, u_mean, y_val, u_val, x_val
+    ! Déclaration des paramètres pour la nappe liquide cisaillée (Cas 3.2 Fluids 2021)
+    real(dp) :: y_c_ls, delta_ls, k_ls, amp_ls, factor_u_ls, dy_c_ls, sgn_y_ls, exp_decay_ls, c_u_ls, a_val_ls
 
     ! Affectation et calcul numérique
     success = .false.
@@ -138,6 +140,62 @@ contains
        end do
        ! Appel de sous-programme modulaire
        call sync_u(this%mesh, this%fields%u)
+    end if
+
+    ! Initialisation du champ de vitesse solénoïdal pour LIQUID_SHEET (Équations 17-18 Fluids 2021)
+    if (this%config%ic_type == IC_LIQUID_SHEET) then
+       ! Déclaration des variables physiques et géométriques
+       if (this%config%ic_center_y > 0.0_dp) then
+          y_c_ls = this%config%ic_center_y
+       else
+          y_c_ls = 0.5_dp * this%mesh%ly
+       end if
+       if (this%config%ic_thickness > 0.0_dp) then
+          delta_ls = this%config%ic_thickness
+       else
+          delta_ls = 0.0003_dp
+       end if
+       k_ls = 2.0_dp * PI / this%mesh%lx
+       amp_ls = 0.04_dp
+       factor_u_ls = amp_ls * (this%mesh%lx / (2.0_dp * PI)) * (2.0_dp / delta_ls)
+
+       ! Composante horizontale u sur les faces décalées MAC en x
+       u_nx = this%mesh%nx_local
+       if (this%mesh%is_boundary_right) u_nx = u_nx + 1
+       do j = 1, this%mesh%ny_local
+          y_val = y_center(this%mesh, j)
+          dy_c_ls = y_val - y_c_ls
+          if (dy_c_ls > 1.0e-12_dp) then
+             sgn_y_ls = 1.0_dp
+          else if (dy_c_ls < -1.0e-12_dp) then
+             sgn_y_ls = -1.0_dp
+          else
+             sgn_y_ls = 0.0_dp
+          end if
+          exp_decay_ls = exp(-2.0_dp * abs(dy_c_ls) / delta_ls)
+          do i = 1, u_nx
+             x_val = x_face(this%mesh, i)
+             c_u_ls = 0.5_dp * (this%fields%C(i - 1, j) + this%fields%C(i, j))
+             a_val_ls = c_u_ls * 30.0_dp + (1.0_dp - c_u_ls) * 2.0_dp
+             this%fields%u(i, j) = a_val_ls - sgn_y_ls * factor_u_ls * cos(k_ls * x_val) * exp_decay_ls
+          end do
+       end do
+
+       ! Composante verticale v sur les faces décalées MAC en y
+       v_ny = this%mesh%ny_local
+       if (this%mesh%is_boundary_top) v_ny = v_ny + 1
+       do j = 1, v_ny
+          y_val = y_face(this%mesh, j)
+          dy_c_ls = y_val - y_c_ls
+          exp_decay_ls = exp(-2.0_dp * abs(dy_c_ls) / delta_ls)
+          do i = 1, this%mesh%nx_local
+             x_val = x_center(this%mesh, i)
+             this%fields%v(i, j) = amp_ls * sin(k_ls * x_val) * exp_decay_ls
+          end do
+       end do
+
+       call sync_u(this%mesh, this%fields%u)
+       call sync_v(this%mesh, this%fields%v)
     end if
 
     ! Initialisation du champ thermique si activé

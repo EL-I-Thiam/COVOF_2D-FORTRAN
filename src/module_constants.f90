@@ -95,6 +95,8 @@ module module_constants
   integer, parameter, public :: IC_DAM_BREAK        = 7
   ! Test analytique d'ordre de convergence de l'opérateur Laplacien discret à 5 points
   integer, parameter, public :: IC_LAPLACIAN_TEST   = 8
+  ! Nappe liquide cisaillée périodique (Cas 3.2 de l'article Fluids 2021)
+  integer, parameter, public :: IC_LIQUID_SHEET     = 9
 
   ! --- 10. Formes Géométriques d'Obstacles Immergés (Brinkman) ---
   ! Aucun obstacle immergé dans le domaine fluide

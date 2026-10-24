@@ -100,6 +100,8 @@ module module_config
      real(dp) :: ic_box_x0 = 0.0_dp, ic_box_y0 = 0.0_dp, ic_box_x1 = 0.5_dp, ic_box_y1 = 0.5_dp
      ! Déclaration de variable locale / paramètre de calcul
      real(dp) :: ic_pert_amp = 0.05_dp, ic_pert_k = 1.0_dp
+     ! Déclaration de l'épaisseur initiale de nappe liquide (Cas 3.2 Fluids 2021)
+     real(dp) :: ic_thickness = 0.0003_dp
 
      ! Solvers
      integer  :: solver_type = SOLVER_AUGMENTED_LAGRANGIAN
@@ -361,6 +363,10 @@ contains
     else if (trim(str_val) == "DAM_BREAK") then
        ! Affectation et calcul numérique
        cfg%ic_type = IC_DAM_BREAK
+    ! Branche conditionnelle alternative pour nappe liquide (Cas 3.2 Fluids 2021)
+    else if (trim(str_val) == "LIQUID_SHEET") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_LIQUID_SHEET
     ! Branche conditionnelle alternative
     else if (trim(str_val) == "LAPLACIAN_TEST") then
        ! Affectation et calcul numérique
@@ -393,6 +399,8 @@ contains
     call json_get_real(buf, "initial_condition.pert_amp", cfg%ic_pert_amp, 0.05_dp)
     ! Appel de sous-programme modulaire
     call json_get_real(buf, "initial_condition.pert_k", cfg%ic_pert_k, 1.0_dp)
+    ! Lecture de l'épaisseur de nappe liquide (Cas 3.2 Fluids 2021)
+    call json_get_real(buf, "initial_condition.thickness", cfg%ic_thickness, 0.0003_dp)
 
     ! Solver
     call json_get_string(buf, "solver.type", str_val, "AUGMENTED_LAGRANGIAN")

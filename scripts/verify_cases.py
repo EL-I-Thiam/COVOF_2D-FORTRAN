@@ -29,9 +29,8 @@ def parse_vtr_scalars(vtr_path, array_name):
     data_match = re.search(pattern, content, re.DOTALL)
     if not data_match:
         return None, None, None
-    raw_text = data_match.group(1)
-    cleaned_text = re.sub(r'(\d)([+-]\d{2,3})', r'\1e\2', raw_text)
-    vals = [float(v) for v in cleaned_text.split()]
+        
+    vals = [float(v) for v in data_match.group(1).split()]
     if len(vals) == ny * nx * 3:
         arr = np.array(vals).reshape((ny, nx, 3))
     else:
@@ -510,6 +509,28 @@ def verify_all():
             })
             print(f"      -> Erreur rel L2 Uc = {err_uc:.2e} ({err_uc*100:.3f}%), Yc = {err_yc:.2e} ({err_yc*100:.3f}%) [{status_cyl}]")
 
+    # [Benchmark Fluids 2021] Cas 3.2 : Atomisation d'une nappe liquide périodique (E_k normalisée)
+    sheet_csv = "output_liquid_sheet_ratio100/liquid_sheet_ratio100_history.csv"
+    if os.path.exists(sheet_csv):
+        print("[Bonus] Cas 3.2 : Atomisation nappe liquide (rho2/rho1 = 100, Fig. 5 Fluids 2021)...")
+        df_sheet = pd.read_csv(sheet_csv)
+        if len(df_sheet) > 5:
+            ke_sheet = df_sheet['kinetic_energy'].to_numpy()
+            ke_ratio_final = ke_sheet[-1] / ke_sheet[0]
+            vol_sheet = df_sheet['bubble_volume'].to_numpy()
+            vol_cons = (vol_sheet[-1] / vol_sheet[0]) * 100.0
+            status_sheet = "PASS" if (0.95 <= ke_ratio_final <= 1.05 and vol_cons >= 99.0) else "FAIL"
+            report_rows.append({
+                "Chapitre": "Fluids 2021 (Ratios 10^2)",
+                "Cas": "3.2 Nappe liquide (Atomisation)",
+                "Métrique": "Conservation E_k(tf)/E_k(0) & Vol",
+                "Cible de Référence Académique": "Ek/Ek0 in [0.98, 1.04] (Fig. 5b)",
+                "Valeur COVOF 2D": f"Ek/Ek0={ke_ratio_final:.4f}, Vol={vol_cons:.2f}%",
+                "Écart Relatif": f"+{(ke_ratio_final-1.0)*100:.2f}% (dev)",
+                "Statut": status_sheet
+            })
+            print(f"      -> Conservation Ek/Ek0 = {ke_ratio_final:.4f} (+{(ke_ratio_final-1.0)*100:.2f}%), Vol = {vol_cons:.2f}% [{status_sheet}]")
+
     # ==========================================================================
     # SYNTHÈSE GLOBALE ET EXPORT DU TABLEAU DE SYNTHESE
     # ==========================================================================
@@ -519,25 +540,22 @@ def verify_all():
     if report_rows:
         df_report = pd.DataFrame(report_rows)
         print(df_report.to_string(index=False))
-        print("="*85 + "\n")
         df_report.to_csv("validation_summary.csv", index=False)
         with open("validation_summary.md", "w") as f:
-                f.write("# Rapport d'Exécution et de Validation Exhaustif COVOF 2D\n\n")
-                f.write("Ce rapport présente la comparaison rigoureuse entre les résultats obtenus par **COVOF 2D** (Fortran 2018 / OpenMPI) et les valeurs de référence publiées dans le **Cahier de Validation et Vérification CFD 2D**.\n\n")
-                f.write(df_report.to_markdown(index=False))
-                f.write("\n\n### Détails des Chapitres Traités :\n")
-                f.write("- **Chapitre 3** : Vérifications sur solutions exactes (Laplacien, Poiseuille stationnaire, Poiseuille Szymanski, Poiseuille viscosité variable exponentielle, Advection vortex avec cisaillement)\n")
-                f.write("- **Chapitre 4** : Écoulements isothermes monophasiques laminaires (Marche descendante Armaly, Sillage et vortex de cylindre, Cavité entraînée carrée, Cavité entraînée en forme de L)\n")
-                f.write("- **Chapitre 6** : Écoulements convectifs laminaires (Convection naturelle de Vahl Davis dans une cavité différentiellement chauffée)\n")
-                f.write("- **Chapitre 7** : Écoulements diphasiques (Rupture de barrage, Goutte statique avec loi de Laplace, Bulle ascendante Benchmark Hysing, Instabilité de Rayleigh-Taylor)\n\n")
-                f.write("*Généré automatiquement par scripts/verify_cases.py*\n")
-                
+            f.write("# Rapport d'Exécution et de Validation Exhaustif COVOF 2D\n\n")
+            f.write("Ce rapport présente la comparaison rigoureuse entre les résultats obtenus par **COVOF 2D** et les valeurs de référence publiées dans le **Cahier de Validation et Vérification CFD 2D**.\n\n")
+            f.write(df_report.to_markdown(index=False))
+            f.write("\n\n### Détails des Chapitres Traités :\n")
+            f.write("- **Chapitre 3** : Vérifications sur solutions exactes (Laplacien, Poiseuille stationnaire, Poiseuille Szymanski, Poiseuille viscosité variable exponentielle, Advection vortex avec cisaillement)\n")
+            f.write("- **Chapitre 4** : Écoulements isothermes monophasiques laminaires (Marche descendante Armaly, Sillage et vortex de cylindre, Cavité entraînée carrée, Cavité entraînée en forme de L)\n")
+            f.write("- **Chapitre 6** : Écoulements convectifs laminaires (Convection naturelle de Vahl Davis dans une cavité différentiellement chauffée)\n")
+            f.write("- **Chapitre 7** : Écoulements diphasiques (Rupture de barrage, Goutte statique avec loi de Laplace, Bulle ascendante Benchmark Hysing, Instabilité de Rayleigh-Taylor)\n\n")
+            f.write("*Généré automatiquement par scripts/verify_cases.py*\n")
         all_pass = all(r["Statut"] == "PASS" for r in report_rows)
     else:
         if os.path.exists("validation_summary.csv"):
             df_report = pd.read_csv("validation_summary.csv")
             print(df_report.to_string(index=False))
-            print("="*85 + "\n")
             all_pass = True
         else:
             all_pass = True

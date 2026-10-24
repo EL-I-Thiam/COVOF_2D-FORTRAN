@@ -121,6 +121,25 @@ contains
                 fields%C(i, j) = 0.0_dp
              end if
 
+          case (IC_LIQUID_SHEET)
+             ! Nappe liquide cisaillée (Cas 3.2 de l'article Fluids 2021)
+             if (cfg%ic_center_y > 0.0_dp) then
+                ! Calcul de distance à l'axe de la nappe
+                dist = abs(y - cfg%ic_center_y) - 0.5_dp * cfg%ic_thickness
+             else
+                ! Calcul de distance au plan médian
+                dist = abs(y - 0.5_dp * mesh%ly) - 0.5_dp * cfg%ic_thickness
+             end if
+             ! Évaluation de l'indicatrice C
+             if (dist < -eps) then
+                fields%C(i, j) = 0.0_dp ! Intérieur nappe liquide (fluide 2)
+             else if (dist > eps) then
+                fields%C(i, j) = 1.0_dp ! Gaz ambiant (fluide 1)
+             else
+                fields%C(i, j) = 0.5_dp + dist / (2.0_dp * eps) + &
+                     (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+             end if
+
           case (IC_VORTEX_SHEAR)
              ! Affectation et calcul numérique
              dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
