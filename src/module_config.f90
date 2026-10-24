@@ -353,8 +353,8 @@ contains
     else if (trim(str_val) == "DROPLET") then
        ! Affectation et calcul numérique
        cfg%ic_type = IC_DROPLET
-    ! Branche conditionnelle alternative
-    else if (trim(str_val) == "BUBBLE") then
+    ! Branche conditionnelle alternative pour bulle ou cylindre immergé
+    else if (trim(str_val) == "BUBBLE" .or. trim(str_val) == "CYLINDER") then
        ! Affectation et calcul numérique
        cfg%ic_type = IC_BUBBLE
     ! Branche conditionnelle alternative

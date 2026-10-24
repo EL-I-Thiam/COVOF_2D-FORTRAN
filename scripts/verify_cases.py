@@ -481,6 +481,35 @@ def verify_all():
         })
         print(f"      -> Conservation volume = {100.0 - vol_err:.2f}% [{status}]")
 
+    # [Benchmark Fluids 2021] Cas 3.1 : Chute libre d'un cylindre dense (ratios 10^5 / 10^10)
+    cyl_csv = "output_free_fall_dense_cylinder/free_fall_dense_cylinder_history.csv"
+    if os.path.exists(cyl_csv):
+        print("\n--- BENCHMARK COMPLEMENTAIRE : FLUIDS 2021 (RATIOS EXTREMES) ---")
+        print("[Bonus] Cas 3.1 : Chute libre d'un cylindre dense (rho2/rho1 = 10^5, mu2/mu1 = 10^10)...")
+        df_cyl = pd.read_csv(cyl_csv)
+        if len(df_cyl) > 5:
+            t_cyl = df_cyl['time'].to_numpy()
+            uc_cyl = df_cyl['rise_velocity'].to_numpy()
+            yc_cyl = df_cyl['center_of_mass_y'].to_numpy()
+            g_val = 9.81
+            y0_val = 0.15
+            uc_ref = -g_val * t_cyl
+            yc_ref = y0_val - 0.5 * g_val * t_cyl**2
+            mask_t = (t_cyl > 1.0e-8)
+            err_uc = np.sqrt(np.sum((uc_cyl[mask_t] - uc_ref[mask_t])**2) / np.sum(uc_ref[mask_t]**2))
+            err_yc = np.sqrt(np.sum((yc_cyl[mask_t] - yc_ref[mask_t])**2) / np.sum(yc_ref[mask_t]**2))
+            status_cyl = "PASS" if (err_uc < 2.5e-3 and err_yc < 2.5e-3) else "FAIL"
+            report_rows.append({
+                "Chapitre": "Fluids 2021 (Ratios 10^5)",
+                "Cas": "3.1 Cylindre dense (Chute)",
+                "Métrique": "Erreur L2 relative Uc & Yc",
+                "Cible de Référence Académique": "Err_rel2(Uc)=5.05e-5, Yc=8.41e-4",
+                "Valeur COVOF 2D": f"Uc={err_uc:.2e}, Yc={err_yc:.2e}",
+                "Écart Relatif": f"{err_uc*100:.3f}% / {err_yc*100:.3f}%",
+                "Statut": status_cyl
+            })
+            print(f"      -> Erreur rel L2 Uc = {err_uc:.2e} ({err_uc*100:.3f}%), Yc = {err_yc:.2e} ({err_yc*100:.3f}%) [{status_cyl}]")
+
     # ==========================================================================
     # SYNTHÈSE GLOBALE ET EXPORT DU TABLEAU DE SYNTHESE
     # ==========================================================================
