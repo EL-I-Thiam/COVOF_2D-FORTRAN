@@ -463,12 +463,15 @@ xc_v = (np.arange(nx_v) + 0.5) * (lx_v / nx_v)
 yc_v = (np.arange(ny_v) + 0.5) * (ly_v / ny_v)
 X_v, Y_v = np.meshgrid(xc_v, yc_v)
 
+k_v = a_v / e_v
+C1_v = (gx_v / k_v) * ((k_v * ly_v - 1.0) * np.exp(k_v * ly_v) + 1.0) / (np.exp(k_v * ly_v) - 1.0)
+
 def var_visc_exact(y_arr):
-    y_phys = y_arr - e_v
-    mu_arr = mu0_v * np.exp(-a_v * y_phys / e_v)
-    C1 = e_v * (np.exp(a_v) + np.exp(-a_v)) / (np.exp(a_v) - np.exp(-a_v)) - e_v / a_v
-    C2 = (e_v / a_v) * np.exp(-a_v) * (C1 - e_v - e_v / a_v)
-    u_arr = -(gx_v / mu0_v) * ((e_v / a_v) * np.exp(a_v * y_phys / e_v) * (y_phys - e_v / a_v - C1) + C2)
+    mu_arr = mu0_v * np.exp(-a_v * (y_arr - e_v) / e_v)
+    u_arr = (np.exp(-a_v) / mu0_v) * (
+        C1_v * (np.exp(k_v * y_arr) - 1.0) / k_v
+        - gx_v * ((k_v * y_arr - 1.0) * np.exp(k_v * y_arr) + 1.0) / (k_v**2)
+    )
     return u_arr, mu_arr
 
 u_ex_v2d, mu_ex_v2d = var_visc_exact(Y_v)

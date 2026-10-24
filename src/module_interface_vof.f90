@@ -267,7 +267,7 @@ contains
              ! Affectation et calcul numérique
              z = y - cfg%visc_e
              ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
-             mu_val = cfg%visc_mu0 * exp(cfg%visc_a * (z * z) / (cfg%visc_e * cfg%visc_e))
+             mu_val = cfg%visc_mu0 * exp(-cfg%visc_a * z / cfg%visc_e)
              ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
              fields%mu(:, j) = mu_val
           end do
@@ -278,7 +278,7 @@ contains
              ! Affectation et calcul numérique
              z = y - cfg%visc_e
              ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
-             mu_val = cfg%visc_mu0 * exp(cfg%visc_a * (z * z) / (cfg%visc_e * cfg%visc_e))
+             mu_val = cfg%visc_mu0 * exp(-cfg%visc_a * z / cfg%visc_e)
              ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
              fields%mu_node(:, j) = mu_val
           end do

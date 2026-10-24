@@ -6711,7 +6711,7 @@ void InterfaceTracker::update_physical_properties(const Mesh2D& mesh, FlowFields
                 // Déclaration de variable typée
                 double z = y - visc_e;
                 // Déclaration de variable typée
-                double mu_val = visc_mu0 * std::exp(visc_a * (z * z) / (visc_e * visc_e));
+                double mu_val = visc_mu0 * std::exp(-visc_a * z / visc_e);
                 // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
                 for (int i = 0; i <= nx + 1; ++i) {
                     // Calcul de la résolution géométrique de cellule
@@ -6725,7 +6725,7 @@ void InterfaceTracker::update_physical_properties(const Mesh2D& mesh, FlowFields
                 // Déclaration de variable typée
                 double z = y - visc_e;
                 // Déclaration de variable typée
-                double mu_node_val = visc_mu0 * std::exp(visc_a * (z * z) / (visc_e * visc_e));
+                double mu_node_val = visc_mu0 * std::exp(-visc_a * z / visc_e);
                 // Boucle spatiale sur les cellules locales selon l'axe horizontal X (abscisses)
                 for (int i = 0; i <= nx + 1; ++i) {
                     // Calcul de la résolution géométrique de cellule
@@ -14955,7 +14955,7 @@ contains
              ! Affectation et calcul numérique
              z = y - cfg%visc_e
              ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
-             mu_val = cfg%visc_mu0 * exp(cfg%visc_a * (z * z) / (cfg%visc_e * cfg%visc_e))
+             mu_val = cfg%visc_mu0 * exp(-cfg%visc_a * z / cfg%visc_e)
              ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
              fields%mu(:, j) = mu_val
           end do
@@ -14966,7 +14966,7 @@ contains
              ! Affectation et calcul numérique
              z = y - cfg%visc_e
              ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
-             mu_val = cfg%visc_mu0 * exp(cfg%visc_a * (z * z) / (cfg%visc_e * cfg%visc_e))
+             mu_val = cfg%visc_mu0 * exp(-cfg%visc_a * z / cfg%visc_e)
              ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
              fields%mu_node(:, j) = mu_val
           end do

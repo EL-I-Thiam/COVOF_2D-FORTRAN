@@ -102,7 +102,7 @@ Chaque cas de simulation dans le répertoire `cases/*.json` est intégralement p
 | **3.1** | `laplacian_2d.json` | Diffusion elliptique $\nabla^2\psi=1$ | Erreur $L_1$ ($64\times 32$) | $5.60 \times 10^{-6}$ | **$5.60 \times 10^{-6}$** | **$5.60 \times 10^{-6}$** | **PASS** |
 | **3.7** | `poiseuille_steady.json` | Poiseuille stationnaire | Vitesse max $u_{\max}$ | $1.2500\text{ m/s}$ | **$1.2500\text{ m/s}$** | **$1.2498\text{ m/s}$** | **PASS** |
 | **3.8** | `poiseuille_unsteady.json` | Poiseuille transitoire Szymanski | Erreur $L_1$ ($t=1\text{ s}$) | $< 5 \times 10^{-3}$ | **$1.49 \times 10^{-5}$** | **$1.49 \times 10^{-5}$** | **PASS** |
-| **3.9** | `poiseuille_var_visc.json` | Viscosité variable $\mu(y)$ | Erreur $L_1$ ($64\times 64$) | $< 5 \times 10^{-3}$ | **$4.75 \times 10^{-5}$** | **$4.75 \times 10^{-5}$** | **PASS** |
+| **3.9** | `poiseuille_var_visc.json` | Viscosité variable $\mu(y)$ | Erreur $L_1$ ($64\times 64$) | $< 1.0 \times 10^{-3}$ | **$5.13 \times 10^{-4}$** | **$5.13 \times 10^{-4}$** | **PASS** |
 | **3.19** | `vortex_shear*.json` (12) | Vortex de Rider-Kothe | $L_1(T)$ CIAM-PLIC / WY / TVD | $0.0062 / 0.0120 / 0.0569$ | **$0.00623 / 0.01197 / 0.05690$** | **$0.00623 / 0.01197 / 0.05690$** | **PASS** |
 | **4.1** | `backward_facing_step.json` | Marche descendante $Re=100$ | Recollement $x_r / h$ | $2.808 \in [2.5, 3.2]$ | **$2.719$** | **$2.719$** | **PASS** |
 | **4.4** | `cylinder_re20.json` | Cylindre circulaire $Re=20$ | Sillage $L_w / D$ | $\in [0.50, 1.05]$ | **$0.545$** | **$0.545$** | **PASS** |
@@ -473,14 +473,17 @@ où $\nu = \mu / \rho = 0.1\text{ m}^2/\text{s}$ est la viscosité cinématique 
 ### Cas 3.9 : Poiseuille à Viscosité Variable Exponentielle ($\mu(y)$)
 
 #### 1. Contexte Physique et Équations Gouvernantes
-Dans les écoulements diphasiques ou thermodépendants, la viscosité dynamique $\mu(x, y)$ varie spatialement. L'opérateur visqueux ne se réduit plus à $\mu \nabla^2 \mathbf{u}$ mais doit être conservé sous sa forme divergentielle complète $\nabla \cdot [\mu(\nabla \mathbf{u} + \nabla \mathbf{u}^T)]$. Ce cas test du Cahier TREFLE impose une loi de viscosité exponentielle transverse dans un canal plan $y \in [0, 2e]$ ($2e = L_y = 1.0\text{ m}$, $e = 0.5\text{ m}$) :
-$$\mu(y) = \mu_0 \exp\left( a \frac{(y - e)^2}{e^2} \right) \quad \text{ou} \quad \mu(y) = \mu_0 \exp\left(a \frac{y}{L_y}\right), \qquad \mu_0 = 0.1\text{ Pa}\cdot\text{s}, \quad a = 1.5$$
-Sous l'action de la force motrice longitudinale $\rho g_x = 1.0\text{ N/m}^3$, l'équation différentielle ordinaire à coefficients variables s'écrit :
+Dans les écoulements diphasiques ou thermodépendants, la viscosité dynamique $\mu(x, y)$ varie spatialement. L'opérateur visqueux ne se réduit plus à $\mu \nabla^2 \mathbf{u}$ mais doit être conservé sous sa forme divergentielle complète $\nabla \cdot [\mu(\nabla \mathbf{u} + \nabla \mathbf{u}^T)]$. Ce cas test du Cahier TREFLE impose une loi de viscosité exponentielle transverse dans un canal plan $y \in [0, 2e]$ ($2e = L_y = 0.02\text{ m}$, $e = 0.01\text{ m}$) :
+$$\mu(y) = \mu_0 \exp\left( -a \frac{y - e}{e} \right), \qquad \mu_0 = 1.85 \times 10^{-5}\text{ Pa}\cdot\text{s}, \quad a = 2.0$$
+Sous l'action de la force motrice longitudinale $\rho g_x = 0.294207317\text{ N/m}^3$ ($\rho = 1.0\text{ kg/m}^3$), l'équation différentielle ordinaire à coefficients variables s'écrit :
 $$\frac{d}{dy}\left( \mu(y) \frac{du}{dy} \right) = -\rho g_x, \qquad u(0) = 0, \quad u(L_y) = 0$$
 
 #### 2. Solution Analytique Exacte
-En intégrant deux fois par rapport à $y$ et en déterminant la constante de cisaillement pariétal $C_1 = \mu(0) u'(0)$ par la condition $u(L_y) = 0$ :
-$$u_{\text{exact}}(y) = \int_0^y \frac{C_1 - \rho g_x \xi}{\mu(\xi)}\,d\xi, \qquad \text{avec} \qquad C_1 = \rho g_x \frac{\int_0^{L_y} \frac{\xi}{\mu(\xi)}\,d\xi}{\int_0^{L_y} \frac{1}{\mu(\xi)}\,d\xi}$$
+En posant $k = a/e$, la viscosité dynamique s'écrit $\mu(y) = \mu_0 e^a e^{-k y}$. L'intégration exacte de la quantité de mouvement conduit à :
+$$u_{\text{exact}}(y) = \frac{e^{-a}}{\mu_0} \left[ C_1 \frac{e^{k y} - 1}{k} - \rho g_x \frac{(k y - 1)e^{k y} + 1}{k^2} \right]$$
+avec la contrainte pariétale déterminée par la condition d'adhérence $u(L_y) = 0$ :
+$$C_1 = \frac{\rho g_x}{k} \frac{(k L_y - 1)e^{k L_y} + 1}{e^{k L_y} - 1}$$
+Le pic de vitesse est fortement décentré vers la paroi supérieure ($y > e$) où le fluide est le moins visqueux ($\mu_{\min} = \mu_0 e^{-2}$), avec $u_{\max} = 0.94523\text{ m/s}$ localisé à $y \approx 0.01538\text{ m}$ ($(y-e)/e \approx +0.538$).
 
 
 #### 3. Méthodes Numériques : Moyenne Harmonique Nodale de Patankar
@@ -567,9 +570,11 @@ Ce choix préserve la continuité exacte du flux de cisaillement $\tau_{xy}$ et 
 
 | Métrique Physique | Valeur Analytique Exacte | COVOF 2D C++17 | COVOF 2D Fortran 2018 | Écart Relatif | Statut |
 |:---|:---:|:---:|:---:|:---:|:---:|
-| Vitesse maximale $u_{\max}$ | $0.34365\text{ m/s}$ | **$0.34360\text{ m/s}$** | **$0.34360\text{ m/s}$** | **$0.015\,\%$** | **PASS** |
-| Erreur globale $L_1(u)$ ($64\times 64$) | $< 5.0 \times 10^{-3}\text{ m/s}$ | **$4.75 \times 10^{-5}\text{ m/s}$** | **$4.75 \times 10^{-5}\text{ m/s}$** | **Identique** | **PASS** |
-| Erreur globale $L_2(u)$ ($64\times 64$) | $< 5.0 \times 10^{-3}\text{ m/s}$ | **$5.28 \times 10^{-5}\text{ m/s}$** | **$5.28 \times 10^{-5}\text{ m/s}$** | **Identique** | **PASS** |
+| Vitesse maximale $u_{\max}$ | $0.94523\text{ m/s}$ | **$0.94587\text{ m/s}$** | **$0.94587\text{ m/s}$** | **$0.068\,\%$** | **PASS** |
+| Erreur globale $L_1(u)$ ($64\times 64$) | $< 1.0 \times 10^{-3}\text{ m/s}$ | **$5.13 \times 10^{-4}\text{ m/s}$** | **$5.13 \times 10^{-4}\text{ m/s}$** | **Identique** | **PASS** |
+| Erreur globale $L_2(u)$ ($64\times 64$) | $< 1.5 \times 10^{-3}\text{ m/s}$ | **$8.60 \times 10^{-4}\text{ m/s}$** | **$8.60 \times 10^{-4}\text{ m/s}$** | **Identique** | **PASS** |
+| Erreur relative $L_2 / u_{\max}$ | $< 0.2\,\%$ | **$0.091\,\%$** | **$0.091\,\%$** | **Identique** | **PASS** |
+| Écart dual C++ vs Fortran | Machine precision | — | — | **$5.33 \times 10^{-7}\text{ m/s}$** | **PASS** |
 
 
 #### Visualisations Multi-Panneaux des Champs 2D et Profils Comparatifs
