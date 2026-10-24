@@ -198,6 +198,7 @@ contains
 
        call sync_u(this%mesh, this%fields%u)
        call sync_v(this%mesh, this%fields%v)
+       call apply_velocity_bc(this%fields, this%mesh, this%config, .false.)
     end if
 
     ! Initialisation du champ de vitesse pour VISCOUS_JET (Cas 3.3 Fluids 2021)
@@ -206,6 +207,12 @@ contains
        half_w_vj = merge(0.5_dp * this%config%ic_jet_width, 0.04_dp, this%config%ic_jet_width > 0.0_dp)
        stub_h_vj = 2.0_dp * this%mesh%dy
        v_in_vj = merge(this%config%bc_top%v, -0.6_dp, this%config%bc_top%v /= 0.0_dp)
+       y_val = 0.0_dp
+       do i = 1, this%mesh%nx_global
+          if (abs((real(i, dp) - 0.5_dp) * this%mesh%dx - x_c_vj) <= half_w_vj) y_val = y_val + this%mesh%dx
+       end do
+       if (y_val < 1.0e-12_dp) y_val = 2.0_dp * half_w_vj
+       v_in_vj = v_in_vj * (2.0_dp * half_w_vj) / y_val
 
        v_ny = this%mesh%ny_local
        if (this%mesh%is_boundary_top) v_ny = v_ny + 1

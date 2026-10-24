@@ -38,12 +38,22 @@ contains
     real(dp), allocatable :: s_bot(:), r_bot(:), s_top(:), r_top(:)
 
     ! Affectation et calcul numérique
-    if (mesh%size <= 1) return
-
-    ! Affectation et calcul numérique
     nx = mesh%nx_local
     ! Affectation et calcul numérique
     ny = mesh%ny_local
+
+    ! Affectation et calcul numérique
+    if (mesh%size <= 1) then
+       if (.not. mesh%is_boundary_left) then
+          field(0, 0:ny+1)    = field(nx, 0:ny+1)
+          field(nx+1, 0:ny+1) = field(1, 0:ny+1)
+       end if
+       if (.not. mesh%is_boundary_bottom) then
+          field(0:nx+1, 0)    = field(0:nx+1, ny)
+          field(0:nx+1, ny+1) = field(0:nx+1, 1)
+       end if
+       return
+    end if
 
     ! Allocation dynamique de tableau contigu en mémoire
     allocate(s_left(ny), r_left(ny), s_right(ny), r_right(ny))
@@ -455,11 +465,16 @@ contains
        if (trim(cfg%bc_top%profile) == "JET_INLET") then
           xc_top = merge(cfg%bc_top%jet_center, 0.5_dp * mesh%lx, cfg%bc_top%jet_center > 0.0_dp)
           half_w_top = merge(0.5_dp * cfg%bc_top%jet_width, 0.04_dp, cfg%bc_top%jet_width > 0.0_dp)
-          v_out_top = -v_t * (2.0_dp * half_w_top) / (mesh%lx - 2.0_dp * half_w_top)
+          y = 0.0_dp
+          do i = 1, mesh%nx_global
+             if (abs((real(i, dp) - 0.5_dp) * mesh%dx - xc_top) <= half_w_top) y = y + mesh%dx
+          end do
+          if (y < 1.0e-12_dp) y = 2.0_dp * half_w_top
+          v_out_top = -v_t * (2.0_dp * half_w_top) / (mesh%lx - y)
           do i = 1, nx
              x_c = x_center(mesh, i)
              if (abs(x_c - xc_top) <= half_w_top) then
-                if (.not. homogeneous) fields%v(i, ny+1) = v_t
+                if (.not. homogeneous) fields%v(i, ny+1) = v_t * (2.0_dp * half_w_top) / y
              else
                 if (.not. homogeneous) fields%v(i, ny+1) = v_out_top
              end if

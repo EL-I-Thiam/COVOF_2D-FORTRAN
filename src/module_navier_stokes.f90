@@ -457,31 +457,34 @@ contains
         ! Terme instationnaire
         val = (rho_u / dt) * tf%u(i, j) * dvol
 
-        ! Terme convectif semi-implicite F_uu
+        ! Terme convectif semi-implicite F_uu (forme advective non-conservative a densite harmonique)
         if (cfg%enable_convection) then
-          ! Affectation et calcul numérique
           u_n = fields_old%u(i, j)
-          ! Affectation et calcul numérique
           u_n_E = fields_old%u(i + 1, j)
-          ! Affectation et calcul numérique
           u_n_W = fields_old%u(i - 1, j)
 
-          ! Affectation et calcul numérique
           v_n_N = 0.5_dp * (fields_old%v(i - 1, j + 1) + fields_old%v(i, j + 1))
-          ! Affectation et calcul numérique
           v_n_S = 0.5_dp * (fields_old%v(i - 1, j) + fields_old%v(i, j))
 
-          ! Affectation et calcul numérique
-          conv_E = 0.5_dp * (u_n + u_n_E) * 0.5_dp * (tf%u(i, j) + tf%u(i + 1, j)) * dy
-          ! Affectation et calcul numérique
-          conv_W = 0.5_dp * (u_n_W + u_n) * 0.5_dp * (tf%u(i - 1, j) + tf%u(i, j)) * dy
-          ! Affectation et calcul numérique
-          conv_N = v_n_N * 0.5_dp * (tf%u(i, j) + tf%u(i, j + 1)) * dx
-          ! Affectation et calcul numérique
-          conv_S = v_n_S * 0.5_dp * (tf%u(i, j - 1) + tf%u(i, j)) * dx
+          mu_cell_E = (2.0_dp * rho_u * fields_old%rho_u(i + 1, j)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i + 1, j))
+          mu_cell_W = (2.0_dp * rho_u * fields_old%rho_u(i - 1, j)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i - 1, j))
+          if (j < mesh%ny_local) then
+            mu_node_N = (2.0_dp * rho_u * fields_old%rho_u(i, j + 1)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i, j + 1))
+          else
+            mu_node_N = rho_u
+          end if
+          if (j > 1) then
+            mu_node_S = (2.0_dp * rho_u * fields_old%rho_u(i, j - 1)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i, j - 1))
+          else
+            mu_node_S = rho_u
+          end if
 
-          ! Affectation et calcul numérique
-          val = val + rho_u * (conv_E - conv_W + conv_N - conv_S)
+          conv_E = 0.5_dp * (u_n + u_n_E) * 0.5_dp * (tf%u(i + 1, j) - tf%u(i, j)) * dy
+          conv_W = 0.5_dp * (u_n_W + u_n) * 0.5_dp * (tf%u(i, j) - tf%u(i - 1, j)) * dy
+          conv_N = v_n_N * 0.5_dp * (tf%u(i, j + 1) - tf%u(i, j)) * dx
+          conv_S = v_n_S * 0.5_dp * (tf%u(i, j) - tf%u(i, j - 1)) * dx
+
+          val = val + (mu_cell_E * conv_E + mu_cell_W * conv_W + mu_node_N * conv_N + mu_node_S * conv_S)
         end if
 
         ! Termes visqueux implicites d'ordre 2
@@ -565,29 +568,32 @@ contains
 
         ! Évaluation de la condition logique
         if (cfg%enable_convection) then
-          ! Affectation et calcul numérique
           v_n = fields_old%v(i, j)
-          ! Affectation et calcul numérique
           v_n_N = fields_old%v(i, j + 1)
-          ! Affectation et calcul numérique
           v_n_S_val = fields_old%v(i, j - 1)
 
-          ! Affectation et calcul numérique
           u_n_E = 0.5_dp * (fields_old%u(i + 1, j - 1) + fields_old%u(i + 1, j))
-          ! Affectation et calcul numérique
           u_n_W = 0.5_dp * (fields_old%u(i, j - 1) + fields_old%u(i, j))
 
-          ! Affectation et calcul numérique
-          conv_E = u_n_E * 0.5_dp * (tf%v(i, j) + tf%v(i + 1, j)) * dy
-          ! Affectation et calcul numérique
-          conv_W = u_n_W * 0.5_dp * (tf%v(i - 1, j) + tf%v(i, j)) * dy
-          ! Affectation et calcul numérique
-          conv_N = 0.5_dp * (v_n + v_n_N) * 0.5_dp * (tf%v(i, j) + tf%v(i, j + 1)) * dx
-          ! Affectation et calcul numérique
-          conv_S = 0.5_dp * (v_n_S_val + v_n) * 0.5_dp * (tf%v(i, j - 1) + tf%v(i, j)) * dx
+          if (i < mesh%nx_local) then
+            mu_node_E = (2.0_dp * rho_v * fields_old%rho_v(i + 1, j)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i + 1, j))
+          else
+            mu_node_E = rho_v
+          end if
+          if (i > 1) then
+            mu_node_W = (2.0_dp * rho_v * fields_old%rho_v(i - 1, j)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i - 1, j))
+          else
+            mu_node_W = rho_v
+          end if
+          mu_cell_N = (2.0_dp * rho_v * fields_old%rho_v(i, j + 1)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i, j + 1))
+          mu_cell_S = (2.0_dp * rho_v * fields_old%rho_v(i, j - 1)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i, j - 1))
 
-          ! Affectation et calcul numérique
-          val = val + rho_v * (conv_E - conv_W + conv_N - conv_S)
+          conv_E = u_n_E * 0.5_dp * (tf%v(i + 1, j) - tf%v(i, j)) * dy
+          conv_W = u_n_W * 0.5_dp * (tf%v(i, j) - tf%v(i - 1, j)) * dy
+          conv_N = 0.5_dp * (v_n + v_n_N) * 0.5_dp * (tf%v(i, j + 1) - tf%v(i, j)) * dx
+          conv_S = 0.5_dp * (v_n_S_val + v_n) * 0.5_dp * (tf%v(i, j) - tf%v(i, j - 1)) * dx
+
+          val = val + (mu_node_E * conv_E + mu_node_W * conv_W + mu_cell_N * conv_N + mu_cell_S * conv_S)
         end if
 
         ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
@@ -849,10 +855,15 @@ contains
           if (trim(cfg%bc_top%profile) == "JET_INLET") then
              xc_jet = merge(cfg%bc_top%jet_center, 0.5_dp * mesh%lx, cfg%bc_top%jet_center > 0.0_dp)
              half_w_jet = merge(0.5_dp * cfg%bc_top%jet_width, 0.04_dp, cfg%bc_top%jet_width > 0.0_dp)
+             T_v = 0.0_dp
+             do p_offset = 1, mesh%nx_global
+                if (abs((real(p_offset, dp) - 0.5_dp) * mesh%dx - xc_jet) <= half_w_jet) T_v = T_v + mesh%dx
+             end do
+             if (T_v < 1.0e-12_dp) T_v = 2.0_dp * half_w_jet
              if (abs(x_center(mesh, i) - xc_jet) <= half_w_jet) then
-                v_bc = cfg%bc_top%v
+                v_bc = cfg%bc_top%v * (2.0_dp * half_w_jet) / T_v
              else
-                v_bc = -cfg%bc_top%v * (2.0_dp * half_w_jet) / (mesh%lx - 2.0_dp * half_w_jet)
+                v_bc = -cfg%bc_top%v * (2.0_dp * half_w_jet) / (mesh%lx - T_v)
              end if
           else if (cfg%bc_top%btype == BC_DIRICHLET) then
              v_bc = cfg%bc_top%v

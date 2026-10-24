@@ -1,80 +1,79 @@
 {
-  "mesh": {
-    "nx": 64,
-    "ny": 64,
-    "lx": 0.003,
-    "ly": 0.003
-  },
-  "physics": {
-    "enable_two_phase": true,
-    "enable_surface_tension": false,
-    "enable_convection": true,
-    "sigma": 0.0,
-    "gx": 0.0,
-    "gy": 0.0,
-    "fluid1": {
-      "rho": 10.0,
-      "mu": 1e-12
+    "mesh": {
+        "nx": 64,
+        "ny": 64,
+        "lx": 0.003,
+        "ly": 0.003
     },
-    "fluid2": {
-      "rho": 1000.0,
-      "mu": 1e-12
+    "physics": {
+        "enable_two_phase": true,
+        "enable_surface_tension": false,
+        "enable_convection": true,
+        "sigma": 0.0,
+        "gx": 0.0,
+        "gy": 0.0,
+        "fluid1": {
+            "rho": 10.0,
+            "mu": 1e-12
+        },
+        "fluid2": {
+            "rho": 1000.0,
+            "mu": 1e-12
+        }
+    },
+    "time": {
+        "dt": 2.5e-07,
+        "t_final": 0.0001,
+        "cfl_max": 0.35,
+        "adaptive_dt": false
+    },
+    "boundary_conditions": {
+        "left": {
+            "type": "PERIODIC",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "right": {
+            "type": "PERIODIC",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "bottom": {
+            "type": "FREE_SLIP",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "top": {
+            "type": "FREE_SLIP",
+            "u": 0.0,
+            "v": 0.0
+        }
+    },
+    "initial_condition": {
+        "type": "LIQUID_SHEET",
+        "center_x": 0.0015,
+        "center_y": 0.0015,
+        "thickness": 0.0003
+    },
+    "solver": {
+        "type": "AUGMENTED_LAGRANGIAN",
+        "tol": 1e-06,
+        "max_iter": 500,
+        "r_al": 10000.0,
+        "uzawa_iter": 1,
+        "use_precond": true,
+        "precond_type": "JACOBI"
+    },
+    "vof": {
+        "advection_method": "WEYMOUTH_YUE",
+        "reconstruction_method": "PLIC",
+        "cfl_vof": 0.5
+    },
+    "output": {
+        "output_dir": "output_liquid_sheet_ratio100",
+        "case_name": "liquid_sheet_ratio100",
+        "vtk_interval": 100,
+        "log_interval": 100,
+        "write_csv_history": true
     }
-  },
-  "time": {
-    "dt": 2.5e-07,
-    "t_final": 0.0001,
-    "cfl_max": 0.35,
-    "adaptive_dt": false
-  },
-  "boundary_conditions": {
-    "left": {
-      "type": "PERIODIC",
-      "u": 0.0,
-      "v": 0.0
-    },
-    "right": {
-      "type": "PERIODIC",
-      "u": 0.0,
-      "v": 0.0
-    },
-    "bottom": {
-      "type": "FREE_SLIP",
-      "u": 0.0,
-      "v": 0.0
-    },
-    "top": {
-      "type": "FREE_SLIP",
-      "u": 0.0,
-      "v": 0.0
-    }
-  },
-  "initial_condition": {
-    "type": "LIQUID_SHEET",
-    "center_x": 0.0015,
-    "center_y": 0.0015,
-    "thickness": 0.0003
-  },
-  "solver": {
-    "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1e-06,
-    "max_iter": 500,
-    "r_al": 10000.0,
-    "uzawa_iter": 1,
-    "use_precond": true,
-    "precond_type": "JACOBI"
-  },
-  "vof": {
-    "reconstruction_method": "PLIC",
-    "advection_method": "VOF_TVD",
-    "tvd_limiter": "SUPERBEE",
-    "cfl_vof": 0.5
-  },
-  "output": {
-    "output_dir": "output_liquid_sheet_ratio100",
-    "case_name": "liquid_sheet_ratio100",
-    "vtk_interval": 100,
-    "log_interval": 100,
-    "write_csv_history": true
-  }
 }

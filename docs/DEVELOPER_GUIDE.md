@@ -298,13 +298,13 @@ struct OutputConfig {
  */
 struct VofConfig {
     // Déclaration de variable typée
-    std::string reconstruction_method = "PLIC";   ///< "SLIC", "PLIC", "LVIRA", "ELVIRA"
+    std::string reconstruction_method = "PLIC";       ///< "PLIC", "ELVIRA", "LVIRA", "SLIC", "NONE"
     // Déclaration de variable typée
-    std::string advection_method = "VOF_TVD";    ///< "VOF_TVD", "CIAM", "WEYMOUTH_YUE"
+    std::string advection_method = "WEYMOUTH_YUE";    ///< "WEYMOUTH_YUE", "CIAM", "VOF_TVD"
     // Déclaration de variable typée
-    std::string tvd_limiter = "SUPERBEE";        ///< "SUPERBEE", "VAN_LEER", "MUSCL", "HRIC"
+    std::string tvd_limiter = "NONE";                 ///< "SUPERBEE", "VAN_LEER", "MUSCL", "HRIC", "NONE"
     // Déclaration de variable typée
-    double cfl_vof = 0.4;                        ///< Nombre de CFL maximum pour le transport VOF
+    double cfl_vof = 0.5;                             ///< Nombre de CFL maximum pour le transport VOF
 };
 
 } // namespace covof
@@ -584,9 +584,9 @@ public:
 | 125 | Méthode / Fonction | `parse_single_bc` | Type retour : static void |
 | 149 | Méthode / Fonction | `Config::load_from_json` | Type retour : bool |
 | 150 | Méthode / Fonction | `file` | Type retour : std::ifstream |
-| 434 | Méthode / Fonction | `Config::print` | Type retour : void |
+| 447 | Méthode / Fonction | `Config::print` | Type retour : void |
 
-### Code Source Intégral : `src/Config.cpp` (486 lignes)
+### Code Source Intégral : `src/Config.cpp` (503 lignes)
 
 ```cpp
 #include "covof/Config.hpp"
@@ -968,13 +968,26 @@ bool Config::load_from_json(const std::string& filepath) {
     // Évaluation de la condition de contrôle
     if (!vof_block.empty()) {
         // Calcul et assignation numérique
-        vof.reconstruction_method = get_string(vof_block, "reconstruction_method", vof.reconstruction_method);
-        // Calcul et assignation numérique
         vof.advection_method      = get_string(vof_block, "advection_method", vof.advection_method);
+        // Calcul et assignation numérique
+        vof.reconstruction_method = get_string(vof_block, "reconstruction_method", vof.reconstruction_method);
         // Calcul et assignation numérique
         vof.tvd_limiter           = get_string(vof_block, "tvd_limiter", vof.tvd_limiter);
         // Calcul et assignation numérique
         vof.cfl_vof               = get_double(vof_block, "cfl_vof", vof.cfl_vof);
+    }
+    // Cohérence stricte : le schéma algébrique TVD ne s'accompagne d'aucune reconstruction géométrique,
+    // tandis que les schémas géométriques (WEYMOUTH_YUE, CIAM) n'utilisent pas de limiteur TVD.
+    if (vof.advection_method == "VOF_TVD" || vof.advection_method == "TVD") {
+        vof.reconstruction_method = "NONE";
+        if (vof.tvd_limiter == "NONE" || vof.tvd_limiter.empty()) {
+            vof.tvd_limiter = "SUPERBEE";
+        }
+    } else {
+        if (vof.reconstruction_method == "NONE" || vof.reconstruction_method.empty()) {
+            vof.reconstruction_method = "PLIC";
+        }
+        vof.tvd_limiter = "NONE";
     }
 
     // 9. Obstacles immergés (Pénalisation de Brinkman)
@@ -1053,10 +1066,14 @@ void Config::print() const {
         // Calcul et assignation numérique
         std::cout << " Fluide 2 : rho=" << fluid2.rho << " kg/m3, mu=" << fluid2.mu << " Pa.s\n"
                   // Calcul et assignation numérique
-                  << " Tension superficielle sigma = " << sigma << " N/m\n"
-                  << " VOF : Reconstruction=" << vof.reconstruction_method 
-                  << " | Advection=" << vof.advection_method 
-                  << " | Limiteur=" << vof.tvd_limiter << "\n";
+                  << " Tension superficielle sigma = " << sigma << " N/m\n";
+        if (vof.advection_method == "VOF_TVD" || vof.advection_method == "TVD") {
+            std::cout << " VOF : Advection=" << vof.advection_method
+                      << " (Algebrique, sans reconstruction) | Limiteur=" << vof.tvd_limiter << "\n";
+        } else {
+            std::cout << " VOF : Advection=" << vof.advection_method
+                      << " | Reconstruction=" << vof.reconstruction_method << "\n";
+        }
     }
     // Calcul et assignation numérique
     std::cout << " Gravite : g = (" << gx << ", " << gy << ") m/s^2\n"
@@ -1563,28 +1580,28 @@ public:
 | Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
 |:---:|:---|:---|:---|
 | 8 | Méthode / Fonction | `MpiComm::sync_cell_scalar` | Type retour : void |
-| 18 | Méthode / Fonction | `send_left` | Type retour : std::vector<double> |
-| 20 | Méthode / Fonction | `send_right` | Type retour : std::vector<double> |
-| 22 | Méthode / Fonction | `send_bot` | Type retour : std::vector<double> |
-| 24 | Méthode / Fonction | `send_top` | Type retour : std::vector<double> |
-| 108 | Méthode / Fonction | `MpiComm::sync_u` | Type retour : void |
-| 118 | Méthode / Fonction | `send_left` | Type retour : std::vector<double> |
-| 120 | Méthode / Fonction | `send_right` | Type retour : std::vector<double> |
-| 122 | Méthode / Fonction | `send_bot` | Type retour : std::vector<double> |
-| 124 | Méthode / Fonction | `send_top` | Type retour : std::vector<double> |
-| 208 | Méthode / Fonction | `MpiComm::sync_v` | Type retour : void |
-| 218 | Méthode / Fonction | `send_left` | Type retour : std::vector<double> |
-| 220 | Méthode / Fonction | `send_right` | Type retour : std::vector<double> |
-| 222 | Méthode / Fonction | `send_bot` | Type retour : std::vector<double> |
-| 224 | Méthode / Fonction | `send_top` | Type retour : std::vector<double> |
-| 308 | Méthode / Fonction | `MpiComm::apply_boundary_conditions` | Type retour : void |
-| 575 | Méthode / Fonction | `MpiComm::apply_thermal_boundary_conditions` | Type retour : void |
-| 664 | Méthode / Fonction | `MpiComm::global_dot_product` | Type retour : double |
-| 681 | Méthode / Fonction | `MpiComm::global_norm2` | Type retour : double |
-| 687 | Méthode / Fonction | `MpiComm::global_max` | Type retour : double |
-| 697 | Méthode / Fonction | `MpiComm::global_sum` | Type retour : double |
+| 32 | Méthode / Fonction | `send_left` | Type retour : std::vector<double> |
+| 34 | Méthode / Fonction | `send_right` | Type retour : std::vector<double> |
+| 36 | Méthode / Fonction | `send_bot` | Type retour : std::vector<double> |
+| 38 | Méthode / Fonction | `send_top` | Type retour : std::vector<double> |
+| 122 | Méthode / Fonction | `MpiComm::sync_u` | Type retour : void |
+| 132 | Méthode / Fonction | `send_left` | Type retour : std::vector<double> |
+| 134 | Méthode / Fonction | `send_right` | Type retour : std::vector<double> |
+| 136 | Méthode / Fonction | `send_bot` | Type retour : std::vector<double> |
+| 138 | Méthode / Fonction | `send_top` | Type retour : std::vector<double> |
+| 222 | Méthode / Fonction | `MpiComm::sync_v` | Type retour : void |
+| 232 | Méthode / Fonction | `send_left` | Type retour : std::vector<double> |
+| 234 | Méthode / Fonction | `send_right` | Type retour : std::vector<double> |
+| 236 | Méthode / Fonction | `send_bot` | Type retour : std::vector<double> |
+| 238 | Méthode / Fonction | `send_top` | Type retour : std::vector<double> |
+| 322 | Méthode / Fonction | `MpiComm::apply_boundary_conditions` | Type retour : void |
+| 597 | Méthode / Fonction | `MpiComm::apply_thermal_boundary_conditions` | Type retour : void |
+| 686 | Méthode / Fonction | `MpiComm::global_dot_product` | Type retour : double |
+| 703 | Méthode / Fonction | `MpiComm::global_norm2` | Type retour : double |
+| 709 | Méthode / Fonction | `MpiComm::global_max` | Type retour : double |
+| 719 | Méthode / Fonction | `MpiComm::global_sum` | Type retour : double |
 
-### Code Source Intégral : `src/MpiComm.cpp` (706 lignes)
+### Code Source Intégral : `src/MpiComm.cpp` (728 lignes)
 
 ```cpp
 #include "covof/MpiComm.hpp"
@@ -1595,13 +1612,27 @@ namespace covof {
 namespace fugu = covof; // Alias rétrocompatibilité
 
 void MpiComm::sync_cell_scalar(const Mesh2D& mesh, std::vector<double>& field) {
-    // Évaluation de la condition de contrôle
-    if (mesh.num_procs == 1) return;
-
     // Déclaration de variable typée
     int nx = mesh.nx_local;
     // Déclaration de variable typée
     int ny = mesh.ny_local;
+
+    // Évaluation de la condition de contrôle
+    if (mesh.num_procs == 1) {
+        if (!mesh.is_boundary_left) {
+            for (int j = 0; j <= ny + 1; ++j) {
+                field[mesh.cell_idx(0, j)]      = field[mesh.cell_idx(nx, j)];
+                field[mesh.cell_idx(nx + 1, j)] = field[mesh.cell_idx(1, j)];
+            }
+        }
+        if (!mesh.is_boundary_bottom) {
+            for (int i = 0; i <= nx + 1; ++i) {
+                field[mesh.cell_idx(i, 0)]      = field[mesh.cell_idx(i, ny)];
+                field[mesh.cell_idx(i, ny + 1)] = field[mesh.cell_idx(i, 1)];
+            }
+        }
+        return;
+    }
 
     // Déclaration de variable typée
     std::vector<double> send_left(ny), recv_left(ny);
@@ -2105,17 +2136,25 @@ void MpiComm::apply_boundary_conditions(const Mesh2D& mesh, const DomainBC& bc, 
                 double xc = (bc.top.jet_center > 0.0) ? bc.top.jet_center : 0.5 * mesh.lx;
                 // Calcul de la demi-largeur de l'injecteur
                 double half_w = (bc.top.jet_width > 0.0) ? 0.5 * bc.top.jet_width : 0.04;
+                // Calcul de la largeur discrète effective de l'injecteur sur le maillage global
+                double d_disc = 0.0;
+                for (int ig = 1; ig <= mesh.nx_global; ++ig) {
+                    double xg = (ig - 0.5) * mesh.dx;
+                    if (std::abs(xg - xc) <= half_w) d_disc += mesh.dx;
+                }
+                if (d_disc < 1.0e-12) d_disc = 2.0 * half_w;
+                double v_in_eff = v_top_val * (2.0 * half_w) / d_disc;
                 // Évaluation de l'appartenance à l'injecteur
                 if (std::abs(x_c - xc) <= half_w) {
                     // Imposition de la vitesse d'injection (préservée pour la ligne diagonale lors de matvec)
-                    if (!homogeneous) f.v[mesh.v_idx(i, ny + 1)] = v_top_val;
+                    if (!homogeneous) f.v[mesh.v_idx(i, ny + 1)] = v_in_eff;
                     // Calcul de la cellule fantôme supérieure pour divergence nulle au bord
-                    f.v[mesh.v_idx(i, ny + 2)] = homogeneous ? 0.0 : v_top_val;
+                    f.v[mesh.v_idx(i, ny + 2)] = homogeneous ? 0.0 : v_in_eff;
                     // Injection continue de liquide (Fluide 2 : C = 0)
                     f.C[mesh.cell_idx(i, ny + 1)] = 0.0;
                 } else {
                     // Calcul du débit de compensation d'échappement du gaz pour incompressibilité stricte
-                    double v_out = -v_top_val * (2.0 * half_w) / (mesh.lx - 2.0 * half_w);
+                    double v_out = -v_top_val * (2.0 * half_w) / (mesh.lx - d_disc);
                     // Imposition de la vitesse d'évacuation (préservée pour la ligne diagonale lors de matvec)
                     if (!homogeneous) f.v[mesh.v_idx(i, ny + 1)] = v_out;
                     // Calcul de la cellule fantôme supérieure
@@ -4428,16 +4467,16 @@ public:
 | 114 | Méthode / Fonction | `NavierStokesSolver::unpack_vector` | Type retour : void |
 | 188 | Méthode / Fonction | `div_cell` | Type retour : std::vector<double> |
 | 461 | Méthode / Fonction | `NavierStokesSolver::assemble_rhs` | Type retour : void |
-| 701 | Méthode / Fonction | `NavierStokesSolver::update_pressure_al` | Type retour : void |
-| 722 | Méthode / Fonction | `NavierStokesSolver::assemble_preconditioner_blocks` | Type retour : void |
-| 799 | Méthode / Fonction | `NavierStokesSolver::solve_energy` | Type retour : void |
-| 832 | Méthode / Fonction | `rhs` | Type retour : std::vector<double> |
-| 834 | Méthode / Fonction | `T_sol` | Type retour : std::vector<double> |
-| 974 | Méthode / Fonction | `y_prec` | Type retour : std::vector<double> |
-| 976 | Méthode / Fonction | `z_prec` | Type retour : std::vector<double> |
-| 1094 | Méthode / Fonction | `NavierStokesSolver::compute_mean_nusselt_hot_wall` | Type retour : double |
+| 707 | Méthode / Fonction | `NavierStokesSolver::update_pressure_al` | Type retour : void |
+| 728 | Méthode / Fonction | `NavierStokesSolver::assemble_preconditioner_blocks` | Type retour : void |
+| 805 | Méthode / Fonction | `NavierStokesSolver::solve_energy` | Type retour : void |
+| 838 | Méthode / Fonction | `rhs` | Type retour : std::vector<double> |
+| 840 | Méthode / Fonction | `T_sol` | Type retour : std::vector<double> |
+| 980 | Méthode / Fonction | `y_prec` | Type retour : std::vector<double> |
+| 982 | Méthode / Fonction | `z_prec` | Type retour : std::vector<double> |
+| 1100 | Méthode / Fonction | `NavierStokesSolver::compute_mean_nusselt_hot_wall` | Type retour : double |
 
-### Code Source Intégral : `src/NavierStokesSolver.cpp` (1132 lignes)
+### Code Source Intégral : `src/NavierStokesSolver.cpp` (1138 lignes)
 
 ```cpp
 #include "covof/NavierStokesSolver.hpp"
@@ -4701,31 +4740,31 @@ void NavierStokesSolver::apply_system_matrix(const FlowFields& fields_old, doubl
             // Terme instationnaire
             double val = (rho_u / dt) * tf.u[mesh.u_idx(i, j)] * dvol;
 
-            // Terme convectif semi-implicite F_uu
+            // Terme convectif semi-implicite F_uu (forme advective non-conservative a densite harmonique)
             if (enable_convection) {
-                // Déclaration de variable typée
                 double u_n = fields_old.u[mesh.u_idx(i, j)];
-                // Déclaration de variable typée
                 double u_n_E = fields_old.u[mesh.u_idx(i + 1, j)];
-                // Déclaration de variable typée
                 double u_n_W = fields_old.u[mesh.u_idx(i - 1, j)];
 
-                // Déclaration de variable typée
                 double v_n_N = 0.5 * (fields_old.v[mesh.v_idx(i - 1, j + 1)] + fields_old.v[mesh.v_idx(i, j + 1)]);
-                // Déclaration de variable typée
                 double v_n_S = 0.5 * (fields_old.v[mesh.v_idx(i - 1, j)] + fields_old.v[mesh.v_idx(i, j)]);
 
-                // Déclaration de variable typée
-                double conv_E = 0.5 * (u_n + u_n_E) * 0.5 * (tf.u[mesh.u_idx(i, j)] + tf.u[mesh.u_idx(i + 1, j)]) * dy;
-                // Déclaration de variable typée
-                double conv_W = 0.5 * (u_n_W + u_n) * 0.5 * (tf.u[mesh.u_idx(i - 1, j)] + tf.u[mesh.u_idx(i, j)]) * dy;
-                // Déclaration de variable typée
-                double conv_N = v_n_N * 0.5 * (tf.u[mesh.u_idx(i, j)] + tf.u[mesh.u_idx(i, j + 1)]) * dx;
-                // Déclaration de variable typée
-                double conv_S = v_n_S * 0.5 * (tf.u[mesh.u_idx(i, j - 1)] + tf.u[mesh.u_idx(i, j)]) * dx;
+                double rho_u_E = fields_old.rho_u[mesh.u_idx(i + 1, j)];
+                double rho_u_W = fields_old.rho_u[mesh.u_idx(i - 1, j)];
+                double rho_u_N = (j < mesh.ny_local) ? fields_old.rho_u[mesh.u_idx(i, j + 1)] : rho_u;
+                double rho_u_S = (j > 1) ? fields_old.rho_u[mesh.u_idx(i, j - 1)] : rho_u;
 
-                // Calcul et assignation numérique
-                val += rho_u * (conv_E - conv_W + conv_N - conv_S);
+                double rho_E = (2.0 * rho_u * rho_u_E) / std::max(1.0e-12, rho_u + rho_u_E);
+                double rho_W = (2.0 * rho_u * rho_u_W) / std::max(1.0e-12, rho_u + rho_u_W);
+                double rho_N = (2.0 * rho_u * rho_u_N) / std::max(1.0e-12, rho_u + rho_u_N);
+                double rho_S = (2.0 * rho_u * rho_u_S) / std::max(1.0e-12, rho_u + rho_u_S);
+
+                double du_E = 0.5 * (u_n + u_n_E) * 0.5 * (tf.u[mesh.u_idx(i + 1, j)] - tf.u[mesh.u_idx(i, j)]) * dy;
+                double du_W = 0.5 * (u_n_W + u_n) * 0.5 * (tf.u[mesh.u_idx(i, j)] - tf.u[mesh.u_idx(i - 1, j)]) * dy;
+                double du_N = v_n_N * 0.5 * (tf.u[mesh.u_idx(i, j + 1)] - tf.u[mesh.u_idx(i, j)]) * dx;
+                double du_S = v_n_S * 0.5 * (tf.u[mesh.u_idx(i, j)] - tf.u[mesh.u_idx(i, j - 1)]) * dx;
+
+                val += (rho_E * du_E + rho_W * du_W + rho_N * du_N + rho_S * du_S);
             }
 
             // Termes visqueux implicites d'ordre 2 (Caltagirone et al. - Annexe A)
@@ -4806,31 +4845,31 @@ void NavierStokesSolver::apply_system_matrix(const FlowFields& fields_old, doubl
             // Terme instationnaire
             double val = (rho_v / dt) * tf.v[mesh.v_idx(i, j)] * dvol;
 
-            // Terme convectif semi-implicite F_vv
+            // Terme convectif semi-implicite F_vv (forme advective non-conservative a densite harmonique)
             if (enable_convection) {
-                // Déclaration de variable typée
                 double v_n = fields_old.v[mesh.v_idx(i, j)];
-                // Déclaration de variable typée
                 double v_n_N = fields_old.v[mesh.v_idx(i, j + 1)];
-                // Déclaration de variable typée
                 double v_n_S = fields_old.v[mesh.v_idx(i, j - 1)];
 
-                // Déclaration de variable typée
                 double u_n_E = 0.5 * (fields_old.u[mesh.u_idx(i + 1, j - 1)] + fields_old.u[mesh.u_idx(i + 1, j)]);
-                // Déclaration de variable typée
                 double u_n_W = 0.5 * (fields_old.u[mesh.u_idx(i, j - 1)] + fields_old.u[mesh.u_idx(i, j)]);
 
-                // Déclaration de variable typée
-                double conv_E = u_n_E * 0.5 * (tf.v[mesh.v_idx(i, j)] + tf.v[mesh.v_idx(i + 1, j)]) * dy;
-                // Déclaration de variable typée
-                double conv_W = u_n_W * 0.5 * (tf.v[mesh.v_idx(i - 1, j)] + tf.v[mesh.v_idx(i, j)]) * dy;
-                // Déclaration de variable typée
-                double conv_N = 0.5 * (v_n + v_n_N) * 0.5 * (tf.v[mesh.v_idx(i, j)] + tf.v[mesh.v_idx(i, j + 1)]) * dx;
-                // Déclaration de variable typée
-                double conv_S = 0.5 * (v_n_S + v_n) * 0.5 * (tf.v[mesh.v_idx(i, j - 1)] + tf.v[mesh.v_idx(i, j)]) * dx;
+                double rho_v_E = (i < mesh.nx_local) ? fields_old.rho_v[mesh.v_idx(i + 1, j)] : rho_v;
+                double rho_v_W = (i > 1) ? fields_old.rho_v[mesh.v_idx(i - 1, j)] : rho_v;
+                double rho_v_N = fields_old.rho_v[mesh.v_idx(i, j + 1)];
+                double rho_v_S = fields_old.rho_v[mesh.v_idx(i, j - 1)];
 
-                // Calcul et assignation numérique
-                val += rho_v * (conv_E - conv_W + conv_N - conv_S);
+                double rho_E = (2.0 * rho_v * rho_v_E) / std::max(1.0e-12, rho_v + rho_v_E);
+                double rho_W = (2.0 * rho_v * rho_v_W) / std::max(1.0e-12, rho_v + rho_v_W);
+                double rho_N = (2.0 * rho_v * rho_v_N) / std::max(1.0e-12, rho_v + rho_v_N);
+                double rho_S = (2.0 * rho_v * rho_v_S) / std::max(1.0e-12, rho_v + rho_v_S);
+
+                double dv_E = u_n_E * 0.5 * (tf.v[mesh.v_idx(i + 1, j)] - tf.v[mesh.v_idx(i, j)]) * dy;
+                double dv_W = u_n_W * 0.5 * (tf.v[mesh.v_idx(i, j)] - tf.v[mesh.v_idx(i - 1, j)]) * dy;
+                double dv_N = 0.5 * (v_n + v_n_N) * 0.5 * (tf.v[mesh.v_idx(i, j + 1)] - tf.v[mesh.v_idx(i, j)]) * dx;
+                double dv_S = 0.5 * (v_n_S + v_n) * 0.5 * (tf.v[mesh.v_idx(i, j)] - tf.v[mesh.v_idx(i, j - 1)]) * dx;
+
+                val += (rho_E * dv_E + rho_W * dv_W + rho_N * dv_N + rho_S * dv_S);
             }
 
             // Termes visqueux implicites d'ordre 2
@@ -5064,13 +5103,19 @@ void NavierStokesSolver::assemble_rhs(const FlowFields& fields, double dt, std::
                     double xc = (bc.top.jet_center > 0.0) ? bc.top.jet_center : 0.5 * mesh.lx;
                     // Calcul de la demi-largeur de l'injecteur
                     double half_w = (bc.top.jet_width > 0.0) ? 0.5 * bc.top.jet_width : 0.04;
+                    double d_disc = 0.0;
+                    for (int ig = 1; ig <= mesh.nx_global; ++ig) {
+                        double xg = (ig - 0.5) * mesh.dx;
+                        if (std::abs(xg - xc) <= half_w) d_disc += mesh.dx;
+                    }
+                    if (d_disc < 1.0e-12) d_disc = 2.0 * half_w;
                     // Évaluation de l'appartenance à l'injecteur
                     if (std::abs(x - xc) <= half_w) {
-                        // Vitesse d'injection négative imposée
-                        v_bc = bc.top.v_val;
+                        // Vitesse d'injection négative imposée (conservant le débit D * v0 exact)
+                        v_bc = bc.top.v_val * (2.0 * half_w) / d_disc;
                     } else {
                         // Vitesse positive d'échappement compensatoire du gaz
-                        v_bc = -bc.top.v_val * (2.0 * half_w) / (mesh.lx - 2.0 * half_w);
+                        v_bc = -bc.top.v_val * (2.0 * half_w) / (mesh.lx - d_disc);
                     }
                 } else if (bc.top.type == BCType::DIRICHLET) {
                     // Calcul et assignation numérique standard
@@ -5753,9 +5798,9 @@ public:
 | 21 | Méthode / Fonction | `InterfaceReconstruction::parse_advection_method` | Type retour : AdvectionMethod |
 | 27 | Méthode / Fonction | `InterfaceReconstruction::parse_tvd_limiter` | Type retour : TvdLimiter |
 | 46 | struct | `Point` | Déclaration de type / classe / structure |
-| 478 | Méthode / Fonction | `InterfaceReconstruction::evaluate_limiter` | Type retour : double |
+| 535 | Méthode / Fonction | `InterfaceReconstruction::evaluate_limiter` | Type retour : double |
 
-### Code Source Intégral : `src/InterfaceReconstruction.cpp` (519 lignes)
+### Code Source Intégral : `src/InterfaceReconstruction.cpp` (576 lignes)
 
 ```cpp
 #include "covof/InterfaceReconstruction.hpp"
@@ -5883,19 +5928,19 @@ double InterfaceReconstruction::compute_alpha(double xmin, double xmax, double y
     double min_val = *std::min_element(vals.begin(), vals.end());
     double max_val = *std::max_element(vals.begin(), vals.end());
 
-    // Pour alpha_low = -max_val, nx*x + ny*y + alpha <= 0 est vide -> aire = 0
-    // Pour alpha_high = -min_val, nx*x + ny*y + alpha <= 0 contient tout -> aire = total_area
+    // Pour alpha_low = -max_val, nx*x + ny*y + alpha <= 0 contient tout -> aire = total_area
+    // Pour alpha_high = -min_val, nx*x + ny*y + alpha <= 0 est vide -> aire = 0
     double alpha_low = -max_val - 1.0e-12;
     double alpha_high = -min_val + 1.0e-12;
 
-    // Méthode de dichotomie / bisection pour trouver alpha exact à 1.0e-12
+    // Méthode de dichotomie / bisection pour trouver alpha exact à 1.0e-12 (a décroît avec alpha)
     for (int iter = 0; iter < 45; ++iter) {
         double alpha_mid = 0.5 * (alpha_low + alpha_high);
         double a = cut_box_area(xmin, xmax, ymin, ymax, nx, ny, alpha_mid);
         if (a < target_area) {
-            alpha_low = alpha_mid;
-        } else {
             alpha_high = alpha_mid;
+        } else {
+            alpha_low = alpha_mid;
         }
     }
     return 0.5 * (alpha_low + alpha_high);
@@ -5910,8 +5955,8 @@ void InterfaceReconstruction::reconstruct_slic(const Mesh2D& mesh, const std::ve
     int nx = mesh.nx_local;
     int ny = mesh.ny_local;
 
-    for (int j = 1; j <= ny; ++j) {
-        for (int i = 1; i <= nx; ++i) {
+    for (int j = 0; j <= ny + 1; ++j) {
+        for (int i = 0; i <= nx + 1; ++i) {
             int idx = mesh.cell_idx(i, j);
             double c = C[idx];
 
@@ -5929,23 +5974,23 @@ void InterfaceReconstruction::reconstruct_slic(const Mesh2D& mesh, const std::ve
             double ymin = mesh.yv(j);
             double ymax = mesh.yv(j + 1);
 
-            double grad_x = std::abs(C[mesh.cell_idx(i + 1, j)] - C[mesh.cell_idx(i - 1, j)]);
-            double grad_y = std::abs(C[mesh.cell_idx(i, j + 1)] - C[mesh.cell_idx(i, j - 1)]);
+            double snx = 1.0, sny = 0.0;
+            if (i >= 1 && i <= nx && j >= 1 && j <= ny) {
+                double grad_x = std::abs(C[mesh.cell_idx(i + 1, j)] - C[mesh.cell_idx(i - 1, j)]);
+                double grad_y = std::abs(C[mesh.cell_idx(i, j + 1)] - C[mesh.cell_idx(i, j - 1)]);
 
-            double snx = 0.0, sny = 0.0;
-            if (grad_x >= grad_y) {
-                // Interface verticale
-                if (C[mesh.cell_idx(i - 1, j)] >= C[mesh.cell_idx(i + 1, j)]) {
-                    snx = 1.0; sny = 0.0; // Fluide à gauche
+                if (grad_x >= grad_y) {
+                    if (C[mesh.cell_idx(i - 1, j)] >= C[mesh.cell_idx(i + 1, j)]) {
+                        snx = 1.0; sny = 0.0;
+                    } else {
+                        snx = -1.0; sny = 0.0;
+                    }
                 } else {
-                    snx = -1.0; sny = 0.0; // Fluide à droite
-                }
-            } else {
-                // Interface horizontale
-                if (C[mesh.cell_idx(i, j - 1)] >= C[mesh.cell_idx(i, j + 1)]) {
-                    snx = 0.0; sny = 1.0; // Fluide en bas
-                } else {
-                    snx = 0.0; sny = -1.0; // Fluide en haut
+                    if (C[mesh.cell_idx(i, j - 1)] >= C[mesh.cell_idx(i, j + 1)]) {
+                        snx = 0.0; sny = 1.0;
+                    } else {
+                        snx = 0.0; sny = -1.0;
+                    }
                 }
             }
 
@@ -5966,8 +6011,8 @@ void InterfaceReconstruction::reconstruct_plic(const Mesh2D& mesh, const std::ve
     double dx = mesh.dx;
     double dy = mesh.dy;
 
-    for (int j = 1; j <= ny; ++j) {
-        for (int i = 1; i <= nx; ++i) {
+    for (int j = 0; j <= ny + 1; ++j) {
+        for (int i = 0; i <= nx + 1; ++i) {
             int idx = mesh.cell_idx(i, j);
             double c = C[idx];
 
@@ -5980,18 +6025,21 @@ void InterfaceReconstruction::reconstruct_plic(const Mesh2D& mesh, const std::ve
                 continue;
             }
 
-            // Calcul du gradient de Youngs sur stencil 3x3 centré
-            double c_mm = C[mesh.cell_idx(i - 1, j - 1)];
-            double c_0m = C[mesh.cell_idx(i,     j - 1)];
-            double c_pm = C[mesh.cell_idx(i + 1, j - 1)];
-            double c_m0 = C[mesh.cell_idx(i - 1, j    )];
-            double c_p0 = C[mesh.cell_idx(i + 1, j    )];
-            double c_mp = C[mesh.cell_idx(i - 1, j + 1)];
-            double c_0p = C[mesh.cell_idx(i,     j + 1)];
-            double c_pp = C[mesh.cell_idx(i + 1, j + 1)];
+            double mx = 1.0, my = 0.0;
+            if (i >= 1 && i <= nx && j >= 1 && j <= ny) {
+                // Calcul du gradient de Youngs sur stencil 3x3 centré
+                double c_mm = C[mesh.cell_idx(i - 1, j - 1)];
+                double c_0m = C[mesh.cell_idx(i,     j - 1)];
+                double c_pm = C[mesh.cell_idx(i + 1, j - 1)];
+                double c_m0 = C[mesh.cell_idx(i - 1, j    )];
+                double c_p0 = C[mesh.cell_idx(i + 1, j    )];
+                double c_mp = C[mesh.cell_idx(i - 1, j + 1)];
+                double c_0p = C[mesh.cell_idx(i,     j + 1)];
+                double c_pp = C[mesh.cell_idx(i + 1, j + 1)];
 
-            double mx = -((c_pp + 2.0 * c_p0 + c_pm) - (c_mp + 2.0 * c_m0 + c_mm)) / (8.0 * dx);
-            double my = -((c_pp + 2.0 * c_0p + c_mp) - (c_pm + 2.0 * c_0m + c_mm)) / (8.0 * dy);
+                mx = -((c_pp + 2.0 * c_p0 + c_pm) - (c_mp + 2.0 * c_m0 + c_mm)) / (8.0 * dx);
+                my = -((c_pp + 2.0 * c_0p + c_mp) - (c_pm + 2.0 * c_0m + c_mm)) / (8.0 * dy);
+            }
 
             double norm = std::hypot(mx, my);
             double pnx = (norm > 1.0e-12) ? mx / norm : 1.0;
@@ -6019,8 +6067,8 @@ void InterfaceReconstruction::reconstruct_elvira(const Mesh2D& mesh, const std::
     double dx = mesh.dx;
     double dy = mesh.dy;
 
-    for (int j = 1; j <= ny; ++j) {
-        for (int i = 1; i <= nx; ++i) {
+    for (int j = 0; j <= ny + 1; ++j) {
+        for (int i = 0; i <= nx + 1; ++i) {
             int idx = mesh.cell_idx(i, j);
             double c = C[idx];
 
@@ -6030,6 +6078,14 @@ void InterfaceReconstruction::reconstruct_elvira(const Mesh2D& mesh, const std::
             }
             if (c >= 1.0 - 1.0e-6) {
                 segments[idx] = {1.0, 0.0, -1.0e9};
+                continue;
+            }
+            if (i < 1 || i > nx || j < 1 || j > ny) {
+                double xmin = mesh.xv(i);
+                double xmax = mesh.xv(i + 1);
+                double ymin = mesh.yv(j);
+                double ymax = mesh.yv(j + 1);
+                segments[idx] = {1.0, 0.0, compute_alpha(xmin, xmax, ymin, ymax, 1.0, 0.0, c)};
                 continue;
             }
 
@@ -6228,6 +6284,52 @@ void InterfaceReconstruction::reconstruct(ReconstructionMethod method, const Mes
         case ReconstructionMethod::ELVIRA:
             reconstruct_elvira(mesh, C, segments);
             break;
+    }
+
+    // Propagation des normales reconstruites vers les mailles fantomes (periodicite / bords)
+    int nx = mesh.nx_local;
+    int ny = mesh.ny_local;
+    int i_left_src  = (!mesh.is_boundary_left  && mesh.num_procs == 1) ? nx : 1;
+    int i_right_src = (!mesh.is_boundary_right && mesh.num_procs == 1) ? 1  : nx;
+    int j_bot_src   = (!mesh.is_boundary_bottom && mesh.num_procs == 1) ? ny : 1;
+    int j_top_src   = (!mesh.is_boundary_top    && mesh.num_procs == 1) ? 1  : ny;
+
+    for (int j = 1; j <= ny; ++j) {
+        // Maille fantome gauche i = 0
+        int idx0 = mesh.cell_idx(0, j);
+        double c0 = C[idx0];
+        if (c0 > 1.0e-6 && c0 < 1.0 - 1.0e-6) {
+            const auto& s_src = segments[mesh.cell_idx(i_left_src, j)];
+            double alpha0 = compute_alpha(mesh.xv(0), mesh.xv(1), mesh.yv(j), mesh.yv(j + 1), s_src.nx, s_src.ny, c0);
+            segments[idx0] = {s_src.nx, s_src.ny, alpha0};
+        }
+        // Maille fantome droite i = nx + 1
+        int idxR = mesh.cell_idx(nx + 1, j);
+        double cR = C[idxR];
+        if (cR > 1.0e-6 && cR < 1.0 - 1.0e-6) {
+            const auto& s_src = segments[mesh.cell_idx(i_right_src, j)];
+            double alphaR = compute_alpha(mesh.xv(nx + 1), mesh.xv(nx + 2), mesh.yv(j), mesh.yv(j + 1), s_src.nx, s_src.ny, cR);
+            segments[idxR] = {s_src.nx, s_src.ny, alphaR};
+        }
+    }
+
+    for (int i = 0; i <= nx + 1; ++i) {
+        // Maille fantome inferieure j = 0
+        int idxB = mesh.cell_idx(i, 0);
+        double cB = C[idxB];
+        if (cB > 1.0e-6 && cB < 1.0 - 1.0e-6) {
+            const auto& s_src = segments[mesh.cell_idx(i, j_bot_src)];
+            double alphaB = compute_alpha(mesh.xv(i), mesh.xv(i + 1), mesh.yv(0), mesh.yv(1), s_src.nx, s_src.ny, cB);
+            segments[idxB] = {s_src.nx, s_src.ny, alphaB};
+        }
+        // Maille fantome superieure j = ny + 1
+        int idxT = mesh.cell_idx(i, ny + 1);
+        double cT = C[idxT];
+        if (cT > 1.0e-6 && cT < 1.0 - 1.0e-6) {
+            const auto& s_src = segments[mesh.cell_idx(i, j_top_src)];
+            double alphaT = compute_alpha(mesh.xv(i), mesh.xv(i + 1), mesh.yv(ny + 1), mesh.yv(ny + 2), s_src.nx, s_src.ny, cT);
+            segments[idxT] = {s_src.nx, s_src.ny, alphaT};
+        }
     }
 }
 
@@ -6439,12 +6541,11 @@ public:
 | 501 | Méthode / Fonction | `flux_vol_x` | Type retour : std::vector<double> |
 | 561 | Méthode / Fonction | `flux_vol_y` | Type retour : std::vector<double> |
 | 633 | Méthode / Fonction | `InterfaceTracker::advect_weymouth_yue` | Type retour : void |
-| 646 | Méthode / Fonction | `f_vol_x` | Type retour : std::vector<double> |
-| 647 | Méthode / Fonction | `f_vol_y` | Type retour : std::vector<double> |
-| 751 | Méthode / Fonction | `scale_out` | Type retour : std::vector<double> |
-| 752 | Méthode / Fonction | `scale_in` | Type retour : std::vector<double> |
+| 644 | Méthode / Fonction | `C_d` | Type retour : std::vector<double> |
+| 655 | Méthode / Fonction | `f_vol_x` | Type retour : std::vector<double> |
+| 698 | Méthode / Fonction | `f_vol_y` | Type retour : std::vector<double> |
 
-### Code Source Intégral : `src/InterfaceTracker.cpp` (833 lignes)
+### Code Source Intégral : `src/InterfaceTracker.cpp` (752 lignes)
 
 ```cpp
 #include "covof/InterfaceTracker.hpp"
@@ -6994,9 +7095,9 @@ void InterfaceTracker::advect_ciam(const Mesh2D& mesh, FlowFields& fields, doubl
                 // Mise à jour conservative 1D avec compensation de divergence
                 double denom = dx - dt * (u_out - u_in);
                 if (denom > 1.0e-12) {
-                    C_out[idx] = (C_in[idx] * dx - (f_out - f_in)) / denom;
+                    C_out[idx] = (C_in[idx] * dx - (f_out - f_in) / dy) / denom;
                 } else {
-                    C_out[idx] = C_in[idx] - (f_out - f_in) / dx;
+                    C_out[idx] = C_in[idx] - (f_out - f_in) / (dx * dy);
                 }
                 C_out[idx] = std::clamp(C_out[idx], 0.0, 1.0);
             }
@@ -7053,9 +7154,9 @@ void InterfaceTracker::advect_ciam(const Mesh2D& mesh, FlowFields& fields, doubl
 
                 double denom = dy - dt * (v_out - v_in);
                 if (denom > 1.0e-12) {
-                    C_out[idx] = (C_in[idx] * dy - (f_out - f_in)) / denom;
+                    C_out[idx] = (C_in[idx] * dy - (f_out - f_in) / dx) / denom;
                 } else {
-                    C_out[idx] = C_in[idx] - (f_out - f_in) / dy;
+                    C_out[idx] = C_in[idx] - (f_out - f_in) / (dx * dy);
                 }
                 C_out[idx] = std::clamp(C_out[idx], 0.0, 1.0);
             }
@@ -7087,196 +7188,115 @@ void InterfaceTracker::advect_weymouth_yue(const Mesh2D& mesh, FlowFields& field
     double cell_area = dx * dy;
 
     ReconstructionMethod recon_method = InterfaceReconstruction::parse_reconstruction_method(vof_cfg.reconstruction_method);
+    bool x_first = (step_count % 2 == 0);
 
-    // 1. Reconstruction geometrique sur le champ initial C^n
-    InterfaceReconstruction::reconstruct(recon_method, mesh, fields.C, interface_segments);
+    // 1. Fonction indicatrice de dilatation binaire C_d(i,j) figee au temps n (Weymouth & Yue, JCP 2010, Eq. 14)
+    std::vector<double> C_d((nx + 2) * (ny + 2), 0.0);
+    for (int j = 0; j <= ny + 1; ++j) {
+        for (int i = 0; i <= nx + 1; ++i) {
+            int idx = mesh.cell_idx(i, j);
+            C_d[idx] = (fields.C[idx] >= 0.5) ? 1.0 : 0.0;
+        }
+    }
 
-    // 2. Calcul des flux 1D de faces geometriques
-    std::vector<double> f_vol_x((nx + 2) * (ny + 2), 0.0);
-    std::vector<double> f_vol_y((nx + 2) * (ny + 2), 0.0);
+    // 2. Balayage directionnel 1D selon X (Weymouth & Yue, JCP 2010, Eq. 15)
+    auto sweep_x = [&](std::vector<double>& C_in, std::vector<double>& C_out, bool clamp_out) {
+        InterfaceReconstruction::reconstruct(recon_method, mesh, C_in, interface_segments);
+        std::vector<double> f_vol_x((nx + 2) * (ny + 2), 0.0);
 
-    for (int j = 1; j <= ny; ++j) {
-        for (int i = 1; i <= nx + 1; ++i) {
-            double u_face = fields.u[mesh.u_idx(i, j)];
-            double delta_x = std::abs(u_face) * dt;
-            if (delta_x <= 1.0e-14) continue;
+        for (int j = 1; j <= ny; ++j) {
+            for (int i = 1; i <= nx + 1; ++i) {
+                double u_face = fields.u[mesh.u_idx(i, j)];
+                double delta_x = std::abs(u_face) * dt;
+                if (delta_x <= 1.0e-14) continue;
 
-            if (u_face > 0.0) {
-                int donor_idx = mesh.cell_idx(i - 1, j);
                 double x_pos = mesh.xv(i);
-                const auto& seg = interface_segments[donor_idx];
-                f_vol_x[mesh.cell_idx(i, j)] = InterfaceReconstruction::cut_box_area(x_pos - delta_x, x_pos,
-                                                                                     mesh.yv(j), mesh.yv(j + 1),
-                                                                                     seg.nx, seg.ny, seg.alpha);
-            } else {
-                int donor_idx = mesh.cell_idx(i, j);
-                double x_pos = mesh.xv(i);
-                const auto& seg = interface_segments[donor_idx];
-                f_vol_x[mesh.cell_idx(i, j)] = -InterfaceReconstruction::cut_box_area(x_pos, x_pos + delta_x,
-                                                                                      mesh.yv(j), mesh.yv(j + 1),
-                                                                                      seg.nx, seg.ny, seg.alpha);
+                if (u_face > 0.0) {
+                    int donor_idx = mesh.cell_idx(i - 1, j);
+                    const auto& seg = interface_segments[donor_idx];
+                    f_vol_x[mesh.cell_idx(i, j)] = InterfaceReconstruction::cut_box_area(
+                        x_pos - delta_x, x_pos, mesh.yv(j), mesh.yv(j + 1), seg.nx, seg.ny, seg.alpha);
+                } else {
+                    int donor_idx = mesh.cell_idx(i, j);
+                    const auto& seg = interface_segments[donor_idx];
+                    f_vol_x[mesh.cell_idx(i, j)] = -InterfaceReconstruction::cut_box_area(
+                        x_pos, x_pos + delta_x, mesh.yv(j), mesh.yv(j + 1), seg.nx, seg.ny, seg.alpha);
+                }
             }
         }
-    }
 
-    for (int j = 1; j <= ny + 1; ++j) {
-        for (int i = 1; i <= nx; ++i) {
-            double v_face = fields.v[mesh.v_idx(i, j)];
-            double delta_y = std::abs(v_face) * dt;
-            if (delta_y <= 1.0e-14) continue;
+        for (int j = 1; j <= ny; ++j) {
+            for (int i = 1; i <= nx; ++i) {
+                int idx = mesh.cell_idx(i, j);
+                double fx_in  = f_vol_x[mesh.cell_idx(i, j)];
+                double fx_out = f_vol_x[mesh.cell_idx(i + 1, j)];
+                double u_in   = fields.u[mesh.u_idx(i, j)];
+                double u_out  = fields.u[mesh.u_idx(i + 1, j)];
 
-            if (v_face > 0.0) {
-                int donor_idx = mesh.cell_idx(i, j - 1);
+                C_out[idx] = C_in[idx] - (fx_out - fx_in) / cell_area + C_d[idx] * (dt / dx) * (u_out - u_in);
+                if (clamp_out) {
+                    C_out[idx] = std::clamp(C_out[idx], 0.0, 1.0);
+                }
+            }
+        }
+        MpiComm::sync_cell_scalar(mesh, C_out);
+    };
+
+    // 3. Balayage directionnel 1D selon Y (Weymouth & Yue, JCP 2010, Eq. 16)
+    auto sweep_y = [&](std::vector<double>& C_in, std::vector<double>& C_out, bool clamp_out) {
+        InterfaceReconstruction::reconstruct(recon_method, mesh, C_in, interface_segments);
+        std::vector<double> f_vol_y((nx + 2) * (ny + 2), 0.0);
+
+        for (int j = 1; j <= ny + 1; ++j) {
+            for (int i = 1; i <= nx; ++i) {
+                double v_face = fields.v[mesh.v_idx(i, j)];
+                double delta_y = std::abs(v_face) * dt;
+                if (delta_y <= 1.0e-14) continue;
+
                 double y_pos = mesh.yv(j);
-                const auto& seg = interface_segments[donor_idx];
-                f_vol_y[mesh.cell_idx(i, j)] = InterfaceReconstruction::cut_box_area(mesh.xv(i), mesh.xv(i + 1),
-                                                                                     y_pos - delta_y, y_pos,
-                                                                                     seg.nx, seg.ny, seg.alpha);
-            } else {
-                int donor_idx = mesh.cell_idx(i, j);
-                double y_pos = mesh.yv(j);
-                const auto& seg = interface_segments[donor_idx];
-                f_vol_y[mesh.cell_idx(i, j)] = -InterfaceReconstruction::cut_box_area(mesh.xv(i), mesh.xv(i + 1),
-                                                                                      y_pos, y_pos + delta_y,
-                                                                                      seg.nx, seg.ny, seg.alpha);
+                if (v_face > 0.0) {
+                    int donor_idx = mesh.cell_idx(i, j - 1);
+                    const auto& seg = interface_segments[donor_idx];
+                    f_vol_y[mesh.cell_idx(i, j)] = InterfaceReconstruction::cut_box_area(
+                        mesh.xv(i), mesh.xv(i + 1), y_pos - delta_y, y_pos, seg.nx, seg.ny, seg.alpha);
+                } else {
+                    int donor_idx = mesh.cell_idx(i, j);
+                    const auto& seg = interface_segments[donor_idx];
+                    f_vol_y[mesh.cell_idx(i, j)] = -InterfaceReconstruction::cut_box_area(
+                        mesh.xv(i), mesh.xv(i + 1), y_pos, y_pos + delta_y, seg.nx, seg.ny, seg.alpha);
+                }
             }
         }
-    }
 
-    // 3. Correction multidimensionnelle de coin de Weymouth & Yue
-    for (int j = 1; j <= ny; ++j) {
-        for (int i = 1; i <= nx; ++i) {
-            int idx = mesh.cell_idx(i, j);
-            double u_e = fields.u[mesh.u_idx(i + 1, j)];
-            double u_w = fields.u[mesh.u_idx(i, j)];
-            double v_n = fields.v[mesh.v_idx(i, j + 1)];
-            double v_s = fields.v[mesh.v_idx(i, j)];
-            const auto& seg = interface_segments[idx];
+        for (int j = 1; j <= ny; ++j) {
+            for (int i = 1; i <= nx; ++i) {
+                int idx = mesh.cell_idx(i, j);
+                double fy_in  = f_vol_y[mesh.cell_idx(i, j)];
+                double fy_out = f_vol_y[mesh.cell_idx(i, j + 1)];
+                double v_in   = fields.v[mesh.v_idx(i, j)];
+                double v_out  = fields.v[mesh.v_idx(i, j + 1)];
 
-            if (u_e > 0.0 && v_n > 0.0) {
-                double c_xmin = mesh.xv(i + 1) - u_e * dt;
-                double c_xmax = mesh.xv(i + 1);
-                double c_ymin = mesh.yv(j + 1) - v_n * dt;
-                double c_ymax = mesh.yv(j + 1);
-                double v_corner = InterfaceReconstruction::cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax,
-                                                                        seg.nx, seg.ny, seg.alpha);
-                f_vol_x[mesh.cell_idx(i + 1, j)] -= 0.5 * v_corner;
-                f_vol_y[mesh.cell_idx(i, j + 1)] -= 0.5 * v_corner;
-            }
-            if (u_w < 0.0 && v_n > 0.0) {
-                double c_xmin = mesh.xv(i);
-                double c_xmax = mesh.xv(i) - u_w * dt;
-                double c_ymin = mesh.yv(j + 1) - v_n * dt;
-                double c_ymax = mesh.yv(j + 1);
-                double v_corner = InterfaceReconstruction::cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax,
-                                                                        seg.nx, seg.ny, seg.alpha);
-                f_vol_x[mesh.cell_idx(i, j)] += 0.5 * v_corner;
-                f_vol_y[mesh.cell_idx(i, j + 1)] -= 0.5 * v_corner;
-            }
-            if (u_e > 0.0 && v_s < 0.0) {
-                double c_xmin = mesh.xv(i + 1) - u_e * dt;
-                double c_xmax = mesh.xv(i + 1);
-                double c_ymin = mesh.yv(j);
-                double c_ymax = mesh.yv(j) - v_s * dt;
-                double v_corner = InterfaceReconstruction::cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax,
-                                                                        seg.nx, seg.ny, seg.alpha);
-                f_vol_x[mesh.cell_idx(i + 1, j)] -= 0.5 * v_corner;
-                f_vol_y[mesh.cell_idx(i, j)] += 0.5 * v_corner;
-            }
-            if (u_w < 0.0 && v_s < 0.0) {
-                double c_xmin = mesh.xv(i);
-                double c_xmax = mesh.xv(i) - u_w * dt;
-                double c_ymin = mesh.yv(j);
-                double c_ymax = mesh.yv(j) - v_s * dt;
-                double v_corner = InterfaceReconstruction::cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax,
-                                                                        seg.nx, seg.ny, seg.alpha);
-                f_vol_x[mesh.cell_idx(i, j)] += 0.5 * v_corner;
-                f_vol_y[mesh.cell_idx(i, j)] += 0.5 * v_corner;
+                C_out[idx] = C_in[idx] - (fy_out - fy_in) / cell_area + C_d[idx] * (dt / dy) * (v_out - v_in);
+                if (clamp_out) {
+                    C_out[idx] = std::clamp(C_out[idx], 0.0, 1.0);
+                }
             }
         }
+        MpiComm::sync_cell_scalar(mesh, C_out);
+    };
+
+    std::vector<double> C_star = fields.C;
+    std::vector<double> C_final = fields.C;
+
+    if (x_first) {
+        sweep_x(fields.C, C_star, false);
+        sweep_y(C_star, C_final, true);
+    } else {
+        sweep_y(fields.C, C_star, false);
+        sweep_x(C_star, C_final, true);
     }
 
-    // 4. Limitation conservative de Weymouth & Yue garantissant 0 <= C <= 1 et conservation de masse exacte
-    std::vector<double> scale_out((nx + 2) * (ny + 2), 1.0);
-    std::vector<double> scale_in((nx + 2) * (ny + 2), 1.0);
-
-    for (int j = 1; j <= ny; ++j) {
-        for (int i = 1; i <= nx; ++i) {
-            int idx = mesh.cell_idx(i, j);
-            double v_fluid = fields.C[idx] * cell_area;
-            double v_empty = (1.0 - fields.C[idx]) * cell_area;
-
-            double f_out = std::max(0.0, f_vol_x[mesh.cell_idx(i + 1, j)]) +
-                           std::max(0.0, -f_vol_x[mesh.cell_idx(i, j)]) +
-                           std::max(0.0, f_vol_y[mesh.cell_idx(i, j + 1)]) +
-                           std::max(0.0, -f_vol_y[mesh.cell_idx(i, j)]);
-
-            double f_in = std::max(0.0, -f_vol_x[mesh.cell_idx(i + 1, j)]) +
-                          std::max(0.0, f_vol_x[mesh.cell_idx(i, j)]) +
-                          std::max(0.0, -f_vol_y[mesh.cell_idx(i, j + 1)]) +
-                          std::max(0.0, f_vol_y[mesh.cell_idx(i, j)]);
-
-            if (f_out > v_fluid && f_out > 1.0e-14) {
-                scale_out[idx] = v_fluid / f_out;
-            }
-            if (f_in > v_empty && f_in > 1.0e-14) {
-                scale_in[idx] = v_empty / f_in;
-            }
-        }
-    }
-
-    for (int j = 1; j <= ny; ++j) {
-        for (int i = 1; i <= nx + 1; ++i) {
-            int c_idx = mesh.cell_idx(i, j);
-            double f = f_vol_x[c_idx];
-            if (f > 0.0) {
-                int donor = mesh.cell_idx(i - 1, j);
-                int receiver = mesh.cell_idx(i, j);
-                double s = std::min(scale_out[donor], scale_in[receiver]);
-                f_vol_x[c_idx] = f * s;
-            } else if (f < 0.0) {
-                int donor = mesh.cell_idx(i, j);
-                int receiver = mesh.cell_idx(i - 1, j);
-                double s = std::min(scale_out[donor], scale_in[receiver]);
-                f_vol_x[c_idx] = f * s;
-            }
-        }
-    }
-
-    for (int j = 1; j <= ny + 1; ++j) {
-        for (int i = 1; i <= nx; ++i) {
-            int c_idx = mesh.cell_idx(i, j);
-            double f = f_vol_y[c_idx];
-            if (f > 0.0) {
-                int donor = mesh.cell_idx(i, j - 1);
-                int receiver = mesh.cell_idx(i, j);
-                double s = std::min(scale_out[donor], scale_in[receiver]);
-                f_vol_y[c_idx] = f * s;
-            } else if (f < 0.0) {
-                int donor = mesh.cell_idx(i, j);
-                int receiver = mesh.cell_idx(i, j - 1);
-                double s = std::min(scale_out[donor], scale_in[receiver]);
-                f_vol_y[c_idx] = f * s;
-            }
-        }
-    }
-
-    // 5. Mise a jour conservative exacte
-    std::vector<double> C_new = fields.C;
-    for (int j = 1; j <= ny; ++j) {
-        for (int i = 1; i <= nx; ++i) {
-            int idx = mesh.cell_idx(i, j);
-            double fx_in  = f_vol_x[mesh.cell_idx(i, j)];
-            double fx_out = f_vol_x[mesh.cell_idx(i + 1, j)];
-            double fy_in  = f_vol_y[mesh.cell_idx(i, j)];
-            double fy_out = f_vol_y[mesh.cell_idx(i, j + 1)];
-
-            C_new[idx] = fields.C[idx] - (1.0 / cell_area) * ((fx_out - fx_in) + (fy_out - fy_in));
-            C_new[idx] = std::clamp(C_new[idx], 0.0, 1.0);
-        }
-    }
-
-    fields.C = C_new;
+    fields.C = C_final;
 }
 
 } // namespace covof
@@ -7823,34 +7843,34 @@ public:
 | Ligne | Catégorie | Identifiant C++17 | Signature / Rôle |
 |:---:|:---|:---|:---|
 | 13 | Méthode / Fonction | `Simulation::init` | Type retour : bool |
-| 210 | Méthode / Fonction | `Simulation::compute_time_step` | Type retour : double |
-| 257 | Méthode / Fonction | `Simulation::run` | Type retour : void |
-| 283 | Méthode / Fonction | `std::setw` | Type retour : << std::left << |
-| 284 | Méthode / Fonction | `std::setw` | Type retour : << |
-| 285 | Méthode / Fonction | `std::setw` | Type retour : << |
-| 286 | Méthode / Fonction | `std::setw` | Type retour : << |
-| 287 | Méthode / Fonction | `std::setw` | Type retour : << |
-| 288 | Méthode / Fonction | `std::setw` | Type retour : << |
-| 291 | Méthode / Fonction | `std::setw` | Type retour : std::cout << |
-| 297 | Méthode / Fonction | `state_vector` | Type retour : std::vector<double> |
-| 299 | Méthode / Fonction | `rhs` | Type retour : std::vector<double> |
-| 428 | Méthode / Fonction | `std::setw` | Type retour : std::cout << std::left << |
-| 429 | Méthode / Fonction | `std::setw` | Type retour : << |
-| 430 | Méthode / Fonction | `std::setw` | Type retour : << |
-| 431 | Méthode / Fonction | `std::setw` | Type retour : << |
-| 432 | Méthode / Fonction | `std::setw` | Type retour : << |
-| 433 | Méthode / Fonction | `std::setw` | Type retour : << |
-| 436 | Méthode / Fonction | `std::setw` | Type retour : std::cout << |
-| 456 | Méthode / Fonction | `std::string` | Type retour : std::cout << |
-| 463 | Méthode / Fonction | `Simulation::run_laplacian` | Type retour : void |
-| 530 | Méthode / Fonction | `rhs` | Type retour : std::vector<double> |
-| 585 | Méthode / Fonction | `diag` | Type retour : std::vector<double> |
-| 596 | Méthode / Fonction | `p_cg` | Type retour : std::vector<double> |
-| 709 | Méthode / Fonction | `ofs` | Type retour : std::ofstream |
-| 720 | Méthode / Fonction | `Simulation::run_vortex_advection` | Type retour : void |
-| 898 | Méthode / Fonction | `ofs` | Type retour : std::ofstream |
+| 218 | Méthode / Fonction | `Simulation::compute_time_step` | Type retour : double |
+| 265 | Méthode / Fonction | `Simulation::run` | Type retour : void |
+| 291 | Méthode / Fonction | `std::setw` | Type retour : << std::left << |
+| 292 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 293 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 294 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 295 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 296 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 299 | Méthode / Fonction | `std::setw` | Type retour : std::cout << |
+| 305 | Méthode / Fonction | `state_vector` | Type retour : std::vector<double> |
+| 307 | Méthode / Fonction | `rhs` | Type retour : std::vector<double> |
+| 436 | Méthode / Fonction | `std::setw` | Type retour : std::cout << std::left << |
+| 437 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 438 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 439 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 440 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 441 | Méthode / Fonction | `std::setw` | Type retour : << |
+| 444 | Méthode / Fonction | `std::setw` | Type retour : std::cout << |
+| 464 | Méthode / Fonction | `std::string` | Type retour : std::cout << |
+| 471 | Méthode / Fonction | `Simulation::run_laplacian` | Type retour : void |
+| 538 | Méthode / Fonction | `rhs` | Type retour : std::vector<double> |
+| 593 | Méthode / Fonction | `diag` | Type retour : std::vector<double> |
+| 604 | Méthode / Fonction | `p_cg` | Type retour : std::vector<double> |
+| 717 | Méthode / Fonction | `ofs` | Type retour : std::ofstream |
+| 728 | Méthode / Fonction | `Simulation::run_vortex_advection` | Type retour : void |
+| 906 | Méthode / Fonction | `ofs` | Type retour : std::ofstream |
 
-### Code Source Intégral : `src/Simulation.cpp` (916 lignes)
+### Code Source Intégral : `src/Simulation.cpp` (924 lignes)
 
 ```cpp
 #include "covof/Simulation.hpp"
@@ -7992,6 +8012,7 @@ bool Simulation::init(MPI_Comm comm, const std::string& config_file) {
         }
         MpiComm::sync_u(mesh, fields.u);
         MpiComm::sync_v(mesh, fields.v);
+        MpiComm::apply_boundary_conditions(mesh, config.bc, fields, false);
     }
 
     // Initialisation du champ de vitesse pour VISCOUS_JET (Cas 3.3 Fluids 2021)
@@ -8002,8 +8023,15 @@ bool Simulation::init(MPI_Comm comm, const std::string& config_file) {
         double half_w = (config.init_cond.jet_width > 0.0) ? 0.5 * config.init_cond.jet_width : 0.04;
         // Déclaration de la hauteur de l'amorce initiale de jet sous la paroi supérieure
         double stub_height = 2.0 * mesh.dy;
-        // Vitesse d'injection négative selon Y
+        // Vitesse d'injection négative selon Y (ajustée au débit discret exact D * v0)
         double v_inlet = (config.bc.top.v_val != 0.0) ? config.bc.top.v_val : -0.6;
+        double d_disc = 0.0;
+        for (int ig = 1; ig <= mesh.nx_global; ++ig) {
+            double xg = (ig - 0.5) * mesh.dx;
+            if (std::abs(xg - x_c) <= half_w) d_disc += mesh.dx;
+        }
+        if (d_disc < 1.0e-12) d_disc = 2.0 * half_w;
+        double v_in_eff = v_inlet * (2.0 * half_w) / d_disc;
 
         // Composante verticale v sur les faces décalées MAC en y
         int v_ny = mesh.ny_local + (mesh.is_boundary_top ? 1 : 0);
@@ -8018,7 +8046,7 @@ bool Simulation::init(MPI_Comm comm, const std::string& config_file) {
                 // Évaluation de l'appartenance à l'amorce initiale
                 if (y >= mesh.ly - stub_height && std::abs(x - x_c) <= half_w) {
                     // Calcul et assignation numérique
-                    fields.v[mesh.v_idx(i, j)] = v_inlet;
+                    fields.v[mesh.v_idx(i, j)] = v_in_eff;
                 }
             }
         }
@@ -9631,7 +9659,7 @@ end module module_json
 | 146 | subroutine | `parse_bc` | Arguments : (buf, prefix, bc) |
 | 213 | subroutine | `load_config_from_json` | Arguments : (filename, cfg, ierr) |
 
-### Code Source Intégral : `src/module_config.f90` (493 lignes)
+### Code Source Intégral : `src/module_config.f90` (507 lignes)
 
 ```fortran
 ! [Procédure/Module] module module_config
@@ -10106,13 +10134,27 @@ contains
     call json_get_real(buf, "solver.steady_state_tol", cfg%steady_state_tol, cfg%steady_state_tol)
 
     ! VOF parameters
+    call json_get_string(buf, "vof.advection_method", cfg%advection_method, "WEYMOUTH_YUE")
+    ! Appel de sous-programme modulaire
     call json_get_string(buf, "vof.reconstruction_method", cfg%reconstruction_method, "PLIC")
     ! Appel de sous-programme modulaire
-    call json_get_string(buf, "vof.advection_method", cfg%advection_method, "VOF_TVD")
+    call json_get_string(buf, "vof.tvd_limiter", cfg%tvd_limiter, "NONE")
     ! Appel de sous-programme modulaire
-    call json_get_string(buf, "vof.tvd_limiter", cfg%tvd_limiter, "SUPERBEE")
-    ! Appel de sous-programme modulaire
-    call json_get_real(buf, "vof.cfl_vof", cfg%cfl_vof, 0.4_dp)
+    call json_get_real(buf, "vof.cfl_vof", cfg%cfl_vof, 0.5_dp)
+
+    ! Cohérence stricte : le schéma algébrique TVD ne s'accompagne d'aucune reconstruction géométrique,
+    ! tandis que les schémas géométriques (WEYMOUTH_YUE, CIAM) n'utilisent pas de limiteur TVD.
+    if (trim(cfg%advection_method) == "VOF_TVD" .or. trim(cfg%advection_method) == "TVD") then
+       cfg%reconstruction_method = "NONE"
+       if (trim(cfg%tvd_limiter) == "NONE" .or. len_trim(cfg%tvd_limiter) == 0) then
+          cfg%tvd_limiter = "SUPERBEE"
+       end if
+    else
+       if (trim(cfg%reconstruction_method) == "NONE" .or. len_trim(cfg%reconstruction_method) == 0) then
+          cfg%reconstruction_method = "PLIC"
+       end if
+       cfg%tvd_limiter = "NONE"
+    end if
 
     ! Output
     call json_get_string(buf, "output.output_dir", cfg%output_dir, "output")
@@ -10608,17 +10650,17 @@ Le module \texttt{src/module\_mpi\_comm.f90} (798 lignes) fournit le type dériv
 |:---:|:---|:---|:---|
 | 2 | module | `module_mpi_comm` | Unité modulaire Fortran 2018 |
 | 25 | subroutine | `exchange_halos_scalar` | Arguments : (field, mesh) |
-| 129 | subroutine | `exchange_halos_velocity` | Arguments : (u, v, mesh) |
-| 280 | subroutine | `apply_velocity_bc` | Arguments : (fields, mesh, cfg, homogeneous) |
-| 499 | subroutine | `apply_thermal_bc` | Arguments : (fields, mesh, cfg) |
-| 595 | subroutine | `apply_vof_bc` | Arguments : (fields, mesh, cfg) |
-| 685 | subroutine | `sync_u` | Arguments : (mesh, u) |
-| 695 | subroutine | `sync_v` | Arguments : (mesh, v) |
-| 705 | subroutine | `sync_cell_scalar` | Arguments : (mesh, s) |
-| 715 | subroutine | `apply_boundary_conditions` | Arguments : (mesh, cfg, fields, homogeneous) |
-| 729 | subroutine | `apply_thermal_boundary_conditions` | Arguments : (mesh, cfg, fields) |
+| 139 | subroutine | `exchange_halos_velocity` | Arguments : (u, v, mesh) |
+| 290 | subroutine | `apply_velocity_bc` | Arguments : (fields, mesh, cfg, homogeneous) |
+| 514 | subroutine | `apply_thermal_bc` | Arguments : (fields, mesh, cfg) |
+| 610 | subroutine | `apply_vof_bc` | Arguments : (fields, mesh, cfg) |
+| 700 | subroutine | `sync_u` | Arguments : (mesh, u) |
+| 710 | subroutine | `sync_v` | Arguments : (mesh, v) |
+| 720 | subroutine | `sync_cell_scalar` | Arguments : (mesh, s) |
+| 730 | subroutine | `apply_boundary_conditions` | Arguments : (mesh, cfg, fields, homogeneous) |
+| 744 | subroutine | `apply_thermal_boundary_conditions` | Arguments : (mesh, cfg, fields) |
 
-### Code Source Intégral : `src/module_mpi_comm.f90` (798 lignes)
+### Code Source Intégral : `src/module_mpi_comm.f90` (813 lignes)
 
 ```fortran
 ! [Procédure/Module] module module_mpi_comm
@@ -10661,12 +10703,22 @@ contains
     real(dp), allocatable :: s_bot(:), r_bot(:), s_top(:), r_top(:)
 
     ! Affectation et calcul numérique
-    if (mesh%size <= 1) return
-
-    ! Affectation et calcul numérique
     nx = mesh%nx_local
     ! Affectation et calcul numérique
     ny = mesh%ny_local
+
+    ! Affectation et calcul numérique
+    if (mesh%size <= 1) then
+       if (.not. mesh%is_boundary_left) then
+          field(0, 0:ny+1)    = field(nx, 0:ny+1)
+          field(nx+1, 0:ny+1) = field(1, 0:ny+1)
+       end if
+       if (.not. mesh%is_boundary_bottom) then
+          field(0:nx+1, 0)    = field(0:nx+1, ny)
+          field(0:nx+1, ny+1) = field(0:nx+1, 1)
+       end if
+       return
+    end if
 
     ! Allocation dynamique de tableau contigu en mémoire
     allocate(s_left(ny), r_left(ny), s_right(ny), r_right(ny))
@@ -11078,11 +11130,16 @@ contains
        if (trim(cfg%bc_top%profile) == "JET_INLET") then
           xc_top = merge(cfg%bc_top%jet_center, 0.5_dp * mesh%lx, cfg%bc_top%jet_center > 0.0_dp)
           half_w_top = merge(0.5_dp * cfg%bc_top%jet_width, 0.04_dp, cfg%bc_top%jet_width > 0.0_dp)
-          v_out_top = -v_t * (2.0_dp * half_w_top) / (mesh%lx - 2.0_dp * half_w_top)
+          y = 0.0_dp
+          do i = 1, mesh%nx_global
+             if (abs((real(i, dp) - 0.5_dp) * mesh%dx - xc_top) <= half_w_top) y = y + mesh%dx
+          end do
+          if (y < 1.0e-12_dp) y = 2.0_dp * half_w_top
+          v_out_top = -v_t * (2.0_dp * half_w_top) / (mesh%lx - y)
           do i = 1, nx
              x_c = x_center(mesh, i)
              if (abs(x_c - xc_top) <= half_w_top) then
-                if (.not. homogeneous) fields%v(i, ny+1) = v_t
+                if (.not. homogeneous) fields%v(i, ny+1) = v_t * (2.0_dp * half_w_top) / y
              else
                 if (.not. homogeneous) fields%v(i, ny+1) = v_out_top
              end if
@@ -12370,13 +12427,13 @@ Ce module constitue le noyau physique et mathématique de \texttt{COVOF\_2D-FORT
 | 180 | subroutine | `ns_pack_vector` | Arguments : (this, mesh, cfg, fields, vec) |
 | 249 | subroutine | `ns_unpack_vector` | Arguments : (this, mesh, cfg, vec, fields, homogeneous) |
 | 329 | subroutine | `ns_apply_system_matrix` | Arguments : (this, mesh, cfg, fields_old, dt, x, y) |
-| 665 | subroutine | `ns_assemble_rhs` | Arguments : (this, mesh, cfg, fields, dt, rhs) |
-| 932 | subroutine | `ns_update_pressure_al` | Arguments : (this, mesh, cfg, fields) |
-| 971 | subroutine | `ns_assemble_preconditioner_blocks` | Arguments : (this, mesh, cfg, fields, dt) |
-| 1097 | subroutine | `ns_solve_energy` | Arguments : (this, mesh, cfg, fields, dt) |
-| 1478 | function | `ns_compute_mean_nusselt_hot_wall` | Arguments : (this, mesh, cfg, fields) |
+| 671 | subroutine | `ns_assemble_rhs` | Arguments : (this, mesh, cfg, fields, dt, rhs) |
+| 943 | subroutine | `ns_update_pressure_al` | Arguments : (this, mesh, cfg, fields) |
+| 982 | subroutine | `ns_assemble_preconditioner_blocks` | Arguments : (this, mesh, cfg, fields, dt) |
+| 1108 | subroutine | `ns_solve_energy` | Arguments : (this, mesh, cfg, fields, dt) |
+| 1489 | function | `ns_compute_mean_nusselt_hot_wall` | Arguments : (this, mesh, cfg, fields) |
 
-### Code Source Intégral : `src/module_navier_stokes.f90` (1540 lignes)
+### Code Source Intégral : `src/module_navier_stokes.f90` (1551 lignes)
 
 ```fortran
 !===============================================================================
@@ -12838,31 +12895,34 @@ contains
         ! Terme instationnaire
         val = (rho_u / dt) * tf%u(i, j) * dvol
 
-        ! Terme convectif semi-implicite F_uu
+        ! Terme convectif semi-implicite F_uu (forme advective non-conservative a densite harmonique)
         if (cfg%enable_convection) then
-          ! Affectation et calcul numérique
           u_n = fields_old%u(i, j)
-          ! Affectation et calcul numérique
           u_n_E = fields_old%u(i + 1, j)
-          ! Affectation et calcul numérique
           u_n_W = fields_old%u(i - 1, j)
 
-          ! Affectation et calcul numérique
           v_n_N = 0.5_dp * (fields_old%v(i - 1, j + 1) + fields_old%v(i, j + 1))
-          ! Affectation et calcul numérique
           v_n_S = 0.5_dp * (fields_old%v(i - 1, j) + fields_old%v(i, j))
 
-          ! Affectation et calcul numérique
-          conv_E = 0.5_dp * (u_n + u_n_E) * 0.5_dp * (tf%u(i, j) + tf%u(i + 1, j)) * dy
-          ! Affectation et calcul numérique
-          conv_W = 0.5_dp * (u_n_W + u_n) * 0.5_dp * (tf%u(i - 1, j) + tf%u(i, j)) * dy
-          ! Affectation et calcul numérique
-          conv_N = v_n_N * 0.5_dp * (tf%u(i, j) + tf%u(i, j + 1)) * dx
-          ! Affectation et calcul numérique
-          conv_S = v_n_S * 0.5_dp * (tf%u(i, j - 1) + tf%u(i, j)) * dx
+          mu_cell_E = (2.0_dp * rho_u * fields_old%rho_u(i + 1, j)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i + 1, j))
+          mu_cell_W = (2.0_dp * rho_u * fields_old%rho_u(i - 1, j)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i - 1, j))
+          if (j < mesh%ny_local) then
+            mu_node_N = (2.0_dp * rho_u * fields_old%rho_u(i, j + 1)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i, j + 1))
+          else
+            mu_node_N = rho_u
+          end if
+          if (j > 1) then
+            mu_node_S = (2.0_dp * rho_u * fields_old%rho_u(i, j - 1)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i, j - 1))
+          else
+            mu_node_S = rho_u
+          end if
 
-          ! Affectation et calcul numérique
-          val = val + rho_u * (conv_E - conv_W + conv_N - conv_S)
+          conv_E = 0.5_dp * (u_n + u_n_E) * 0.5_dp * (tf%u(i + 1, j) - tf%u(i, j)) * dy
+          conv_W = 0.5_dp * (u_n_W + u_n) * 0.5_dp * (tf%u(i, j) - tf%u(i - 1, j)) * dy
+          conv_N = v_n_N * 0.5_dp * (tf%u(i, j + 1) - tf%u(i, j)) * dx
+          conv_S = v_n_S * 0.5_dp * (tf%u(i, j) - tf%u(i, j - 1)) * dx
+
+          val = val + (mu_cell_E * conv_E + mu_cell_W * conv_W + mu_node_N * conv_N + mu_node_S * conv_S)
         end if
 
         ! Termes visqueux implicites d'ordre 2
@@ -12946,29 +13006,32 @@ contains
 
         ! Évaluation de la condition logique
         if (cfg%enable_convection) then
-          ! Affectation et calcul numérique
           v_n = fields_old%v(i, j)
-          ! Affectation et calcul numérique
           v_n_N = fields_old%v(i, j + 1)
-          ! Affectation et calcul numérique
           v_n_S_val = fields_old%v(i, j - 1)
 
-          ! Affectation et calcul numérique
           u_n_E = 0.5_dp * (fields_old%u(i + 1, j - 1) + fields_old%u(i + 1, j))
-          ! Affectation et calcul numérique
           u_n_W = 0.5_dp * (fields_old%u(i, j - 1) + fields_old%u(i, j))
 
-          ! Affectation et calcul numérique
-          conv_E = u_n_E * 0.5_dp * (tf%v(i, j) + tf%v(i + 1, j)) * dy
-          ! Affectation et calcul numérique
-          conv_W = u_n_W * 0.5_dp * (tf%v(i - 1, j) + tf%v(i, j)) * dy
-          ! Affectation et calcul numérique
-          conv_N = 0.5_dp * (v_n + v_n_N) * 0.5_dp * (tf%v(i, j) + tf%v(i, j + 1)) * dx
-          ! Affectation et calcul numérique
-          conv_S = 0.5_dp * (v_n_S_val + v_n) * 0.5_dp * (tf%v(i, j - 1) + tf%v(i, j)) * dx
+          if (i < mesh%nx_local) then
+            mu_node_E = (2.0_dp * rho_v * fields_old%rho_v(i + 1, j)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i + 1, j))
+          else
+            mu_node_E = rho_v
+          end if
+          if (i > 1) then
+            mu_node_W = (2.0_dp * rho_v * fields_old%rho_v(i - 1, j)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i - 1, j))
+          else
+            mu_node_W = rho_v
+          end if
+          mu_cell_N = (2.0_dp * rho_v * fields_old%rho_v(i, j + 1)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i, j + 1))
+          mu_cell_S = (2.0_dp * rho_v * fields_old%rho_v(i, j - 1)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i, j - 1))
 
-          ! Affectation et calcul numérique
-          val = val + rho_v * (conv_E - conv_W + conv_N - conv_S)
+          conv_E = u_n_E * 0.5_dp * (tf%v(i + 1, j) - tf%v(i, j)) * dy
+          conv_W = u_n_W * 0.5_dp * (tf%v(i, j) - tf%v(i - 1, j)) * dy
+          conv_N = 0.5_dp * (v_n + v_n_N) * 0.5_dp * (tf%v(i, j + 1) - tf%v(i, j)) * dx
+          conv_S = 0.5_dp * (v_n_S_val + v_n) * 0.5_dp * (tf%v(i, j) - tf%v(i, j - 1)) * dx
+
+          val = val + (mu_node_E * conv_E + mu_node_W * conv_W + mu_cell_N * conv_N + mu_cell_S * conv_S)
         end if
 
         ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
@@ -13230,10 +13293,15 @@ contains
           if (trim(cfg%bc_top%profile) == "JET_INLET") then
              xc_jet = merge(cfg%bc_top%jet_center, 0.5_dp * mesh%lx, cfg%bc_top%jet_center > 0.0_dp)
              half_w_jet = merge(0.5_dp * cfg%bc_top%jet_width, 0.04_dp, cfg%bc_top%jet_width > 0.0_dp)
+             T_v = 0.0_dp
+             do p_offset = 1, mesh%nx_global
+                if (abs((real(p_offset, dp) - 0.5_dp) * mesh%dx - xc_jet) <= half_w_jet) T_v = T_v + mesh%dx
+             end do
+             if (T_v < 1.0e-12_dp) T_v = 2.0_dp * half_w_jet
              if (abs(x_center(mesh, i) - xc_jet) <= half_w_jet) then
-                v_bc = cfg%bc_top%v
+                v_bc = cfg%bc_top%v * (2.0_dp * half_w_jet) / T_v
              else
-                v_bc = -cfg%bc_top%v * (2.0_dp * half_w_jet) / (mesh%lx - 2.0_dp * half_w_jet)
+                v_bc = -cfg%bc_top%v * (2.0_dp * half_w_jet) / (mesh%lx - T_v)
              end if
           else if (cfg%bc_top%btype == BC_DIRICHLET) then
              v_bc = cfg%bc_top%v
@@ -13946,9 +14014,9 @@ Le module \texttt{src/module\_interface\_reconstruction.f90} (569 lignes) implé
 | 275 | subroutine | `reconstruct_elvira` | Arguments : (mesh, C, segments) |
 | 389 | subroutine | `reconstruct_lvira` | Arguments : (mesh, C, segments) |
 | 509 | subroutine | `reconstruct_interface` | Arguments : (method_name, mesh, C, segments) |
-| 528 | function | `evaluate_limiter` | Arguments : (limiter_name, r, c_donor, c_upwind, c_a...) |
+| 592 | function | `evaluate_limiter` | Arguments : (limiter_name, r, c_donor, c_upwind, c_a...) |
 
-### Code Source Intégral : `src/module_interface_reconstruction.f90` (569 lignes)
+### Code Source Intégral : `src/module_interface_reconstruction.f90` (633 lignes)
 
 ```fortran
 ! [Procédure/Module] module module_interface_reconstruction
@@ -14090,9 +14158,9 @@ contains
        alpha_mid = 0.5_dp * (alpha_low + alpha_high)
        a = cut_box_area(xmin, xmax, ymin, ymax, nx, ny, alpha_mid)
        if (a < target_area) then
-          alpha_low = alpha_mid
-       else
           alpha_high = alpha_mid
+       else
+          alpha_low = alpha_mid
        end if
     end do
     alpha = 0.5_dp * (alpha_low + alpha_high)
@@ -14465,6 +14533,9 @@ contains
     real(dp), intent(in) :: C(0:mesh%nx_local+1, 0:mesh%ny_local+1)
     type(interface_segment_t), intent(out) :: segments(0:mesh%nx_local+1, 0:mesh%ny_local+1)
 
+    integer :: i, j, nx, ny, i_left_src, i_right_src, j_bot_src, j_top_src
+    real(dp) :: c_val
+
     select case (trim(method_name))
     case ("SLIC")
        call reconstruct_slic(mesh, C, segments)
@@ -14475,6 +14546,67 @@ contains
     case default
        call reconstruct_plic(mesh, C, segments)
     end select
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    if (.not. mesh%is_boundary_left .and. mesh%size <= 1) then
+       i_left_src = nx
+    else
+       i_left_src = 1
+    end if
+    if (.not. mesh%is_boundary_right .and. mesh%size <= 1) then
+       i_right_src = 1
+    else
+       i_right_src = nx
+    end if
+    if (.not. mesh%is_boundary_bottom .and. mesh%size <= 1) then
+       j_bot_src = ny
+    else
+       j_bot_src = 1
+    end if
+    if (.not. mesh%is_boundary_top .and. mesh%size <= 1) then
+       j_top_src = 1
+    else
+       j_top_src = ny
+    end if
+
+    do j = 1, ny
+       c_val = C(0, j)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          segments(0, j)%nx = segments(i_left_src, j)%nx
+          segments(0, j)%ny = segments(i_left_src, j)%ny
+          segments(0, j)%alpha = compute_alpha(x_face(mesh, 0), x_face(mesh, 1), &
+                                               y_face(mesh, j), y_face(mesh, j + 1), &
+                                               segments(0, j)%nx, segments(0, j)%ny, c_val)
+       end if
+       c_val = C(nx + 1, j)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          segments(nx + 1, j)%nx = segments(i_right_src, j)%nx
+          segments(nx + 1, j)%ny = segments(i_right_src, j)%ny
+          segments(nx + 1, j)%alpha = compute_alpha(x_face(mesh, nx + 1), x_face(mesh, nx + 2), &
+                                                    y_face(mesh, j), y_face(mesh, j + 1), &
+                                                    segments(nx + 1, j)%nx, segments(nx + 1, j)%ny, c_val)
+       end if
+    end do
+
+    do i = 0, nx + 1
+       c_val = C(i, 0)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          segments(i, 0)%nx = segments(i, j_bot_src)%nx
+          segments(i, 0)%ny = segments(i, j_bot_src)%ny
+          segments(i, 0)%alpha = compute_alpha(x_face(mesh, i), x_face(mesh, i + 1), &
+                                               y_face(mesh, 0), y_face(mesh, 1), &
+                                               segments(i, 0)%nx, segments(i, 0)%ny, c_val)
+       end if
+       c_val = C(i, ny + 1)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          segments(i, ny + 1)%nx = segments(i, j_top_src)%nx
+          segments(i, ny + 1)%ny = segments(i, j_top_src)%ny
+          segments(i, ny + 1)%alpha = compute_alpha(x_face(mesh, i), x_face(mesh, i + 1), &
+                                                    y_face(mesh, ny + 1), y_face(mesh, ny + 2), &
+                                                    segments(i, ny + 1)%nx, segments(i, ny + 1)%ny, c_val)
+       end if
+    end do
   end subroutine reconstruct_interface
 
   ! [Procédure/Module] function evaluate_limiter
@@ -14547,11 +14679,11 @@ Ce module implémente la séparation directionnelle d'ordre 2 de Strang (\texttt
 | 519 | subroutine | `advect_vof_tvd` | Arguments : (fields, mesh, cfg, dt) |
 | 629 | subroutine | `advect_vof_ciam` | Arguments : (fields, mesh, cfg, dt) |
 | 807 | subroutine | `advect_vof_weymouth_yue` | Arguments : (fields, mesh, cfg, dt) |
-| 991 | subroutine | `vof_init` | Arguments : (this, cfg) |
-| 1001 | subroutine | `vof_set_ic` | Arguments : (this, mesh, fields) |
-| 1017 | subroutine | `vof_advect_step` | Arguments : (this, mesh, fields, dt) |
+| 979 | subroutine | `vof_init` | Arguments : (this, cfg) |
+| 989 | subroutine | `vof_set_ic` | Arguments : (this, mesh, fields) |
+| 1005 | subroutine | `vof_advect_step` | Arguments : (this, mesh, fields, dt) |
 
-### Code Source Intégral : `src/module_interface_vof.f90` (1034 lignes)
+### Code Source Intégral : `src/module_interface_vof.f90` (1022 lignes)
 
 ```fortran
 ! [Procédure/Module] module module_interface_vof
@@ -15236,9 +15368,9 @@ contains
           do i = 1, nx
              denom = dx - dt * (fields%u(i + 1, j) - fields%u(i, j))
              if (denom > 1.0e-12_dp) then
-                c_star(i, j) = (fields%C(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j))) / denom
+                c_star(i, j) = (fields%C(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j)) / dy) / denom
              else
-                c_star(i, j) = fields%C(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / dx
+                c_star(i, j) = fields%C(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / (dx * dy)
              end if
              c_star(i, j) = max(0.0_dp, min(1.0_dp, c_star(i, j)))
           end do
@@ -15273,9 +15405,9 @@ contains
           do i = 1, nx
              denom = dy - dt * (fields%v(i, j + 1) - fields%v(i, j))
              if (denom > 1.0e-12_dp) then
-                c_final(i, j) = (c_star(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j))) / denom
+                c_final(i, j) = (c_star(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j)) / dx) / denom
              else
-                c_final(i, j) = c_star(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / dy
+                c_final(i, j) = c_star(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / (dx * dy)
              end if
              c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
           end do
@@ -15309,9 +15441,9 @@ contains
           do i = 1, nx
              denom = dy - dt * (fields%v(i, j + 1) - fields%v(i, j))
              if (denom > 1.0e-12_dp) then
-                c_star(i, j) = (fields%C(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j))) / denom
+                c_star(i, j) = (fields%C(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j)) / dx) / denom
              else
-                c_star(i, j) = fields%C(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / dy
+                c_star(i, j) = fields%C(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / (dx * dy)
              end if
              c_star(i, j) = max(0.0_dp, min(1.0_dp, c_star(i, j)))
           end do
@@ -15346,9 +15478,9 @@ contains
           do i = 1, nx
              denom = dx - dt * (fields%u(i + 1, j) - fields%u(i, j))
              if (denom > 1.0e-12_dp) then
-                c_final(i, j) = (c_star(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j))) / denom
+                c_final(i, j) = (c_star(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j)) / dy) / denom
              else
-                c_final(i, j) = c_star(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / dx
+                c_final(i, j) = c_star(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / (dx * dy)
              end if
              c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
           end do
@@ -15368,179 +15500,167 @@ contains
 
     integer :: i, j, nx, ny
     real(dp) :: dx, dy, cell_area, u_face, v_face, delta_x, delta_y
-    real(dp) :: x_pos, y_pos, u_e, u_w, v_n, v_s, v_corner
-    real(dp) :: c_xmin, c_xmax, c_ymin, c_ymax, v_fluid, v_empty, f_out, f_in, f, s
+    real(dp) :: x_pos, y_pos, b_xmin, b_xmax, b_ymin, b_ymax
+    logical :: x_first
     type(interface_segment_t), allocatable :: segments(:, :)
-    real(dp), allocatable :: f_vol_x(:, :), f_vol_y(:, :), c_new(:, :), scale_out(:, :), scale_in(:, :)
+    real(dp), allocatable :: flux_vol(:, :), c_star(:, :), c_final(:, :), c_d(:, :)
 
     nx = mesh%nx_local
     ny = mesh%ny_local
     dx = mesh%dx
     dy = mesh%dy
     cell_area = dx * dy
+    x_first = (mod(vof_step_count, 2) == 0)
 
     allocate(segments(0:nx+1, 0:ny+1))
-    allocate(f_vol_x(0:nx+1, 0:ny+1))
-    allocate(f_vol_y(0:nx+1, 0:ny+1))
-    allocate(c_new(0:nx+1, 0:ny+1))
-    f_vol_x = 0.0_dp
-    f_vol_y = 0.0_dp
+    allocate(flux_vol(0:nx+1, 0:ny+1))
+    allocate(c_star(0:nx+1, 0:ny+1))
+    allocate(c_final(0:nx+1, 0:ny+1))
+    allocate(c_d(0:nx+1, 0:ny+1))
 
-    ! 1. Unique étape de reconstruction géométrique sur le champ C^n
-    call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
-
-    ! 2. Flux 1D sur faces X
-    do j = 1, ny
-       do i = 1, nx + 1
-          u_face = fields%u(i, j)
-          delta_x = abs(u_face) * dt
-          if (delta_x <= 1.0e-14_dp) cycle
-          x_pos = x_face(mesh, i)
-          if (u_face > 0.0_dp) then
-             f_vol_x(i, j) = cut_box_area(x_pos - delta_x, x_pos, y_face(mesh, j), y_face(mesh, j + 1), &
-                                         segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+    ! Fonction indicatrice binaire de dilatation figée au temps n (Weymouth & Yue, JCP 2010, Eq. 14)
+    do j = 0, ny + 1
+       do i = 0, nx + 1
+          if (fields%C(i, j) >= 0.5_dp) then
+             c_d(i, j) = 1.0_dp
           else
-             f_vol_x(i, j) = -cut_box_area(x_pos, x_pos + delta_x, y_face(mesh, j), y_face(mesh, j + 1), &
-                                          segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             c_d(i, j) = 0.0_dp
           end if
        end do
     end do
 
-    ! 2. Flux 1D sur faces Y
-    do j = 1, ny + 1
-       do i = 1, nx
-          v_face = fields%v(i, j)
-          delta_y = abs(v_face) * dt
-          if (delta_y <= 1.0e-14_dp) cycle
-          y_pos = y_face(mesh, j)
-          if (v_face > 0.0_dp) then
-             f_vol_y(i, j) = cut_box_area(x_face(mesh, i), x_face(mesh, i + 1), y_pos - delta_y, y_pos, &
-                                         segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
-          else
-             f_vol_y(i, j) = -cut_box_area(x_face(mesh, i), x_face(mesh, i + 1), y_pos, y_pos + delta_y, &
-                                          segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
-          end if
+    if (x_first) then
+       ! 1. Passe X (Eq. 15 Weymouth & Yue 2010)
+       call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx + 1
+             u_face = fields%u(i, j)
+             delta_x = abs(u_face) * dt
+             if (delta_x <= 1.0e-14_dp) cycle
+             x_pos = x_face(mesh, i)
+             if (u_face > 0.0_dp) then
+                b_xmin = x_pos - delta_x; b_xmax = x_pos
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+             else
+                b_xmin = x_pos; b_xmax = x_pos + delta_x
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
        end do
-    end do
 
-    ! 3. Correction multidimensionnelle des flux de coin
-    do j = 1, ny
-       do i = 1, nx
-          u_e = fields%u(i + 1, j)
-          u_w = fields%u(i, j)
-          v_n = fields%v(i, j + 1)
-          v_s = fields%v(i, j)
-
-          ! Nord-Est
-          if (u_e > 0.0_dp .and. v_n > 0.0_dp) then
-             c_xmin = x_face(mesh, i + 1) - u_e * dt; c_xmax = x_face(mesh, i + 1)
-             c_ymin = y_face(mesh, j + 1) - v_n * dt; c_ymax = y_face(mesh, j + 1)
-             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
-                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
-             f_vol_x(i + 1, j) = f_vol_x(i + 1, j) - 0.5_dp * v_corner
-             f_vol_y(i, j + 1) = f_vol_y(i, j + 1) - 0.5_dp * v_corner
-          end if
-
-          ! Nord-Ouest
-          if (u_w < 0.0_dp .and. v_n > 0.0_dp) then
-             c_xmin = x_face(mesh, i); c_xmax = x_face(mesh, i) - u_w * dt
-             c_ymin = y_face(mesh, j + 1) - v_n * dt; c_ymax = y_face(mesh, j + 1)
-             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
-                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
-             f_vol_x(i, j) = f_vol_x(i, j) + 0.5_dp * v_corner
-             f_vol_y(i, j + 1) = f_vol_y(i, j + 1) - 0.5_dp * v_corner
-          end if
-
-          ! Sud-Est
-          if (u_e > 0.0_dp .and. v_s < 0.0_dp) then
-             c_xmin = x_face(mesh, i + 1) - u_e * dt; c_xmax = x_face(mesh, i + 1)
-             c_ymin = y_face(mesh, j); c_ymax = y_face(mesh, j) - v_s * dt
-             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
-                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
-             f_vol_x(i + 1, j) = f_vol_x(i + 1, j) - 0.5_dp * v_corner
-             f_vol_y(i, j) = f_vol_y(i, j) + 0.5_dp * v_corner
-          end if
-
-          ! Sud-Ouest
-          if (u_w < 0.0_dp .and. v_s < 0.0_dp) then
-             c_xmin = x_face(mesh, i); c_xmax = x_face(mesh, i) - u_w * dt
-             c_ymin = y_face(mesh, j); c_ymax = y_face(mesh, j) - v_s * dt
-             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
-                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
-             f_vol_x(i, j) = f_vol_x(i, j) + 0.5_dp * v_corner
-             f_vol_y(i, j) = f_vol_y(i, j) + 0.5_dp * v_corner
-          end if
+       c_star = fields%C
+       do j = 1, ny
+          do i = 1, nx
+             c_star(i, j) = fields%C(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / cell_area + &
+                            c_d(i, j) * (dt / dx) * (fields%u(i + 1, j) - fields%u(i, j))
+          end do
        end do
-    end do
+       call exchange_halos_scalar(c_star, mesh)
 
-    ! 4. Limitation conservative de Weymouth & Yue garantissant 0 <= C <= 1 et conservation exacte
-    allocate(scale_out(0:nx+1, 0:ny+1))
-    allocate(scale_in(0:nx+1, 0:ny+1))
-    scale_out = 1.0_dp
-    scale_in  = 1.0_dp
-
-    do j = 1, ny
-       do i = 1, nx
-          v_fluid = fields%C(i, j) * cell_area
-          v_empty = (1.0_dp - fields%C(i, j)) * cell_area
-
-          f_out = max(0.0_dp, f_vol_x(i + 1, j)) + &
-                  max(0.0_dp, -f_vol_x(i, j)) + &
-                  max(0.0_dp, f_vol_y(i, j + 1)) + &
-                  max(0.0_dp, -f_vol_y(i, j))
-
-          f_in = max(0.0_dp, -f_vol_x(i + 1, j)) + &
-                 max(0.0_dp, f_vol_x(i, j)) + &
-                 max(0.0_dp, -f_vol_y(i, j + 1)) + &
-                 max(0.0_dp, f_vol_y(i, j))
-
-          if (f_out > v_fluid .and. f_out > 1.0e-14_dp) then
-             scale_out(i, j) = v_fluid / f_out
-          end if
-          if (f_in > v_empty .and. f_in > 1.0e-14_dp) then
-             scale_in(i, j) = v_empty / f_in
-          end if
+       ! 2. Passe Y (Eq. 16 Weymouth & Yue 2010)
+       call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny + 1
+          do i = 1, nx
+             v_face = fields%v(i, j)
+             delta_y = abs(v_face) * dt
+             if (delta_y <= 1.0e-14_dp) cycle
+             y_pos = y_face(mesh, j)
+             if (v_face > 0.0_dp) then
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos - delta_y; b_ymax = y_pos
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
+             else
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos; b_ymax = y_pos + delta_y
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
        end do
-    end do
 
-    do j = 1, ny
-       do i = 1, nx + 1
-          f = f_vol_x(i, j)
-          if (f > 0.0_dp) then
-             s = min(scale_out(i - 1, j), scale_in(i, j))
-             f_vol_x(i, j) = f * s
-          else if (f < 0.0_dp) then
-             s = min(scale_out(i, j), scale_in(i - 1, j))
-             f_vol_x(i, j) = f * s
-          end if
+       c_final = c_star
+       do j = 1, ny
+          do i = 1, nx
+             c_final(i, j) = c_star(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / cell_area + &
+                             c_d(i, j) * (dt / dy) * (fields%v(i, j + 1) - fields%v(i, j))
+             c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
+          end do
        end do
-    end do
-
-    do j = 1, ny + 1
-       do i = 1, nx
-          f = f_vol_y(i, j)
-          if (f > 0.0_dp) then
-             s = min(scale_out(i, j - 1), scale_in(i, j))
-             f_vol_y(i, j) = f * s
-          else if (f < 0.0_dp) then
-             s = min(scale_out(i, j), scale_in(i, j - 1))
-             f_vol_y(i, j) = f * s
-          end if
+    else
+       ! 1. Passe Y (Eq. 16 Weymouth & Yue 2010)
+       call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny + 1
+          do i = 1, nx
+             v_face = fields%v(i, j)
+             delta_y = abs(v_face) * dt
+             if (delta_y <= 1.0e-14_dp) cycle
+             y_pos = y_face(mesh, j)
+             if (v_face > 0.0_dp) then
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos - delta_y; b_ymax = y_pos
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
+             else
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos; b_ymax = y_pos + delta_y
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
        end do
-    end do
 
-    ! 5. Mise à jour conservative exacte
-    c_new = fields%C
-    do j = 1, ny
-       do i = 1, nx
-          c_new(i, j) = fields%C(i, j) - (1.0_dp / cell_area) * &
-                        ((f_vol_x(i + 1, j) - f_vol_x(i, j)) + (f_vol_y(i, j + 1) - f_vol_y(i, j)))
-          c_new(i, j) = max(0.0_dp, min(1.0_dp, c_new(i, j)))
+       c_star = fields%C
+       do j = 1, ny
+          do i = 1, nx
+             c_star(i, j) = fields%C(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / cell_area + &
+                            c_d(i, j) * (dt / dy) * (fields%v(i, j + 1) - fields%v(i, j))
+          end do
        end do
-    end do
+       call exchange_halos_scalar(c_star, mesh)
 
-    fields%C = c_new
-    deallocate(segments, f_vol_x, f_vol_y, c_new, scale_out, scale_in)
+       ! 2. Passe X (Eq. 15 Weymouth & Yue 2010)
+       call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx + 1
+             u_face = fields%u(i, j)
+             delta_x = abs(u_face) * dt
+             if (delta_x <= 1.0e-14_dp) cycle
+             x_pos = x_face(mesh, i)
+             if (u_face > 0.0_dp) then
+                b_xmin = x_pos - delta_x; b_xmax = x_pos
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+             else
+                b_xmin = x_pos; b_xmax = x_pos + delta_x
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
+       end do
+
+       c_final = c_star
+       do j = 1, ny
+          do i = 1, nx
+             c_final(i, j) = c_star(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / cell_area + &
+                             c_d(i, j) * (dt / dx) * (fields%u(i + 1, j) - fields%u(i, j))
+             c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
+          end do
+       end do
+    end if
+
+    fields%C = c_final
+    deallocate(segments, flux_vol, c_star, c_final, c_d)
   end subroutine advect_vof_weymouth_yue
 
   ! [Procédure/Module] subroutine vof_init
@@ -16132,12 +16252,12 @@ Le module \texttt{src/module\_simulation.f90} réalise l'intégration temporelle
 | 11 | module | `module_simulation` | Unité modulaire Fortran 2018 |
 | 28 | type dérivé | `simulation_t` | Structure de données Fortran 2018 |
 | 59 | function | `sim_init` | Arguments : (this, comm, config_file) |
-| 259 | function | `sim_compute_time_step` | Arguments : (this) |
-| 323 | subroutine | `sim_run` | Arguments : (this) |
-| 554 | subroutine | `sim_run_laplacian` | Arguments : (this) |
-| 768 | subroutine | `sim_run_vortex_advection` | Arguments : (this) |
+| 266 | function | `sim_compute_time_step` | Arguments : (this) |
+| 330 | subroutine | `sim_run` | Arguments : (this) |
+| 561 | subroutine | `sim_run_laplacian` | Arguments : (this) |
+| 775 | subroutine | `sim_run_vortex_advection` | Arguments : (this) |
 
-### Code Source Intégral : `src/module_simulation.f90` (1004 lignes)
+### Code Source Intégral : `src/module_simulation.f90` (1011 lignes)
 
 ```fortran
 !===============================================================================
@@ -16340,6 +16460,7 @@ contains
 
        call sync_u(this%mesh, this%fields%u)
        call sync_v(this%mesh, this%fields%v)
+       call apply_velocity_bc(this%fields, this%mesh, this%config, .false.)
     end if
 
     ! Initialisation du champ de vitesse pour VISCOUS_JET (Cas 3.3 Fluids 2021)
@@ -16348,6 +16469,12 @@ contains
        half_w_vj = merge(0.5_dp * this%config%ic_jet_width, 0.04_dp, this%config%ic_jet_width > 0.0_dp)
        stub_h_vj = 2.0_dp * this%mesh%dy
        v_in_vj = merge(this%config%bc_top%v, -0.6_dp, this%config%bc_top%v /= 0.0_dp)
+       y_val = 0.0_dp
+       do i = 1, this%mesh%nx_global
+          if (abs((real(i, dp) - 0.5_dp) * this%mesh%dx - x_c_vj) <= half_w_vj) y_val = y_val + this%mesh%dx
+       end do
+       if (y_val < 1.0e-12_dp) y_val = 2.0_dp * half_w_vj
+       v_in_vj = v_in_vj * (2.0_dp * half_w_vj) / y_val
 
        v_ny = this%mesh%ny_local
        if (this%mesh%is_boundary_top) v_ny = v_ny + 1

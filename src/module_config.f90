@@ -470,13 +470,27 @@ contains
     call json_get_real(buf, "solver.steady_state_tol", cfg%steady_state_tol, cfg%steady_state_tol)
 
     ! VOF parameters
+    call json_get_string(buf, "vof.advection_method", cfg%advection_method, "WEYMOUTH_YUE")
+    ! Appel de sous-programme modulaire
     call json_get_string(buf, "vof.reconstruction_method", cfg%reconstruction_method, "PLIC")
     ! Appel de sous-programme modulaire
-    call json_get_string(buf, "vof.advection_method", cfg%advection_method, "VOF_TVD")
+    call json_get_string(buf, "vof.tvd_limiter", cfg%tvd_limiter, "NONE")
     ! Appel de sous-programme modulaire
-    call json_get_string(buf, "vof.tvd_limiter", cfg%tvd_limiter, "SUPERBEE")
-    ! Appel de sous-programme modulaire
-    call json_get_real(buf, "vof.cfl_vof", cfg%cfl_vof, 0.4_dp)
+    call json_get_real(buf, "vof.cfl_vof", cfg%cfl_vof, 0.5_dp)
+
+    ! Cohérence stricte : le schéma algébrique TVD ne s'accompagne d'aucune reconstruction géométrique,
+    ! tandis que les schémas géométriques (WEYMOUTH_YUE, CIAM) n'utilisent pas de limiteur TVD.
+    if (trim(cfg%advection_method) == "VOF_TVD" .or. trim(cfg%advection_method) == "TVD") then
+       cfg%reconstruction_method = "NONE"
+       if (trim(cfg%tvd_limiter) == "NONE" .or. len_trim(cfg%tvd_limiter) == 0) then
+          cfg%tvd_limiter = "SUPERBEE"
+       end if
+    else
+       if (trim(cfg%reconstruction_method) == "NONE" .or. len_trim(cfg%reconstruction_method) == 0) then
+          cfg%reconstruction_method = "PLIC"
+       end if
+       cfg%tvd_limiter = "NONE"
+    end if
 
     ! Output
     call json_get_string(buf, "output.output_dir", cfg%output_dir, "output")

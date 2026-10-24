@@ -1350,29 +1350,37 @@ rigoureusement avec la condition initiale :
 Configurations
 JSON)}\label{muxe9thodes-numuxe9riques-vof-impluxe9mentuxe9es-et-comparuxe9es-12-configurations-json}
 
-Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre
-méthodes de reconstruction géométrique : 1. \textbf{Reconstruction
-géométrique PLIC / ELVIRA / LVIRA / SLIC} : - \textbf{PLIC (Youngs /
-Parker-Youngs)} : Normale \(\mathbf{n} = -\nabla C / \|\nabla C\|\) par
-filtre \(3\times 3\) de Parker-Youngs et inversion analytique de l'aire
-polygonale \(\alpha = f(\mathbf{n}, C)\) (Scardovelli \& Zaleski 2000).
-- \textbf{ELVIRA (Pilliod \& Puckett 2004)} : Sélection de la pente
-exacte parmi 6 candidats aux différences centrées/décentrées minimisant
-l'erreur \(L_2\) de fraction volumique sur le stencil \(3\times 3\)
-(exact pour toute droite). - \textbf{LVIRA (Puckett 1991)} :
-Optimisation non linéaire de l'angle de normale minimisant la
-fonctionnelle quadratique d'erreur sur le voisinage \(3\times 3\). -
-\textbf{SLIC (Noh \& Woodward 1976)} : Interface alignée avec les axes
-de coordonnées par direction de balayage. 2. \textbf{Schémas d'advection
-par séparation directionnelle de Strang (\(X\)-\(Y\) puis \(Y\)-\(X\))}
-: - \textbf{CIAM (Li 1995 --- \emph{Calcul d'Interface Affine par
-Morceaux})} : Transport lagrangien des segments PLIC avec correction de
-dilatation linéaire. - \textbf{Weymouth \& Yue (2010)} : Schéma
-géométrique \textbf{strictement conservatif à la précision machine}
-grâce à l'évaluation centrée du terme de dilatation
-\(C_{\text{dil}} = \text{H}(C^n - 0.5) \in \{0, 1\}\). - \textbf{TVD
-Algébrique (Superbee, Monotonized Central MC, Van Leer, Minmod)} :
-Transport algébrique haute résolution sans reconstruction géométrique.
+Le solveur COVOF 2D distingue rigoureusement deux paradigmes de capture
+d'interface VOF : 1. \textbf{Les schémas VOF géométriques
+(\texttt{WEYMOUTH\_YUE} et \texttt{CIAM}) avec reconstruction
+géométrique (\texttt{PLIC}, \texttt{ELVIRA}, \texttt{LVIRA},
+\texttt{SLIC})} : - \textbf{Weymouth \& Yue (2010)} : Schéma géométrique
+multidimensionnel \textbf{strictement conservatif à la précision
+machine}, utilisé comme schéma de référence pour tous les écoulements
+diphasiques physiques (Chapitre 7) et tous les benchmarks diphasiques à
+rapports extrêmes (\emph{Fluids} 2021). - \textbf{CIAM (Li 1995 ---
+\emph{Calcul d'Interface Affine par Morceaux})} : Transport lagrangien
+directionnel des segments reconstruits avec correction de dilatation
+linéaire. - Ces deux schémas géométriques s'accompagnent obligatoirement
+d'une méthode de reconstruction géométrique de l'interface dans chaque
+cellule mixte (\(0 < C < 1\)) : - \textbf{PLIC (Youngs / Parker-Youngs)}
+: Normale \(\mathbf{n} = -\nabla C / \|\nabla C\|\) sur stencil
+\(3\times 3\) et inversion exacte de l'aire polygonale
+\(\alpha = f(\mathbf{n}, C)\). - \textbf{ELVIRA (Pilliod \& Puckett
+2004)} : Sélection de la pente exacte parmi 6 candidats aux différences
+centrées/décentrées minimisant l'erreur \(L_2\) sur le bloc
+\(3\times 3\). - \textbf{LVIRA (Puckett 1991)} : Optimisation non
+linéaire de l'angle de normale minimisant l'erreur quadratique sur le
+voisinage \(3\times 3\). - \textbf{SLIC (Noh \& Woodward 1976)} :
+Interface alignée avec les axes de coordonnées. - Les schémas
+géométriques \textbf{n'utilisent aucun limiteur TVD}. 2. \textbf{Les
+schémas VOF algébriques (\texttt{VOF\_TVD}) sans reconstruction
+géométrique (\texttt{reconstruction\_method:\ "NONE"})} : - Transportent
+directement la fraction volumique \(C\) par des flux algébriques haute
+résolution bornés par un limiteur de pente (\textbf{Superbee},
+\textbf{MUSCL}, \textbf{Van Leer} ou \textbf{HRIC}). - Un schéma
+algébrique TVD \textbf{ne s'accompagne d'aucune reconstruction
+géométrique d'interface} (\texttt{"reconstruction\_method":\ "NONE"}).
 
 \paragraph{\texorpdfstring{Configuration JSON Complète
 (\texttt{cases/vortex\_shear.json})}{Configuration JSON Complète (cases/vortex\_shear.json)}}\label{configuration-json-compluxe8te-casesvortex_shear.json}
@@ -1402,8 +1410,8 @@ Transport algébrique haute résolution sans reconstruction géométrique.
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"NONE"}\FunctionTok{,}
     \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
@@ -1491,8 +1499,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"NONE"}\FunctionTok{,}
     \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
@@ -1577,9 +1585,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"CIAM"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"initial\_condition"}\FunctionTok{:} \FunctionTok{\{}
@@ -1663,9 +1670,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"ELVIRA"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"CIAM"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"ELVIRA"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"initial\_condition"}\FunctionTok{:} \FunctionTok{\{}
@@ -1749,9 +1755,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"LVIRA"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"CIAM"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"LVIRA"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"initial\_condition"}\FunctionTok{:} \FunctionTok{\{}
@@ -1835,9 +1840,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"SLIC"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"CIAM"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"SLIC"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"initial\_condition"}\FunctionTok{:} \FunctionTok{\{}
@@ -1921,9 +1925,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"initial\_condition"}\FunctionTok{:} \FunctionTok{\{}
@@ -2007,9 +2010,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"ELVIRA"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"ELVIRA"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"initial\_condition"}\FunctionTok{:} \FunctionTok{\{}
@@ -2093,9 +2095,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"LVIRA"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"LVIRA"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"initial\_condition"}\FunctionTok{:} \FunctionTok{\{}
@@ -2179,9 +2180,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"SLIC"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"SLIC"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"initial\_condition"}\FunctionTok{:} \FunctionTok{\{}
@@ -2265,8 +2265,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"NONE"}\FunctionTok{,}
     \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
@@ -2351,8 +2351,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"NONE"}\FunctionTok{,}
     \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"VAN\_LEER"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
@@ -2437,8 +2437,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"NONE"}\FunctionTok{,}
     \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"MUSCL"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
@@ -2523,8 +2523,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas}
     \FunctionTok{\}}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
-    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
     \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"NONE"}\FunctionTok{,}
     \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"HRIC"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
@@ -2584,20 +2584,23 @@ Fortran
 
 {\def\LTcaptype{none} % do not increment counter
 \begin{longtable}[]{@{}
-  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1250}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1250}}
-  >{\raggedright\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1250}}
-  >{\centering\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1562}}
-  >{\centering\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1562}}
-  >{\centering\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1562}}
-  >{\centering\arraybackslash}p{(\linewidth - 12\tabcolsep) * \real{0.1562}}@{}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.1111}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.1111}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.1111}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.1111}}
+  >{\centering\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.1389}}
+  >{\centering\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.1389}}
+  >{\centering\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.1389}}
+  >{\centering\arraybackslash}p{(\linewidth - 14\tabcolsep) * \real{0.1389}}@{}}
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 Configuration JSON
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
 Méthode d'Advection
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Reconstruction
+Reconstruction Géométrique
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Limiteur Algébrique
 \end{minipage} & \begin{minipage}[b]{\linewidth}\centering
 Erreur \(L_1(T)\) C++17
 \end{minipage} & \begin{minipage}[b]{\linewidth}\centering
@@ -2611,48 +2614,50 @@ Statut
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-\texttt{vortex\_shear\_ciam\_plic.json} & \textbf{CIAM} & \textbf{PLIC
-(Youngs)} & \textbf{\(6.23 \times 10^{-3}\)} &
+\texttt{vortex\_shear\_ciam\_plic.json} & \textbf{CIAM (Géométrique)} &
+\textbf{PLIC (Youngs)} & Aucun & \textbf{\(6.23 \times 10^{-3}\)} &
 \textbf{\(6.23 \times 10^{-3}\)} & \(99.96\,\%\) & \textbf{PASS} \\
-\texttt{vortex\_shear\_ciam\_elvira.json} & \textbf{CIAM} &
-\textbf{ELVIRA} & \textbf{\(6.23 \times 10^{-3}\)} &
+\texttt{vortex\_shear\_ciam\_elvira.json} & \textbf{CIAM (Géométrique)}
+& \textbf{ELVIRA} & Aucun & \textbf{\(6.23 \times 10^{-3}\)} &
 \textbf{\(6.23 \times 10^{-3}\)} & \(99.96\,\%\) & \textbf{PASS} \\
-\texttt{vortex\_shear\_ciam\_lvira.json} & \textbf{CIAM} &
-\textbf{LVIRA} & \textbf{\(6.23 \times 10^{-3}\)} &
+\texttt{vortex\_shear\_ciam\_lvira.json} & \textbf{CIAM (Géométrique)} &
+\textbf{LVIRA} & Aucun & \textbf{\(6.23 \times 10^{-3}\)} &
 \textbf{\(6.23 \times 10^{-3}\)} & \(99.96\,\%\) & \textbf{PASS} \\
-\texttt{vortex\_shear\_wy\_plic.json} & \textbf{Weymouth-Yue} &
-\textbf{PLIC (Youngs)} & \textbf{\(1.20 \times 10^{-2}\)} &
-\textbf{\(1.20 \times 10^{-2}\)} & \textbf{\(100.0000\,\%\)} &
-\textbf{PASS} \\
-\texttt{vortex\_shear\_wy\_elvira.json} & \textbf{Weymouth-Yue} &
-\textbf{ELVIRA} & \textbf{\(1.20 \times 10^{-2}\)} &
-\textbf{\(1.20 \times 10^{-2}\)} & \textbf{\(100.0000\,\%\)} &
-\textbf{PASS} \\
-\texttt{vortex\_shear\_wy\_lvira.json} & \textbf{Weymouth-Yue} &
-\textbf{LVIRA} & \textbf{\(1.20 \times 10^{-2}\)} &
-\textbf{\(1.20 \times 10^{-2}\)} & \textbf{\(100.0000\,\%\)} &
-\textbf{PASS} \\
-\texttt{vortex\_shear\_ciam\_slic.json} & \textbf{CIAM} & \textbf{SLIC}
-& \textbf{\(2.20 \times 10^{-2}\)} & \textbf{\(2.20 \times 10^{-2}\)} &
-\(99.95\,\%\) & \textbf{PASS} \\
-\texttt{vortex\_shear\_wy\_slic.json} & \textbf{Weymouth-Yue} &
-\textbf{SLIC} & \textbf{\(3.05 \times 10^{-2}\)} &
-\textbf{\(3.05 \times 10^{-2}\)} & \textbf{\(100.0000\,\%\)} &
-\textbf{PASS} \\
-\texttt{vortex\_shear.json} & \textbf{TVD} & \textbf{Superbee} &
+\texttt{vortex\_shear\_weymouth\_yue\_plic.json} & \textbf{Weymouth-Yue
+(Géométrique)} & \textbf{PLIC (Youngs)} & Aucun &
+\textbf{\(1.20 \times 10^{-2}\)} & \textbf{\(1.20 \times 10^{-2}\)} &
+\textbf{\(100.0000\,\%\)} & \textbf{PASS} \\
+\texttt{vortex\_shear\_weymouth\_yue\_elvira.json} &
+\textbf{Weymouth-Yue (Géométrique)} & \textbf{ELVIRA} & Aucun &
+\textbf{\(1.20 \times 10^{-2}\)} & \textbf{\(1.20 \times 10^{-2}\)} &
+\textbf{\(100.0000\,\%\)} & \textbf{PASS} \\
+\texttt{vortex\_shear\_weymouth\_yue\_lvira.json} & \textbf{Weymouth-Yue
+(Géométrique)} & \textbf{LVIRA} & Aucun &
+\textbf{\(1.20 \times 10^{-2}\)} & \textbf{\(1.20 \times 10^{-2}\)} &
+\textbf{\(100.0000\,\%\)} & \textbf{PASS} \\
+\texttt{vortex\_shear\_ciam\_slic.json} & \textbf{CIAM (Géométrique)} &
+\textbf{SLIC} & Aucun & \textbf{\(2.20 \times 10^{-2}\)} &
+\textbf{\(2.20 \times 10^{-2}\)} & \(99.95\,\%\) & \textbf{PASS} \\
+\texttt{vortex\_shear\_weymouth\_yue\_slic.json} & \textbf{Weymouth-Yue
+(Géométrique)} & \textbf{SLIC} & Aucun &
+\textbf{\(3.05 \times 10^{-2}\)} & \textbf{\(3.05 \times 10^{-2}\)} &
+\textbf{\(100.0000\,\%\)} & \textbf{PASS} \\
+\texttt{vortex\_shear.json} & \textbf{VOF\_TVD (Algébrique)} &
+\textbf{Aucune (\texttt{NONE})} & \textbf{Superbee} &
 \textbf{\(5.69 \times 10^{-2}\)} & \textbf{\(5.69 \times 10^{-2}\)} &
 \textbf{\(100.0000\,\%\)} & \textbf{PASS} \\
-\texttt{vortex\_shear\_tvd\_mc.json} & \textbf{TVD} & \textbf{MC} &
+\texttt{vortex\_shear\_vof\_tvd\_hric.json} & \textbf{VOF\_TVD
+(Algébrique)} & \textbf{Aucune (\texttt{NONE})} & \textbf{HRIC} &
+\textbf{\(3.66 \times 10^{-2}\)} & \textbf{\(3.66 \times 10^{-2}\)} &
+\textbf{\(100.0000\,\%\)} & \textbf{PASS} \\
+\texttt{vortex\_shear\_vof\_tvd\_muscl.json} & \textbf{VOF\_TVD
+(Algébrique)} & \textbf{Aucune (\texttt{NONE})} & \textbf{MUSCL} &
 \textbf{\(7.24 \times 10^{-2}\)} & \textbf{\(7.24 \times 10^{-2}\)} &
 \textbf{\(100.0000\,\%\)} & \textbf{PASS} \\
-\texttt{vortex\_shear\_tvd\_vanleer.json} & \textbf{TVD} & \textbf{Van
-Leer} & \textbf{\(8.19 \times 10^{-2}\)} &
-\textbf{\(8.19 \times 10^{-2}\)} & \textbf{\(100.0000\,\%\)} &
-\textbf{PASS} \\
-\texttt{vortex\_shear\_tvd\_minmod.json} & \textbf{TVD} &
-\textbf{Minmod} & \textbf{\(9.88 \times 10^{-2}\)} &
-\textbf{\(9.88 \times 10^{-2}\)} & \textbf{\(100.0000\,\%\)} &
-\textbf{PASS} \\
+\texttt{vortex\_shear\_vof\_tvd\_vanleer.json} & \textbf{VOF\_TVD
+(Algébrique)} & \textbf{Aucune (\texttt{NONE})} & \textbf{Van Leer} &
+\textbf{\(8.19 \times 10^{-2}\)} & \textbf{\(8.19 \times 10^{-2}\)} &
+\textbf{\(100.0000\,\%\)} & \textbf{PASS} \\
 \end{longtable}
 }
 
@@ -3962,6 +3967,12 @@ JSON}\label{muxe9thodes-numuxe9riques-et-paramuxe9trage-json-6}
   \textbf{Maillage} : \(N_x \times N_y = 80 \times 60\) cellules avec
   conditions d'adhérence sur les parois (\texttt{WALL}).
 \item
+  \textbf{Capture d'interface VOF géométrique} : Schéma d'advection
+  conservatif de \textbf{Weymouth \& Yue (2010)} couplé à la
+  reconstruction géométrique \textbf{PLIC}
+  (\texttt{"advection\_method":\ "WEYMOUTH\_YUE"},
+  \texttt{"reconstruction\_method":\ "PLIC"}, sans TVD).
+\item
   \textbf{Propriétés diphasiques} : Moyenne arithmétique de la masse
   volumique \(\rho(C) = C \rho_1 + (1-C)\rho_2\) et moyenne harmonique
   de la viscosité aux nœuds.
@@ -4050,6 +4061,11 @@ JSON}\label{muxe9thodes-numuxe9riques-et-paramuxe9trage-json-6}
     \DataTypeTok{"vtk\_interval"}\FunctionTok{:} \DecValTok{5}\FunctionTok{,}
     \DataTypeTok{"log\_interval"}\FunctionTok{:} \DecValTok{1}\FunctionTok{,}
     \DataTypeTok{"write\_csv\_history"}\FunctionTok{:} \KeywordTok{true}
+  \FunctionTok{\},}
+  \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
+    \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\}}
 \FunctionTok{\}}
 \end{Highlighting}
@@ -4140,20 +4156,32 @@ pression hydrostatique exact entre l'intérieur (\(r < R\)) et
 l'extérieur (\(r > R\)) de la goutte :
 \[\Delta P_{\text{exact}} = P_{\text{int}} - P_{\text{ext}} = \sigma \kappa = \frac{\sigma}{R} = \frac{1.0}{0.25} = 4.00\text{ Pa}\]
 
-\paragraph{2. Méthode Numérique CSF
-Balanced-Force}\label{muxe9thode-numuxe9rique-csf-balanced-force}
+\paragraph{2. Méthode Numérique CSF Balanced-Force et VOF Géométrique
+Weymouth-Yue +
+PLIC}\label{muxe9thode-numuxe9rique-csf-balanced-force-et-vof-guxe9omuxe9trique-weymouth-yue-plic}
 
-Dans COVOF 2D, la force capillaire volumique
-\(\mathbf{f}_\sigma = \sigma \kappa \delta_s \mathbf{n}\) est reformulée
-selon Brackbill et al.~(1992) comme proportionnelle au gradient de la
-fonction couleur lissée \(\tilde{C}\) :
-\[\mathbf{f}_\sigma = \sigma \kappa(\tilde{C}) \nabla C, \qquad \text{avec} \qquad \kappa(\tilde{C}) = -\nabla \cdot \left( \frac{\nabla \tilde{C}}{\|\nabla \tilde{C}\|} \right)\]
-Sur la grille MAC décalée, l'opérateur gradient discret \(\nabla_h C\)
-est évalué \textbf{exactement aux mêmes centres de faces} \((i-1/2, j)\)
-et \((i, j-1/2)\) que le gradient de pression \(-\nabla_h p\). Ainsi, à
-courbure constante, le gradient de pression équilibre algébriquement la
-force capillaire, réduisant drastiquement les courants parasites
-(\emph{spurious currents}).
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Capture d'interface VOF géométrique} : Schéma d'advection
+  conservatif de \textbf{Weymouth \& Yue (2010)} avec reconstruction
+  géométrique \textbf{PLIC}
+  (\texttt{"advection\_method":\ "WEYMOUTH\_YUE"},
+  \texttt{"reconstruction\_method":\ "PLIC"}, sans TVD).
+\item
+  \textbf{Force capillaire CSF Balanced-Force} : Dans COVOF 2D, la force
+  capillaire volumique
+  \(\mathbf{f}_\sigma = \sigma \kappa \delta_s \mathbf{n}\) est
+  reformulée selon Brackbill et al.~(1992) comme proportionnelle au
+  gradient de la fonction couleur lissée \(\tilde{C}\) :
+  \[\mathbf{f}_\sigma = \sigma \kappa(\tilde{C}) \nabla C, \qquad \text{avec} \qquad \kappa(\tilde{C}) = -\nabla \cdot \left( \frac{\nabla \tilde{C}}{\|\nabla \tilde{C}\|} \right)\]
+  Sur la grille MAC décalée, l'opérateur gradient discret \(\nabla_h C\)
+  est évalué \textbf{exactement aux mêmes centres de faces}
+  \((i-1/2, j)\) et \((i, j-1/2)\) que le gradient de pression
+  \(-\nabla_h p\). Ainsi, à courbure constante, le gradient de pression
+  équilibre algébriquement la force capillaire, réduisant drastiquement
+  les courants parasites (\emph{spurious currents}).
+\end{itemize}
 
 \paragraph{\texorpdfstring{Configuration JSON Complète
 (\texttt{cases/static\_droplet.json})}{Configuration JSON Complète (cases/static\_droplet.json)}}\label{configuration-json-compluxe8te-casesstatic_droplet.json}
@@ -4232,6 +4260,11 @@ force capillaire, réduisant drastiquement les courants parasites
     \DataTypeTok{"vtk\_interval"}\FunctionTok{:} \DecValTok{2}\FunctionTok{,}
     \DataTypeTok{"log\_interval"}\FunctionTok{:} \DecValTok{1}\FunctionTok{,}
     \DataTypeTok{"write\_csv\_history"}\FunctionTok{:} \KeywordTok{true}
+  \FunctionTok{\},}
+  \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
+    \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\}}
 \FunctionTok{\}}
 \end{Highlighting}
@@ -4344,6 +4377,12 @@ JSON}\label{muxe9thodes-numuxe9riques-et-paramuxe9trage-json-7}
   parois horizontales \(y=0, y=2\), glissement libre (\texttt{SLIP} /
   symétrie) sur les parois verticales \(x=0, x=1\).
 \item
+  \textbf{Capture d'interface VOF géométrique} : Advection de
+  \textbf{Weymouth \& Yue (2010)} couplée à la reconstruction
+  géométrique \textbf{PLIC}
+  (\texttt{"advection\_method":\ "WEYMOUTH\_YUE"},
+  \texttt{"reconstruction\_method":\ "PLIC"}, sans TVD).
+\item
   \textbf{Couplage Diphasique + Capillaire} : Lagrangien Augmenté
   (\(r_{al} = 1000.0\)), modèle CSF Balanced-Force, pas de temps
   \(\Delta t = 10^{-3}\text{ s}\) sur \(3000\) pas de temps
@@ -4427,6 +4466,11 @@ JSON}\label{muxe9thodes-numuxe9riques-et-paramuxe9trage-json-7}
     \DataTypeTok{"vtk\_interval"}\FunctionTok{:} \DecValTok{2}\FunctionTok{,}
     \DataTypeTok{"log\_interval"}\FunctionTok{:} \DecValTok{1}\FunctionTok{,}
     \DataTypeTok{"write\_csv\_history"}\FunctionTok{:} \KeywordTok{true}
+  \FunctionTok{\},}
+  \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
+    \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\}}
 \FunctionTok{\}}
 \end{Highlighting}
@@ -4531,9 +4575,15 @@ JSON}\label{muxe9thodes-numuxe9riques-et-paramuxe9trage-json-8}
   \textbf{Maillage} : \(N_x \times N_y = 64 \times 256\) cellules
   carrées (\(\Delta x = \Delta y = 1/64 = 0.015625\text{ m}\)).
 \item
-  \textbf{Lagrangien Augmenté} : \(r_{al} = 100.0\), solveur BiCGSTAB(2)
-  (\texttt{tol\ =\ 1e-7}), schéma VOF conservatif sans perte de symétrie
+  \textbf{Capture d'interface VOF géométrique} : Advection de
+  \textbf{Weymouth \& Yue (2010)} avec reconstruction géométrique
+  \textbf{PLIC} (\texttt{"advection\_method":\ "WEYMOUTH\_YUE"},
+  \texttt{"reconstruction\_method":\ "PLIC"}, sans TVD), préservant la
+  finesse des enroulements de Kelvin-Helmholtz et la symétrie
   gauche-droite (\(x \leftrightarrow 1-x\)).
+\item
+  \textbf{Lagrangien Augmenté} : \(r_{al} = 100.0\), solveur BiCGSTAB(2)
+  (\texttt{tol\ =\ 1e-7}).
 \end{itemize}
 
 \paragraph{\texorpdfstring{Configuration JSON Complète
@@ -4609,6 +4659,11 @@ JSON}\label{muxe9thodes-numuxe9riques-et-paramuxe9trage-json-8}
     \DataTypeTok{"vtk\_interval"}\FunctionTok{:} \DecValTok{40}\FunctionTok{,}
     \DataTypeTok{"log\_interval"}\FunctionTok{:} \DecValTok{20}\FunctionTok{,}
     \DataTypeTok{"write\_csv\_history"}\FunctionTok{:} \KeywordTok{true}
+  \FunctionTok{\},}
+  \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
+    \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
+    \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\}}
 \FunctionTok{\}}
 \end{Highlighting}
@@ -4806,9 +4861,8 @@ JSON}\label{muxe9thodes-numuxe9riques-et-paramuxe9trage-json-9}
     \DataTypeTok{"precond\_type"}\FunctionTok{:} \StringTok{"JACOBI"}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
     \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
-    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"output"}\FunctionTok{:} \FunctionTok{\{}
@@ -5046,9 +5100,8 @@ JSON}\label{muxe9thodes-numuxe9riques-et-paramuxe9trage-json-10}
     \DataTypeTok{"precond\_type"}\FunctionTok{:} \StringTok{"JACOBI"}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
     \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
-    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"output"}\FunctionTok{:} \FunctionTok{\{}
@@ -5140,9 +5193,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas-3}
     \DataTypeTok{"precond\_type"}\FunctionTok{:} \StringTok{"JACOBI"}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
     \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
-    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"output"}\FunctionTok{:} \FunctionTok{\{}
@@ -5392,9 +5444,8 @@ Augmenté}\label{muxe9thodes-numuxe9riques-condition-duxe9vacuation-compensatoir
     \DataTypeTok{"precond\_type"}\FunctionTok{:} \StringTok{"JACOBI"}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
     \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
-    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"output"}\FunctionTok{:} \FunctionTok{\{}
@@ -5488,9 +5539,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas-4}
     \DataTypeTok{"precond\_type"}\FunctionTok{:} \StringTok{"JACOBI"}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
     \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
-    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"output"}\FunctionTok{:} \FunctionTok{\{}
@@ -5581,9 +5631,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas-4}
     \DataTypeTok{"precond\_type"}\FunctionTok{:} \StringTok{"JACOBI"}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
     \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
-    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"output"}\FunctionTok{:} \FunctionTok{\{}
@@ -5674,9 +5723,8 @@ Cas}\label{variantes-json-suppluxe9mentaires-associuxe9es-uxe0-ce-cas-4}
     \DataTypeTok{"precond\_type"}\FunctionTok{:} \StringTok{"JACOBI"}
   \FunctionTok{\},}
   \DataTypeTok{"vof"}\FunctionTok{:} \FunctionTok{\{}
+    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"WEYMOUTH\_YUE"}\FunctionTok{,}
     \DataTypeTok{"reconstruction\_method"}\FunctionTok{:} \StringTok{"PLIC"}\FunctionTok{,}
-    \DataTypeTok{"advection\_method"}\FunctionTok{:} \StringTok{"VOF\_TVD"}\FunctionTok{,}
-    \DataTypeTok{"tvd\_limiter"}\FunctionTok{:} \StringTok{"SUPERBEE"}\FunctionTok{,}
     \DataTypeTok{"cfl\_vof"}\FunctionTok{:} \FloatTok{0.5}
   \FunctionTok{\},}
   \DataTypeTok{"output"}\FunctionTok{:} \FunctionTok{\{}

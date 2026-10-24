@@ -1,75 +1,75 @@
 {
-  "mode": "VORTEX_ADVECTION",
-  "mesh": {
-    "nx": 64,
-    "ny": 64,
-    "lx": 1.0,
-    "ly": 1.0
-  },
-  "physics": {
-    "enable_two_phase": true,
-    "enable_surface_tension": false,
-    "enable_convection": true,
-    "sigma": 0.0,
-    "fluid1": {
-      "rho": 1000.0,
-      "mu": 0.001
+    "mode": "VORTEX_ADVECTION",
+    "mesh": {
+        "nx": 64,
+        "ny": 64,
+        "lx": 1.0,
+        "ly": 1.0
     },
-    "fluid2": {
-      "rho": 1.0,
-      "mu": 1e-05
+    "physics": {
+        "enable_two_phase": true,
+        "enable_surface_tension": false,
+        "enable_convection": true,
+        "sigma": 0.0,
+        "fluid1": {
+            "rho": 1000.0,
+            "mu": 0.001
+        },
+        "fluid2": {
+            "rho": 1.0,
+            "mu": 1e-05
+        }
+    },
+    "vof": {
+        "advection_method": "VOF_TVD",
+        "reconstruction_method": "NONE",
+        "tvd_limiter": "VAN_LEER",
+        "cfl_vof": 0.5
+    },
+    "initial_condition": {
+        "type": "VORTEX_SHEAR",
+        "center_x": 0.5,
+        "center_y": 0.75,
+        "radius": 0.125
+    },
+    "time": {
+        "dt": 0.005,
+        "t_final": 6.0,
+        "adaptive_dt": false
+    },
+    "boundary_conditions": {
+        "left": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "right": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "bottom": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "top": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        }
+    },
+    "solver": {
+        "type": "AUGMENTED_LAGRANGIAN",
+        "tol": 1e-07,
+        "max_iter": 500,
+        "r_al": 500.0
+    },
+    "output": {
+        "output_dir": "output_vortex_shear_vof_tvd_vanleer",
+        "case_name": "vortex",
+        "vtk_interval": 120,
+        "log_interval": 100,
+        "write_csv_history": true
     }
-  },
-  "vof": {
-    "reconstruction_method": "PLIC",
-    "advection_method": "VOF_TVD",
-    "tvd_limiter": "VAN_LEER",
-    "cfl_vof": 0.5
-  },
-  "initial_condition": {
-    "type": "VORTEX_SHEAR",
-    "center_x": 0.5,
-    "center_y": 0.75,
-    "radius": 0.125
-  },
-  "time": {
-    "dt": 0.005,
-    "t_final": 6.0,
-    "adaptive_dt": false
-  },
-  "boundary_conditions": {
-    "left": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
-    },
-    "right": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
-    },
-    "bottom": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
-    },
-    "top": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
-    }
-  },
-  "solver": {
-    "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1e-07,
-    "max_iter": 500,
-    "r_al": 500.0
-  },
-  "output": {
-    "output_dir": "output_vortex_shear_vof_tvd_vanleer",
-    "case_name": "vortex",
-    "vtk_interval": 120,
-    "log_interval": 100,
-    "write_csv_history": true
-  }
 }

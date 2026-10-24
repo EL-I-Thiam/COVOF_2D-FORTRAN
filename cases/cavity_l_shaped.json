@@ -1,73 +1,73 @@
 {
-  "mode": "NAVIER_STOKES",
-  "mesh": {
-    "nx": 64,
-    "ny": 64,
-    "lx": 1.0,
-    "ly": 1.0
-  },
-  "physics": {
-    "enable_two_phase": false,
-    "enable_convection": true,
-    "gx": 0.0,
-    "gy": 0.0,
-    "fluid1": {
-      "rho": 1.0,
-      "mu": 0.001
-    }
-  },
-  "obstacles": [
-    {
-      "type": "BOX",
-      "x0": 0.0,
-      "y0": 0.0,
-      "x1": 0.5,
-      "y1": 0.5,
-      "permeability": 1e-14
-    }
-  ],
-  "time": {
-    "dt": 0.01,
-    "t_final": 8.0,
-    "adaptive_dt": false
-  },
-  "boundary_conditions": {
-    "left": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
+    "mode": "NAVIER_STOKES",
+    "mesh": {
+        "nx": 64,
+        "ny": 64,
+        "lx": 1.0,
+        "ly": 1.0
     },
-    "right": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
+    "physics": {
+        "enable_two_phase": false,
+        "enable_convection": true,
+        "gx": 0.0,
+        "gy": 0.0,
+        "fluid1": {
+            "rho": 1.0,
+            "mu": 0.001
+        }
     },
-    "bottom": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
+    "obstacles": [
+        {
+            "type": "BOX",
+            "x0": 0.0,
+            "y0": 0.0,
+            "x1": 0.5,
+            "y1": 0.5,
+            "permeability": 1e-14
+        }
+    ],
+    "time": {
+        "dt": 0.01,
+        "t_final": 8.0,
+        "adaptive_dt": false
     },
-    "top": {
-      "type": "DIRICHLET",
-      "u": 1.0,
-      "v": 0.0
+    "boundary_conditions": {
+        "left": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "right": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "bottom": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "top": {
+            "type": "DIRICHLET",
+            "u": 1.0,
+            "v": 0.0
+        }
+    },
+    "solver": {
+        "type": "AUGMENTED_LAGRANGIAN",
+        "tol": 1e-06,
+        "max_iter": 400,
+        "r_al": 100.0,
+        "uzawa_iter": 1,
+        "use_precond": true,
+        "precond_type": "JACOBI"
+    },
+    "steady_state_tol": 0.0001,
+    "output": {
+        "output_dir": "output_cavity_l",
+        "case_name": "cavity_l",
+        "vtk_interval": 50,
+        "log_interval": 20,
+        "write_csv_history": true
     }
-  },
-  "solver": {
-    "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1e-06,
-    "max_iter": 400,
-    "r_al": 100.0,
-    "uzawa_iter": 1,
-    "use_precond": true,
-    "precond_type": "JACOBI"
-  },
-  "steady_state_tol": 0.0001,
-  "output": {
-    "output_dir": "output_cavity_l",
-    "case_name": "cavity_l",
-    "vtk_interval": 50,
-    "log_interval": 20,
-    "write_csv_history": true
-  }
 }

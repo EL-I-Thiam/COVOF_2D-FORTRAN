@@ -680,9 +680,9 @@ contains
           do i = 1, nx
              denom = dx - dt * (fields%u(i + 1, j) - fields%u(i, j))
              if (denom > 1.0e-12_dp) then
-                c_star(i, j) = (fields%C(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j))) / denom
+                c_star(i, j) = (fields%C(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j)) / dy) / denom
              else
-                c_star(i, j) = fields%C(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / dx
+                c_star(i, j) = fields%C(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / (dx * dy)
              end if
              c_star(i, j) = max(0.0_dp, min(1.0_dp, c_star(i, j)))
           end do
@@ -717,9 +717,9 @@ contains
           do i = 1, nx
              denom = dy - dt * (fields%v(i, j + 1) - fields%v(i, j))
              if (denom > 1.0e-12_dp) then
-                c_final(i, j) = (c_star(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j))) / denom
+                c_final(i, j) = (c_star(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j)) / dx) / denom
              else
-                c_final(i, j) = c_star(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / dy
+                c_final(i, j) = c_star(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / (dx * dy)
              end if
              c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
           end do
@@ -753,9 +753,9 @@ contains
           do i = 1, nx
              denom = dy - dt * (fields%v(i, j + 1) - fields%v(i, j))
              if (denom > 1.0e-12_dp) then
-                c_star(i, j) = (fields%C(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j))) / denom
+                c_star(i, j) = (fields%C(i, j) * dy - (flux_vol(i, j + 1) - flux_vol(i, j)) / dx) / denom
              else
-                c_star(i, j) = fields%C(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / dy
+                c_star(i, j) = fields%C(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / (dx * dy)
              end if
              c_star(i, j) = max(0.0_dp, min(1.0_dp, c_star(i, j)))
           end do
@@ -790,9 +790,9 @@ contains
           do i = 1, nx
              denom = dx - dt * (fields%u(i + 1, j) - fields%u(i, j))
              if (denom > 1.0e-12_dp) then
-                c_final(i, j) = (c_star(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j))) / denom
+                c_final(i, j) = (c_star(i, j) * dx - (flux_vol(i + 1, j) - flux_vol(i, j)) / dy) / denom
              else
-                c_final(i, j) = c_star(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / dx
+                c_final(i, j) = c_star(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / (dx * dy)
              end if
              c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
           end do
@@ -812,179 +812,167 @@ contains
 
     integer :: i, j, nx, ny
     real(dp) :: dx, dy, cell_area, u_face, v_face, delta_x, delta_y
-    real(dp) :: x_pos, y_pos, u_e, u_w, v_n, v_s, v_corner
-    real(dp) :: c_xmin, c_xmax, c_ymin, c_ymax, v_fluid, v_empty, f_out, f_in, f, s
+    real(dp) :: x_pos, y_pos, b_xmin, b_xmax, b_ymin, b_ymax
+    logical :: x_first
     type(interface_segment_t), allocatable :: segments(:, :)
-    real(dp), allocatable :: f_vol_x(:, :), f_vol_y(:, :), c_new(:, :), scale_out(:, :), scale_in(:, :)
+    real(dp), allocatable :: flux_vol(:, :), c_star(:, :), c_final(:, :), c_d(:, :)
 
     nx = mesh%nx_local
     ny = mesh%ny_local
     dx = mesh%dx
     dy = mesh%dy
     cell_area = dx * dy
+    x_first = (mod(vof_step_count, 2) == 0)
 
     allocate(segments(0:nx+1, 0:ny+1))
-    allocate(f_vol_x(0:nx+1, 0:ny+1))
-    allocate(f_vol_y(0:nx+1, 0:ny+1))
-    allocate(c_new(0:nx+1, 0:ny+1))
-    f_vol_x = 0.0_dp
-    f_vol_y = 0.0_dp
+    allocate(flux_vol(0:nx+1, 0:ny+1))
+    allocate(c_star(0:nx+1, 0:ny+1))
+    allocate(c_final(0:nx+1, 0:ny+1))
+    allocate(c_d(0:nx+1, 0:ny+1))
 
-    ! 1. Unique étape de reconstruction géométrique sur le champ C^n
-    call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
-
-    ! 2. Flux 1D sur faces X
-    do j = 1, ny
-       do i = 1, nx + 1
-          u_face = fields%u(i, j)
-          delta_x = abs(u_face) * dt
-          if (delta_x <= 1.0e-14_dp) cycle
-          x_pos = x_face(mesh, i)
-          if (u_face > 0.0_dp) then
-             f_vol_x(i, j) = cut_box_area(x_pos - delta_x, x_pos, y_face(mesh, j), y_face(mesh, j + 1), &
-                                         segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+    ! Fonction indicatrice binaire de dilatation figée au temps n (Weymouth & Yue, JCP 2010, Eq. 14)
+    do j = 0, ny + 1
+       do i = 0, nx + 1
+          if (fields%C(i, j) >= 0.5_dp) then
+             c_d(i, j) = 1.0_dp
           else
-             f_vol_x(i, j) = -cut_box_area(x_pos, x_pos + delta_x, y_face(mesh, j), y_face(mesh, j + 1), &
-                                          segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             c_d(i, j) = 0.0_dp
           end if
        end do
     end do
 
-    ! 2. Flux 1D sur faces Y
-    do j = 1, ny + 1
-       do i = 1, nx
-          v_face = fields%v(i, j)
-          delta_y = abs(v_face) * dt
-          if (delta_y <= 1.0e-14_dp) cycle
-          y_pos = y_face(mesh, j)
-          if (v_face > 0.0_dp) then
-             f_vol_y(i, j) = cut_box_area(x_face(mesh, i), x_face(mesh, i + 1), y_pos - delta_y, y_pos, &
-                                         segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
-          else
-             f_vol_y(i, j) = -cut_box_area(x_face(mesh, i), x_face(mesh, i + 1), y_pos, y_pos + delta_y, &
-                                          segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
-          end if
+    if (x_first) then
+       ! 1. Passe X (Eq. 15 Weymouth & Yue 2010)
+       call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx + 1
+             u_face = fields%u(i, j)
+             delta_x = abs(u_face) * dt
+             if (delta_x <= 1.0e-14_dp) cycle
+             x_pos = x_face(mesh, i)
+             if (u_face > 0.0_dp) then
+                b_xmin = x_pos - delta_x; b_xmax = x_pos
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+             else
+                b_xmin = x_pos; b_xmax = x_pos + delta_x
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
        end do
-    end do
 
-    ! 3. Correction multidimensionnelle des flux de coin
-    do j = 1, ny
-       do i = 1, nx
-          u_e = fields%u(i + 1, j)
-          u_w = fields%u(i, j)
-          v_n = fields%v(i, j + 1)
-          v_s = fields%v(i, j)
-
-          ! Nord-Est
-          if (u_e > 0.0_dp .and. v_n > 0.0_dp) then
-             c_xmin = x_face(mesh, i + 1) - u_e * dt; c_xmax = x_face(mesh, i + 1)
-             c_ymin = y_face(mesh, j + 1) - v_n * dt; c_ymax = y_face(mesh, j + 1)
-             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
-                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
-             f_vol_x(i + 1, j) = f_vol_x(i + 1, j) - 0.5_dp * v_corner
-             f_vol_y(i, j + 1) = f_vol_y(i, j + 1) - 0.5_dp * v_corner
-          end if
-
-          ! Nord-Ouest
-          if (u_w < 0.0_dp .and. v_n > 0.0_dp) then
-             c_xmin = x_face(mesh, i); c_xmax = x_face(mesh, i) - u_w * dt
-             c_ymin = y_face(mesh, j + 1) - v_n * dt; c_ymax = y_face(mesh, j + 1)
-             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
-                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
-             f_vol_x(i, j) = f_vol_x(i, j) + 0.5_dp * v_corner
-             f_vol_y(i, j + 1) = f_vol_y(i, j + 1) - 0.5_dp * v_corner
-          end if
-
-          ! Sud-Est
-          if (u_e > 0.0_dp .and. v_s < 0.0_dp) then
-             c_xmin = x_face(mesh, i + 1) - u_e * dt; c_xmax = x_face(mesh, i + 1)
-             c_ymin = y_face(mesh, j); c_ymax = y_face(mesh, j) - v_s * dt
-             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
-                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
-             f_vol_x(i + 1, j) = f_vol_x(i + 1, j) - 0.5_dp * v_corner
-             f_vol_y(i, j) = f_vol_y(i, j) + 0.5_dp * v_corner
-          end if
-
-          ! Sud-Ouest
-          if (u_w < 0.0_dp .and. v_s < 0.0_dp) then
-             c_xmin = x_face(mesh, i); c_xmax = x_face(mesh, i) - u_w * dt
-             c_ymin = y_face(mesh, j); c_ymax = y_face(mesh, j) - v_s * dt
-             v_corner = cut_box_area(c_xmin, c_xmax, c_ymin, c_ymax, &
-                                     segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
-             f_vol_x(i, j) = f_vol_x(i, j) + 0.5_dp * v_corner
-             f_vol_y(i, j) = f_vol_y(i, j) + 0.5_dp * v_corner
-          end if
+       c_star = fields%C
+       do j = 1, ny
+          do i = 1, nx
+             c_star(i, j) = fields%C(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / cell_area + &
+                            c_d(i, j) * (dt / dx) * (fields%u(i + 1, j) - fields%u(i, j))
+          end do
        end do
-    end do
+       call exchange_halos_scalar(c_star, mesh)
 
-    ! 4. Limitation conservative de Weymouth & Yue garantissant 0 <= C <= 1 et conservation exacte
-    allocate(scale_out(0:nx+1, 0:ny+1))
-    allocate(scale_in(0:nx+1, 0:ny+1))
-    scale_out = 1.0_dp
-    scale_in  = 1.0_dp
-
-    do j = 1, ny
-       do i = 1, nx
-          v_fluid = fields%C(i, j) * cell_area
-          v_empty = (1.0_dp - fields%C(i, j)) * cell_area
-
-          f_out = max(0.0_dp, f_vol_x(i + 1, j)) + &
-                  max(0.0_dp, -f_vol_x(i, j)) + &
-                  max(0.0_dp, f_vol_y(i, j + 1)) + &
-                  max(0.0_dp, -f_vol_y(i, j))
-
-          f_in = max(0.0_dp, -f_vol_x(i + 1, j)) + &
-                 max(0.0_dp, f_vol_x(i, j)) + &
-                 max(0.0_dp, -f_vol_y(i, j + 1)) + &
-                 max(0.0_dp, f_vol_y(i, j))
-
-          if (f_out > v_fluid .and. f_out > 1.0e-14_dp) then
-             scale_out(i, j) = v_fluid / f_out
-          end if
-          if (f_in > v_empty .and. f_in > 1.0e-14_dp) then
-             scale_in(i, j) = v_empty / f_in
-          end if
+       ! 2. Passe Y (Eq. 16 Weymouth & Yue 2010)
+       call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny + 1
+          do i = 1, nx
+             v_face = fields%v(i, j)
+             delta_y = abs(v_face) * dt
+             if (delta_y <= 1.0e-14_dp) cycle
+             y_pos = y_face(mesh, j)
+             if (v_face > 0.0_dp) then
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos - delta_y; b_ymax = y_pos
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
+             else
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos; b_ymax = y_pos + delta_y
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
        end do
-    end do
 
-    do j = 1, ny
-       do i = 1, nx + 1
-          f = f_vol_x(i, j)
-          if (f > 0.0_dp) then
-             s = min(scale_out(i - 1, j), scale_in(i, j))
-             f_vol_x(i, j) = f * s
-          else if (f < 0.0_dp) then
-             s = min(scale_out(i, j), scale_in(i - 1, j))
-             f_vol_x(i, j) = f * s
-          end if
+       c_final = c_star
+       do j = 1, ny
+          do i = 1, nx
+             c_final(i, j) = c_star(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / cell_area + &
+                             c_d(i, j) * (dt / dy) * (fields%v(i, j + 1) - fields%v(i, j))
+             c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
+          end do
        end do
-    end do
-
-    do j = 1, ny + 1
-       do i = 1, nx
-          f = f_vol_y(i, j)
-          if (f > 0.0_dp) then
-             s = min(scale_out(i, j - 1), scale_in(i, j))
-             f_vol_y(i, j) = f * s
-          else if (f < 0.0_dp) then
-             s = min(scale_out(i, j), scale_in(i, j - 1))
-             f_vol_y(i, j) = f * s
-          end if
+    else
+       ! 1. Passe Y (Eq. 16 Weymouth & Yue 2010)
+       call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny + 1
+          do i = 1, nx
+             v_face = fields%v(i, j)
+             delta_y = abs(v_face) * dt
+             if (delta_y <= 1.0e-14_dp) cycle
+             y_pos = y_face(mesh, j)
+             if (v_face > 0.0_dp) then
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos - delta_y; b_ymax = y_pos
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i, j-1)%nx, segments(i, j-1)%ny, segments(i, j-1)%alpha)
+             else
+                b_xmin = x_face(mesh, i); b_xmax = x_face(mesh, i + 1)
+                b_ymin = y_pos; b_ymax = y_pos + delta_y
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
        end do
-    end do
 
-    ! 5. Mise à jour conservative exacte
-    c_new = fields%C
-    do j = 1, ny
-       do i = 1, nx
-          c_new(i, j) = fields%C(i, j) - (1.0_dp / cell_area) * &
-                        ((f_vol_x(i + 1, j) - f_vol_x(i, j)) + (f_vol_y(i, j + 1) - f_vol_y(i, j)))
-          c_new(i, j) = max(0.0_dp, min(1.0_dp, c_new(i, j)))
+       c_star = fields%C
+       do j = 1, ny
+          do i = 1, nx
+             c_star(i, j) = fields%C(i, j) - (flux_vol(i, j + 1) - flux_vol(i, j)) / cell_area + &
+                            c_d(i, j) * (dt / dy) * (fields%v(i, j + 1) - fields%v(i, j))
+          end do
        end do
-    end do
+       call exchange_halos_scalar(c_star, mesh)
 
-    fields%C = c_new
-    deallocate(segments, f_vol_x, f_vol_y, c_new, scale_out, scale_in)
+       ! 2. Passe X (Eq. 15 Weymouth & Yue 2010)
+       call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       flux_vol = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx + 1
+             u_face = fields%u(i, j)
+             delta_x = abs(u_face) * dt
+             if (delta_x <= 1.0e-14_dp) cycle
+             x_pos = x_face(mesh, i)
+             if (u_face > 0.0_dp) then
+                b_xmin = x_pos - delta_x; b_xmax = x_pos
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                             segments(i-1, j)%nx, segments(i-1, j)%ny, segments(i-1, j)%alpha)
+             else
+                b_xmin = x_pos; b_xmax = x_pos + delta_x
+                b_ymin = y_face(mesh, j); b_ymax = y_face(mesh, j + 1)
+                flux_vol(i, j) = -cut_box_area(b_xmin, b_xmax, b_ymin, b_ymax, &
+                                              segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha)
+             end if
+          end do
+       end do
+
+       c_final = c_star
+       do j = 1, ny
+          do i = 1, nx
+             c_final(i, j) = c_star(i, j) - (flux_vol(i + 1, j) - flux_vol(i, j)) / cell_area + &
+                             c_d(i, j) * (dt / dx) * (fields%u(i + 1, j) - fields%u(i, j))
+             c_final(i, j) = max(0.0_dp, min(1.0_dp, c_final(i, j)))
+          end do
+       end do
+    end if
+
+    fields%C = c_final
+    deallocate(segments, flux_vol, c_star, c_final, c_d)
   end subroutine advect_vof_weymouth_yue
 
   ! [Procédure/Module] subroutine vof_init

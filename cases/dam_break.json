@@ -1,75 +1,80 @@
 {
-  "mesh": {
-    "nx": 60,
-    "ny": 30,
-    "lx": 2.0,
-    "ly": 1.0
-  },
-  "physics": {
-    "enable_two_phase": true,
-    "enable_surface_tension": false,
-    "enable_convection": true,
-    "sigma": 0.0,
-    "gx": 0.0,
-    "gy": -9.81,
-    "fluid1": {
-      "rho": 1000.0,
-      "mu": 0.001
+    "mesh": {
+        "nx": 60,
+        "ny": 30,
+        "lx": 2.0,
+        "ly": 1.0
     },
-    "fluid2": {
-      "rho": 1.0,
-      "mu": 1.8e-05
+    "physics": {
+        "enable_two_phase": true,
+        "enable_surface_tension": false,
+        "enable_convection": true,
+        "sigma": 0.0,
+        "gx": 0.0,
+        "gy": -9.81,
+        "fluid1": {
+            "rho": 1000.0,
+            "mu": 0.001
+        },
+        "fluid2": {
+            "rho": 1.0,
+            "mu": 1.8e-05
+        }
+    },
+    "time": {
+        "dt": 0.002,
+        "t_final": 0.1,
+        "cfl_max": 0.4,
+        "adaptive_dt": false
+    },
+    "boundary_conditions": {
+        "left": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "right": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "bottom": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "top": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        }
+    },
+    "initial_condition": {
+        "type": "DAM_BREAK",
+        "box_x0": 0.0,
+        "box_y0": 0.0,
+        "box_x1": 0.5,
+        "box_y1": 0.5
+    },
+    "solver": {
+        "type": "AUGMENTED_LAGRANGIAN",
+        "tol": 1e-05,
+        "max_iter": 300,
+        "r_al": 1000.0,
+        "uzawa_iter": 1,
+        "use_precond": true,
+        "precond_type": "JACOBI"
+    },
+    "output": {
+        "output_dir": "output_dam_break",
+        "case_name": "dam_break",
+        "vtk_interval": 5,
+        "log_interval": 1,
+        "write_csv_history": true
+    },
+    "vof": {
+        "advection_method": "WEYMOUTH_YUE",
+        "reconstruction_method": "PLIC",
+        "cfl_vof": 0.5
     }
-  },
-  "time": {
-    "dt": 0.002,
-    "t_final": 0.1,
-    "cfl_max": 0.4,
-    "adaptive_dt": false
-  },
-  "boundary_conditions": {
-    "left": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
-    },
-    "right": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
-    },
-    "bottom": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
-    },
-    "top": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0
-    }
-  },
-  "initial_condition": {
-    "type": "DAM_BREAK",
-    "box_x0": 0.0,
-    "box_y0": 0.0,
-    "box_x1": 0.5,
-    "box_y1": 0.5
-  },
-  "solver": {
-    "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1e-05,
-    "max_iter": 300,
-    "r_al": 1000.0,
-    "uzawa_iter": 1,
-    "use_precond": true,
-    "precond_type": "JACOBI"
-  },
-  "output": {
-    "output_dir": "output_dam_break",
-    "case_name": "dam_break",
-    "vtk_interval": 5,
-    "log_interval": 1,
-    "write_csv_history": true
-  }
 }

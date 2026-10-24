@@ -137,9 +137,9 @@ contains
        alpha_mid = 0.5_dp * (alpha_low + alpha_high)
        a = cut_box_area(xmin, xmax, ymin, ymax, nx, ny, alpha_mid)
        if (a < target_area) then
-          alpha_low = alpha_mid
-       else
           alpha_high = alpha_mid
+       else
+          alpha_low = alpha_mid
        end if
     end do
     alpha = 0.5_dp * (alpha_low + alpha_high)
@@ -512,6 +512,9 @@ contains
     real(dp), intent(in) :: C(0:mesh%nx_local+1, 0:mesh%ny_local+1)
     type(interface_segment_t), intent(out) :: segments(0:mesh%nx_local+1, 0:mesh%ny_local+1)
 
+    integer :: i, j, nx, ny, i_left_src, i_right_src, j_bot_src, j_top_src
+    real(dp) :: c_val
+
     select case (trim(method_name))
     case ("SLIC")
        call reconstruct_slic(mesh, C, segments)
@@ -522,6 +525,67 @@ contains
     case default
        call reconstruct_plic(mesh, C, segments)
     end select
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    if (.not. mesh%is_boundary_left .and. mesh%size <= 1) then
+       i_left_src = nx
+    else
+       i_left_src = 1
+    end if
+    if (.not. mesh%is_boundary_right .and. mesh%size <= 1) then
+       i_right_src = 1
+    else
+       i_right_src = nx
+    end if
+    if (.not. mesh%is_boundary_bottom .and. mesh%size <= 1) then
+       j_bot_src = ny
+    else
+       j_bot_src = 1
+    end if
+    if (.not. mesh%is_boundary_top .and. mesh%size <= 1) then
+       j_top_src = 1
+    else
+       j_top_src = ny
+    end if
+
+    do j = 1, ny
+       c_val = C(0, j)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          segments(0, j)%nx = segments(i_left_src, j)%nx
+          segments(0, j)%ny = segments(i_left_src, j)%ny
+          segments(0, j)%alpha = compute_alpha(x_face(mesh, 0), x_face(mesh, 1), &
+                                               y_face(mesh, j), y_face(mesh, j + 1), &
+                                               segments(0, j)%nx, segments(0, j)%ny, c_val)
+       end if
+       c_val = C(nx + 1, j)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          segments(nx + 1, j)%nx = segments(i_right_src, j)%nx
+          segments(nx + 1, j)%ny = segments(i_right_src, j)%ny
+          segments(nx + 1, j)%alpha = compute_alpha(x_face(mesh, nx + 1), x_face(mesh, nx + 2), &
+                                                    y_face(mesh, j), y_face(mesh, j + 1), &
+                                                    segments(nx + 1, j)%nx, segments(nx + 1, j)%ny, c_val)
+       end if
+    end do
+
+    do i = 0, nx + 1
+       c_val = C(i, 0)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          segments(i, 0)%nx = segments(i, j_bot_src)%nx
+          segments(i, 0)%ny = segments(i, j_bot_src)%ny
+          segments(i, 0)%alpha = compute_alpha(x_face(mesh, i), x_face(mesh, i + 1), &
+                                               y_face(mesh, 0), y_face(mesh, 1), &
+                                               segments(i, 0)%nx, segments(i, 0)%ny, c_val)
+       end if
+       c_val = C(i, ny + 1)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          segments(i, ny + 1)%nx = segments(i, j_top_src)%nx
+          segments(i, ny + 1)%ny = segments(i, j_top_src)%ny
+          segments(i, ny + 1)%alpha = compute_alpha(x_face(mesh, i), x_face(mesh, i + 1), &
+                                                    y_face(mesh, ny + 1), y_face(mesh, ny + 2), &
+                                                    segments(i, ny + 1)%nx, segments(i, ny + 1)%ny, c_val)
+       end if
+    end do
   end subroutine reconstruct_interface
 
   ! [Procédure/Module] function evaluate_limiter

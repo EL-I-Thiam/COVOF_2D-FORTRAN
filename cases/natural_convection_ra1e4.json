@@ -1,77 +1,77 @@
 {
-  "mode": "NAVIER_STOKES",
-  "mesh": {
-    "nx": 64,
-    "ny": 64,
-    "lx": 1.0,
-    "ly": 1.0
-  },
-  "physics": {
-    "enable_two_phase": false,
-    "enable_convection": true,
-    "enable_energy": true,
-    "Ra": 10000.0,
-    "Pr": 0.71,
-    "T_ref": 0.5,
-    "beta": 1.0,
-    "gx": 0.0,
-    "gy": 1.0,
-    "fluid1": {
-      "rho": 1.0,
-      "mu": 0.00842614977,
-      "Cp": 1.0,
-      "k_thermal": 0.01186781658,
-      "beta": 1.0
+    "mode": "NAVIER_STOKES",
+    "mesh": {
+        "nx": 64,
+        "ny": 64,
+        "lx": 1.0,
+        "ly": 1.0
+    },
+    "physics": {
+        "enable_two_phase": false,
+        "enable_convection": true,
+        "enable_energy": true,
+        "Ra": 10000.0,
+        "Pr": 0.71,
+        "T_ref": 0.5,
+        "beta": 1.0,
+        "gx": 0.0,
+        "gy": 1.0,
+        "fluid1": {
+            "rho": 1.0,
+            "mu": 0.00842614977,
+            "Cp": 1.0,
+            "k_thermal": 0.01186781658,
+            "beta": 1.0
+        }
+    },
+    "time": {
+        "dt": 0.005,
+        "t_final": 5.0,
+        "adaptive_dt": false
+    },
+    "boundary_conditions": {
+        "left": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0,
+            "T_type": "DIRICHLET",
+            "T": 1.0
+        },
+        "right": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0,
+            "T_type": "DIRICHLET",
+            "T": 0.0
+        },
+        "bottom": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0,
+            "T_type": "NEUMANN"
+        },
+        "top": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0,
+            "T_type": "NEUMANN"
+        }
+    },
+    "solver": {
+        "type": "AUGMENTED_LAGRANGIAN",
+        "tol": 1e-07,
+        "max_iter": 400,
+        "r_al": 100.0,
+        "uzawa_iter": 1,
+        "use_precond": true,
+        "precond_type": "JACOBI"
+    },
+    "steady_state_tol": 1e-05,
+    "output": {
+        "output_dir": "output_natural_convection_ra1e4",
+        "case_name": "nat_conv_ra1e4",
+        "vtk_interval": 50,
+        "log_interval": 20,
+        "write_csv_history": true
     }
-  },
-  "time": {
-    "dt": 0.005,
-    "t_final": 5.0,
-    "adaptive_dt": false
-  },
-  "boundary_conditions": {
-    "left": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0,
-      "T_type": "DIRICHLET",
-      "T": 1.0
-    },
-    "right": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0,
-      "T_type": "DIRICHLET",
-      "T": 0.0
-    },
-    "bottom": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0,
-      "T_type": "NEUMANN"
-    },
-    "top": {
-      "type": "DIRICHLET",
-      "u": 0.0,
-      "v": 0.0,
-      "T_type": "NEUMANN"
-    }
-  },
-  "solver": {
-    "type": "AUGMENTED_LAGRANGIAN",
-    "tol": 1e-07,
-    "max_iter": 400,
-    "r_al": 100.0,
-    "uzawa_iter": 1,
-    "use_precond": true,
-    "precond_type": "JACOBI"
-  },
-  "steady_state_tol": 1e-05,
-  "output": {
-    "output_dir": "output_natural_convection_ra1e4",
-    "case_name": "nat_conv_ra1e4",
-    "vtk_interval": 50,
-    "log_interval": 20,
-    "write_csv_history": true
-  }
 }

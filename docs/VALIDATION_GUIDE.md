@@ -594,16 +594,19 @@ $$C_{\text{exact}}(x, y, T) = C(x, y, 0), \qquad E_{L_1} = \frac{1}{\Omega} \sum
 
 
 #### 3. Méthodes Numériques VOF Implémentées et Comparées (12 Configurations JSON)
-Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthodes de reconstruction géométrique :
-1. **Reconstruction géométrique PLIC / ELVIRA / LVIRA / SLIC** :
-   - **PLIC (Youngs / Parker-Youngs)** : Normale $\mathbf{n} = -\nabla C / \|\nabla C\|$ par filtre $3\times 3$ de Parker-Youngs et inversion analytique de l'aire polygonale $\alpha = f(\mathbf{n}, C)$ (Scardovelli & Zaleski 2000).
-   - **ELVIRA (Pilliod & Puckett 2004)** : Sélection de la pente exacte parmi 6 candidats aux différences centrées/décentrées minimisant l'erreur $L_2$ de fraction volumique sur le stencil $3\times 3$ (exact pour toute droite).
-   - **LVIRA (Puckett 1991)** : Optimisation non linéaire de l'angle de normale minimisant la fonctionnelle quadratique d'erreur sur le voisinage $3\times 3$.
-   - **SLIC (Noh & Woodward 1976)** : Interface alignée avec les axes de coordonnées par direction de balayage.
-2. **Schémas d'advection par séparation directionnelle de Strang ($X$-$Y$ puis $Y$-$X$)** :
-   - **CIAM (Li 1995 — *Calcul d'Interface Affine par Morceaux*)** : Transport lagrangien des segments PLIC avec correction de dilatation linéaire.
-   - **Weymouth & Yue (2010)** : Schéma géométrique **strictement conservatif à la précision machine** grâce à l'évaluation centrée du terme de dilatation $C_{\text{dil}} = \text{H}(C^n - 0.5) \in \{0, 1\}$.
-   - **TVD Algébrique (Superbee, Monotonized Central MC, Van Leer, Minmod)** : Transport algébrique haute résolution sans reconstruction géométrique.
+Le solveur COVOF 2D distingue rigoureusement deux paradigmes de capture d'interface VOF :
+1. **Les schémas VOF géométriques (`WEYMOUTH_YUE` et `CIAM`) avec reconstruction géométrique (`PLIC`, `ELVIRA`, `LVIRA`, `SLIC`)** :
+   - **Weymouth & Yue (2010)** : Schéma géométrique multidimensionnel **strictement conservatif à la précision machine**, utilisé comme schéma de référence pour tous les écoulements diphasiques physiques (Chapitre 7) et tous les benchmarks diphasiques à rapports extrêmes (*Fluids* 2021).
+   - **CIAM (Li 1995 — *Calcul d'Interface Affine par Morceaux*)** : Transport lagrangien directionnel des segments reconstruits avec correction de dilatation linéaire.
+   - Ces deux schémas géométriques s'accompagnent obligatoirement d'une méthode de reconstruction géométrique de l'interface dans chaque cellule mixte ($0 < C < 1$) :
+     - **PLIC (Youngs / Parker-Youngs)** : Normale $\mathbf{n} = -\nabla C / \|\nabla C\|$ sur stencil $3\times 3$ et inversion exacte de l'aire polygonale $\alpha = f(\mathbf{n}, C)$.
+     - **ELVIRA (Pilliod & Puckett 2004)** : Sélection de la pente exacte parmi 6 candidats aux différences centrées/décentrées minimisant l'erreur $L_2$ sur le bloc $3\times 3$.
+     - **LVIRA (Puckett 1991)** : Optimisation non linéaire de l'angle de normale minimisant l'erreur quadratique sur le voisinage $3\times 3$.
+     - **SLIC (Noh & Woodward 1976)** : Interface alignée avec les axes de coordonnées.
+   - Les schémas géométriques **n'utilisent aucun limiteur TVD**.
+2. **Les schémas VOF algébriques (`VOF_TVD`) sans reconstruction géométrique (`reconstruction_method: "NONE"`)** :
+   - Transportent directement la fraction volumique $C$ par des flux algébriques haute résolution bornés par un limiteur de pente (**Superbee**, **MUSCL**, **Van Leer** ou **HRIC**).
+   - Un schéma algébrique TVD **ne s'accompagne d'aucune reconstruction géométrique d'interface** (`"reconstruction_method": "NONE"`).
 
 
 #### Configuration JSON Complète (`cases/vortex_shear.json`)
@@ -632,8 +635,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "PLIC",
     "advection_method": "VOF_TVD",
+    "reconstruction_method": "NONE",
     "tvd_limiter": "SUPERBEE",
     "cfl_vof": 0.5
   },
@@ -714,8 +717,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "PLIC",
     "advection_method": "VOF_TVD",
+    "reconstruction_method": "NONE",
     "tvd_limiter": "SUPERBEE",
     "cfl_vof": 0.5
   },
@@ -793,9 +796,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "PLIC",
     "advection_method": "CIAM",
-    "tvd_limiter": "SUPERBEE",
+    "reconstruction_method": "PLIC",
     "cfl_vof": 0.5
   },
   "initial_condition": {
@@ -872,9 +874,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "ELVIRA",
     "advection_method": "CIAM",
-    "tvd_limiter": "SUPERBEE",
+    "reconstruction_method": "ELVIRA",
     "cfl_vof": 0.5
   },
   "initial_condition": {
@@ -951,9 +952,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "LVIRA",
     "advection_method": "CIAM",
-    "tvd_limiter": "SUPERBEE",
+    "reconstruction_method": "LVIRA",
     "cfl_vof": 0.5
   },
   "initial_condition": {
@@ -1030,9 +1030,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "SLIC",
     "advection_method": "CIAM",
-    "tvd_limiter": "SUPERBEE",
+    "reconstruction_method": "SLIC",
     "cfl_vof": 0.5
   },
   "initial_condition": {
@@ -1109,9 +1108,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "PLIC",
     "advection_method": "WEYMOUTH_YUE",
-    "tvd_limiter": "SUPERBEE",
+    "reconstruction_method": "PLIC",
     "cfl_vof": 0.5
   },
   "initial_condition": {
@@ -1188,9 +1186,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "ELVIRA",
     "advection_method": "WEYMOUTH_YUE",
-    "tvd_limiter": "SUPERBEE",
+    "reconstruction_method": "ELVIRA",
     "cfl_vof": 0.5
   },
   "initial_condition": {
@@ -1267,9 +1264,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "LVIRA",
     "advection_method": "WEYMOUTH_YUE",
-    "tvd_limiter": "SUPERBEE",
+    "reconstruction_method": "LVIRA",
     "cfl_vof": 0.5
   },
   "initial_condition": {
@@ -1346,9 +1342,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "SLIC",
     "advection_method": "WEYMOUTH_YUE",
-    "tvd_limiter": "SUPERBEE",
+    "reconstruction_method": "SLIC",
     "cfl_vof": 0.5
   },
   "initial_condition": {
@@ -1425,8 +1420,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "PLIC",
     "advection_method": "VOF_TVD",
+    "reconstruction_method": "NONE",
     "tvd_limiter": "SUPERBEE",
     "cfl_vof": 0.5
   },
@@ -1504,8 +1499,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "PLIC",
     "advection_method": "VOF_TVD",
+    "reconstruction_method": "NONE",
     "tvd_limiter": "VAN_LEER",
     "cfl_vof": 0.5
   },
@@ -1583,8 +1578,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "PLIC",
     "advection_method": "VOF_TVD",
+    "reconstruction_method": "NONE",
     "tvd_limiter": "MUSCL",
     "cfl_vof": 0.5
   },
@@ -1662,8 +1657,8 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
     }
   },
   "vof": {
-    "reconstruction_method": "PLIC",
     "advection_method": "VOF_TVD",
+    "reconstruction_method": "NONE",
     "tvd_limiter": "HRIC",
     "cfl_vof": 0.5
   },
@@ -1719,20 +1714,20 @@ Le solveur COVOF 2D implémente trois familles d'advection VOF et quatre méthod
 #### Résultats Quantitatifs Comparatifs (Référence vs C++17 vs Fortran 2018)
 
 
-| Configuration JSON | Méthode d'Advection | Reconstruction | Erreur $L_1(T)$ C++17 | Erreur $L_1(T)$ Fortran | Conservation Masse | Statut |
-|:---|:---|:---|:---:|:---:|:---:|:---:|
-| `vortex_shear_ciam_plic.json` | **CIAM** | **PLIC (Youngs)** | **$6.23 \times 10^{-3}$** | **$6.23 \times 10^{-3}$** | $99.96\,\%$ | **PASS** |
-| `vortex_shear_ciam_elvira.json` | **CIAM** | **ELVIRA** | **$6.23 \times 10^{-3}$** | **$6.23 \times 10^{-3}$** | $99.96\,\%$ | **PASS** |
-| `vortex_shear_ciam_lvira.json` | **CIAM** | **LVIRA** | **$6.23 \times 10^{-3}$** | **$6.23 \times 10^{-3}$** | $99.96\,\%$ | **PASS** |
-| `vortex_shear_wy_plic.json` | **Weymouth-Yue** | **PLIC (Youngs)** | **$1.20 \times 10^{-2}$** | **$1.20 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
-| `vortex_shear_wy_elvira.json` | **Weymouth-Yue** | **ELVIRA** | **$1.20 \times 10^{-2}$** | **$1.20 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
-| `vortex_shear_wy_lvira.json` | **Weymouth-Yue** | **LVIRA** | **$1.20 \times 10^{-2}$** | **$1.20 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
-| `vortex_shear_ciam_slic.json` | **CIAM** | **SLIC** | **$2.20 \times 10^{-2}$** | **$2.20 \times 10^{-2}$** | $99.95\,\%$ | **PASS** |
-| `vortex_shear_wy_slic.json` | **Weymouth-Yue** | **SLIC** | **$3.05 \times 10^{-2}$** | **$3.05 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
-| `vortex_shear.json` | **TVD** | **Superbee** | **$5.69 \times 10^{-2}$** | **$5.69 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
-| `vortex_shear_tvd_mc.json` | **TVD** | **MC** | **$7.24 \times 10^{-2}$** | **$7.24 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
-| `vortex_shear_tvd_vanleer.json` | **TVD** | **Van Leer** | **$8.19 \times 10^{-2}$** | **$8.19 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
-| `vortex_shear_tvd_minmod.json` | **TVD** | **Minmod** | **$9.88 \times 10^{-2}$** | **$9.88 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
+| Configuration JSON | Méthode d'Advection | Reconstruction Géométrique | Limiteur Algébrique | Erreur $L_1(T)$ C++17 | Erreur $L_1(T)$ Fortran | Conservation Masse | Statut |
+|:---|:---|:---|:---|:---:|:---:|:---:|:---:|
+| `vortex_shear_ciam_plic.json` | **CIAM (Géométrique)** | **PLIC (Youngs)** | Aucun | **$6.23 \times 10^{-3}$** | **$6.23 \times 10^{-3}$** | $99.96\,\%$ | **PASS** |
+| `vortex_shear_ciam_elvira.json` | **CIAM (Géométrique)** | **ELVIRA** | Aucun | **$6.23 \times 10^{-3}$** | **$6.23 \times 10^{-3}$** | $99.96\,\%$ | **PASS** |
+| `vortex_shear_ciam_lvira.json` | **CIAM (Géométrique)** | **LVIRA** | Aucun | **$6.23 \times 10^{-3}$** | **$6.23 \times 10^{-3}$** | $99.96\,\%$ | **PASS** |
+| `vortex_shear_weymouth_yue_plic.json` | **Weymouth-Yue (Géométrique)** | **PLIC (Youngs)** | Aucun | **$1.20 \times 10^{-2}$** | **$1.20 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
+| `vortex_shear_weymouth_yue_elvira.json` | **Weymouth-Yue (Géométrique)** | **ELVIRA** | Aucun | **$1.20 \times 10^{-2}$** | **$1.20 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
+| `vortex_shear_weymouth_yue_lvira.json` | **Weymouth-Yue (Géométrique)** | **LVIRA** | Aucun | **$1.20 \times 10^{-2}$** | **$1.20 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
+| `vortex_shear_ciam_slic.json` | **CIAM (Géométrique)** | **SLIC** | Aucun | **$2.20 \times 10^{-2}$** | **$2.20 \times 10^{-2}$** | $99.95\,\%$ | **PASS** |
+| `vortex_shear_weymouth_yue_slic.json` | **Weymouth-Yue (Géométrique)** | **SLIC** | Aucun | **$3.05 \times 10^{-2}$** | **$3.05 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
+| `vortex_shear.json` | **VOF_TVD (Algébrique)** | **Aucune (`NONE`)** | **Superbee** | **$5.69 \times 10^{-2}$** | **$5.69 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
+| `vortex_shear_vof_tvd_hric.json` | **VOF_TVD (Algébrique)** | **Aucune (`NONE`)** | **HRIC** | **$3.66 \times 10^{-2}$** | **$3.66 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
+| `vortex_shear_vof_tvd_muscl.json` | **VOF_TVD (Algébrique)** | **Aucune (`NONE`)** | **MUSCL** | **$7.24 \times 10^{-2}$** | **$7.24 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
+| `vortex_shear_vof_tvd_vanleer.json` | **VOF_TVD (Algébrique)** | **Aucune (`NONE`)** | **Van Leer** | **$8.19 \times 10^{-2}$** | **$8.19 \times 10^{-2}$** | **$100.0000\,\%$** | **PASS** |
 
 
 #### Visualisations Multi-Panneaux des Champs 2D et Profils Comparatifs
@@ -2577,6 +2572,7 @@ La vitesse théorique de Ritter d'effondrement en fluide parfait donne un ordre 
 
 #### 3. Méthodes Numériques et Paramétrage JSON
 - **Maillage** : $N_x \times N_y = 80 \times 60$ cellules avec conditions d'adhérence sur les parois (`WALL`).
+- **Capture d'interface VOF géométrique** : Schéma d'advection conservatif de **Weymouth & Yue (2010)** couplé à la reconstruction géométrique **PLIC** (`"advection_method": "WEYMOUTH_YUE"`, `"reconstruction_method": "PLIC"`, sans TVD).
 - **Propriétés diphasiques** : Moyenne arithmétique de la masse volumique $\rho(C) = C \rho_1 + (1-C)\rho_2$ et moyenne harmonique de la viscosité aux nœuds.
 - **Lagrangien Augmenté** : Paramètre $r_{al} = 1000.0$ indispensable pour stabiliser le saut de densité $\rho_1 / \rho_2 = 1000$ sans oscillations de pression à l'interface eau-air.
 
@@ -2657,6 +2653,11 @@ La vitesse théorique de Ritter d'effondrement en fluide parfait donne un ordre 
     "vtk_interval": 5,
     "log_interval": 1,
     "write_csv_history": true
+  },
+  "vof": {
+    "advection_method": "WEYMOUTH_YUE",
+    "reconstruction_method": "PLIC",
+    "cfl_vof": 0.5
   }
 }
 ```
@@ -2687,8 +2688,9 @@ En l'absence de gravité ($\mathbf{g} = \mathbf{0}$), une goutte cylindrique 2D 
 $$\Delta P_{\text{exact}} = P_{\text{int}} - P_{\text{ext}} = \sigma \kappa = \frac{\sigma}{R} = \frac{1.0}{0.25} = 4.00\text{ Pa}$$
 
 
-#### 2. Méthode Numérique CSF Balanced-Force
-Dans COVOF 2D, la force capillaire volumique $\mathbf{f}_\sigma = \sigma \kappa \delta_s \mathbf{n}$ est reformulée selon Brackbill et al. (1992) comme proportionnelle au gradient de la fonction couleur lissée $\tilde{C}$ :
+#### 2. Méthode Numérique CSF Balanced-Force et VOF Géométrique Weymouth-Yue + PLIC
+- **Capture d'interface VOF géométrique** : Schéma d'advection conservatif de **Weymouth & Yue (2010)** avec reconstruction géométrique **PLIC** (`"advection_method": "WEYMOUTH_YUE"`, `"reconstruction_method": "PLIC"`, sans TVD).
+- **Force capillaire CSF Balanced-Force** : Dans COVOF 2D, la force capillaire volumique $\mathbf{f}_\sigma = \sigma \kappa \delta_s \mathbf{n}$ est reformulée selon Brackbill et al. (1992) comme proportionnelle au gradient de la fonction couleur lissée $\tilde{C}$ :
 $$\mathbf{f}_\sigma = \sigma \kappa(\tilde{C}) \nabla C, \qquad \text{avec} \qquad \kappa(\tilde{C}) = -\nabla \cdot \left( \frac{\nabla \tilde{C}}{\|\nabla \tilde{C}\|} \right)$$
 Sur la grille MAC décalée, l'opérateur gradient discret $\nabla_h C$ est évalué **exactement aux mêmes centres de faces** $(i-1/2, j)$ et $(i, j-1/2)$ que le gradient de pression $-\nabla_h p$. Ainsi, à courbure constante, le gradient de pression équilibre algébriquement la force capillaire, réduisant drastiquement les courants parasites (*spurious currents*).
 
@@ -2768,6 +2770,11 @@ Sur la grille MAC décalée, l'opérateur gradient discret $\nabla_h C$ est éva
     "vtk_interval": 2,
     "log_interval": 1,
     "write_csv_history": true
+  },
+  "vof": {
+    "advection_method": "WEYMOUTH_YUE",
+    "reconstruction_method": "PLIC",
+    "cfl_vof": 0.5
   }
 }
 ```
@@ -2805,6 +2812,7 @@ $$\mathcal{V}_b(t) = \iint_\Omega (1 - C)\,dx\,dy, \qquad y_c(t) = \frac{1}{\mat
 #### 3. Méthodes Numériques et Paramétrage JSON
 - **Maillage** : $N_x \times N_y = 64 \times 128$ cellules ($\Delta x = \Delta y = 1/64 = 0.015625\text{ m}$).
 - **Conditions aux limites** : Adhérence (`WALL`) sur les parois horizontales $y=0, y=2$, glissement libre (`SLIP` / symétrie) sur les parois verticales $x=0, x=1$.
+- **Capture d'interface VOF géométrique** : Advection de **Weymouth & Yue (2010)** couplée à la reconstruction géométrique **PLIC** (`"advection_method": "WEYMOUTH_YUE"`, `"reconstruction_method": "PLIC"`, sans TVD).
 - **Couplage Diphasique + Capillaire** : Lagrangien Augmenté ($r_{al} = 1000.0$), modèle CSF Balanced-Force, pas de temps $\Delta t = 10^{-3}\text{ s}$ sur $3000$ pas de temps ($t_f = 3.0\text{ s}$).
 
 
@@ -2883,6 +2891,11 @@ $$\mathcal{V}_b(t) = \iint_\Omega (1 - C)\,dx\,dy, \qquad y_c(t) = \frac{1}{\mat
     "vtk_interval": 2,
     "log_interval": 1,
     "write_csv_history": true
+  },
+  "vof": {
+    "advection_method": "WEYMOUTH_YUE",
+    "reconstruction_method": "PLIC",
+    "cfl_vof": 0.5
   }
 }
 ```
@@ -2917,7 +2930,8 @@ Sous l'effet du terme barocline $\frac{1}{\rho^2} \nabla \rho \times \nabla p$ d
 
 #### 2. Méthodes Numériques et Paramétrage JSON
 - **Maillage** : $N_x \times N_y = 64 \times 256$ cellules carrées ($\Delta x = \Delta y = 1/64 = 0.015625\text{ m}$).
-- **Lagrangien Augmenté** : $r_{al} = 100.0$, solveur BiCGSTAB(2) (`tol = 1e-7`), schéma VOF conservatif sans perte de symétrie gauche-droite ($x \leftrightarrow 1-x$).
+- **Capture d'interface VOF géométrique** : Advection de **Weymouth & Yue (2010)** avec reconstruction géométrique **PLIC** (`"advection_method": "WEYMOUTH_YUE"`, `"reconstruction_method": "PLIC"`, sans TVD), préservant la finesse des enroulements de Kelvin-Helmholtz et la symétrie gauche-droite ($x \leftrightarrow 1-x$).
+- **Lagrangien Augmenté** : $r_{al} = 100.0$, solveur BiCGSTAB(2) (`tol = 1e-7`).
 
 
 #### Configuration JSON Complète (`cases/rayleigh_taylor.json`)
@@ -2991,6 +3005,11 @@ Sous l'effet du terme barocline $\frac{1}{\rho^2} \nabla \rho \times \nabla p$ d
     "vtk_interval": 40,
     "log_interval": 20,
     "write_csv_history": true
+  },
+  "vof": {
+    "advection_method": "WEYMOUTH_YUE",
+    "reconstruction_method": "PLIC",
+    "cfl_vof": 0.5
   }
 }
 ```
@@ -3108,9 +3127,8 @@ $$E_{L_2}(U_c) = \sqrt{\frac{\sum_n \left(U_c(t^n) - U_{\text{th}}(t^n)\right)^2
     "precond_type": "JACOBI"
   },
   "vof": {
+    "advection_method": "WEYMOUTH_YUE",
     "reconstruction_method": "PLIC",
-    "advection_method": "VOF_TVD",
-    "tvd_limiter": "SUPERBEE",
     "cfl_vof": 0.5
   },
   "output": {
@@ -3236,9 +3254,8 @@ est un **invariant exact du mouvement** ($dE_k / dt = 0 \implies E_k(t) / E_k(0)
     "precond_type": "JACOBI"
   },
   "vof": {
+    "advection_method": "WEYMOUTH_YUE",
     "reconstruction_method": "PLIC",
-    "advection_method": "VOF_TVD",
-    "tvd_limiter": "SUPERBEE",
     "cfl_vof": 0.5
   },
   "output": {
@@ -3323,9 +3340,8 @@ est un **invariant exact du mouvement** ($dE_k / dt = 0 \implies E_k(t) / E_k(0)
     "precond_type": "JACOBI"
   },
   "vof": {
+    "advection_method": "WEYMOUTH_YUE",
     "reconstruction_method": "PLIC",
-    "advection_method": "VOF_TVD",
-    "tvd_limiter": "SUPERBEE",
     "cfl_vof": 0.5
   },
   "output": {
@@ -3452,9 +3468,8 @@ $$\frac{H}{D} > 3\pi \approx 9.42 \qquad \text{et} \qquad Re = \frac{\rho_2 V_0 
     "precond_type": "JACOBI"
   },
   "vof": {
+    "advection_method": "WEYMOUTH_YUE",
     "reconstruction_method": "PLIC",
-    "advection_method": "VOF_TVD",
-    "tvd_limiter": "SUPERBEE",
     "cfl_vof": 0.5
   },
   "output": {
@@ -3541,9 +3556,8 @@ $$\frac{H}{D} > 3\pi \approx 9.42 \qquad \text{et} \qquad Re = \frac{\rho_2 V_0 
     "precond_type": "JACOBI"
   },
   "vof": {
+    "advection_method": "WEYMOUTH_YUE",
     "reconstruction_method": "PLIC",
-    "advection_method": "VOF_TVD",
-    "tvd_limiter": "SUPERBEE",
     "cfl_vof": 0.5
   },
   "output": {
@@ -3627,9 +3641,8 @@ $$\frac{H}{D} > 3\pi \approx 9.42 \qquad \text{et} \qquad Re = \frac{\rho_2 V_0 
     "precond_type": "JACOBI"
   },
   "vof": {
+    "advection_method": "WEYMOUTH_YUE",
     "reconstruction_method": "PLIC",
-    "advection_method": "VOF_TVD",
-    "tvd_limiter": "SUPERBEE",
     "cfl_vof": 0.5
   },
   "output": {
@@ -3713,9 +3726,8 @@ $$\frac{H}{D} > 3\pi \approx 9.42 \qquad \text{et} \qquad Re = \frac{\rho_2 V_0 
     "precond_type": "JACOBI"
   },
   "vof": {
+    "advection_method": "WEYMOUTH_YUE",
     "reconstruction_method": "PLIC",
-    "advection_method": "VOF_TVD",
-    "tvd_limiter": "SUPERBEE",
     "cfl_vof": 0.5
   },
   "output": {
