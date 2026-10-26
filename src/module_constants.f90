@@ -62,7 +62,9 @@ module module_constants
   ! Symmetric Successive Over-Relaxation (SSOR) pour lissage spectral rapide
   integer, parameter, public :: PRECOND_SSOR   = 2
   ! Factorisation incomplète Incomplete LU sans remplissage (ILU(0))
-  integer, parameter, public :: PRECOND_ILU0   = 3
+  integer, parameter, public :: PRECOND_ILU0             = 3
+  ! Préconditionneur par blocs triangulaires avec complément de Schur (El Ouafa et al. 2023)
+  integer, parameter, public :: PRECOND_BLOCK_TRIANGULAR = 4
 
   ! --- 7. Schémas de Discrétisation Spatiale des Termes Convectifs ---
   ! Schéma décentré amont d'ordre 1 (Upwind) inconditionnellement stable mais diffusif

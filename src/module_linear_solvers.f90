@@ -14,7 +14,7 @@ module module_linear_solvers
   use module_mesh, only: mesh_2d_t
   use module_fields, only: flow_fields_t
   use module_mpi_comm, only: global_dot_product, global_norm2
-  use module_navier_stokes, only: navier_stokes_t
+  use module_navier_stokes, only: navier_stokes_t, is_u_face_in_obstacle, is_v_face_in_obstacle
   implicit none
   private
 
@@ -27,9 +27,11 @@ contains
   !-----------------------------------------------------------------------------
   ! Application du préconditionneur : dst = P^{-1} src
   !-----------------------------------------------------------------------------
-  subroutine apply_preconditioner(ns, cfg, src, dst)
+  subroutine apply_preconditioner(ns, mesh, cfg, src, dst)
     ! Déclaration de variable locale / paramètre de calcul
     type(navier_stokes_t), intent(in) :: ns
+    ! Déclaration de variable locale / paramètre de calcul
+    type(mesh_2d_t), intent(in)        :: mesh
     ! Déclaration de variable locale / paramètre de calcul
     type(config_t), intent(in)        :: cfg
     ! Déclaration de variable locale / paramètre de calcul
@@ -38,9 +40,14 @@ contains
     real(dp), intent(out)             :: dst(:)
 
     ! Déclaration de variable locale / paramètre de calcul
-    integer :: i, nu, nv, np, n
+    integer :: i, j, dof, nu, nv, np, n, u_nx, v_ny, sweep
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: d
+    real(dp) :: d, val, grad_p
+    ! Déclaration de variable locale / paramètre de calcul
+    logical :: is_wall
+    ! Déclaration de variable locale / paramètre de calcul
+    real(dp), allocatable :: rp_2d(:, :), zp_2d(:, :)
+    real(dp), allocatable :: ru(:), rv(:), rhs_u(:), rhs_v(:)
 
     ! Affectation et calcul numérique
     n = ns%n_owned_total
@@ -141,6 +148,247 @@ contains
         end do
       end if
 
+    case (PRECOND_BLOCK_TRIANGULAR)
+      if (cfg%solver_type == SOLVER_MONOLITHIC) then
+        u_nx = mesh%nx_local
+        if (mesh%is_boundary_right) u_nx = u_nx + 1
+        v_ny = mesh%ny_local
+        if (mesh%is_boundary_top) v_ny = v_ny + 1
+
+        allocate(rp_2d(mesh%nx_local, mesh%ny_local))
+        allocate(zp_2d(mesh%nx_local, mesh%ny_local))
+
+        do j = 1, mesh%ny_local
+          do i = 1, mesh%nx_local
+            zp_2d(i, j) = src(nu + nv + (j - 1) * mesh%nx_local + i)
+          end do
+        end do
+
+        rp_2d = 0.0_dp
+
+        ! 1. 8 balayages de Gauss-Seidel symétrique sur le complément de Schur S
+        do sweep = 1, 8
+          ! Balayage avant
+          do j = 1, mesh%ny_local
+            do i = 1, mesh%nx_local
+              val = zp_2d(i, j)
+              if (i > 1) then
+                val = val + ns%schur_aW(i, j) * rp_2d(i - 1, j)
+              else if (cfg%bc_left%btype == BC_PERIODIC) then
+                val = val + ns%schur_aW(i, j) * rp_2d(mesh%nx_local, j)
+              end if
+
+              if (i < mesh%nx_local) then
+                val = val + ns%schur_aE(i, j) * rp_2d(i + 1, j)
+              else if (cfg%bc_right%btype == BC_PERIODIC) then
+                val = val + ns%schur_aE(i, j) * rp_2d(1, j)
+              end if
+
+              if (j > 1) then
+                val = val + ns%schur_aS(i, j) * rp_2d(i, j - 1)
+              else if (cfg%bc_bottom%btype == BC_PERIODIC) then
+                val = val + ns%schur_aS(i, j) * rp_2d(i, mesh%ny_local)
+              end if
+
+              if (j < mesh%ny_local) then
+                val = val + ns%schur_aN(i, j) * rp_2d(i, j + 1)
+              else if (cfg%bc_top%btype == BC_PERIODIC) then
+                val = val + ns%schur_aN(i, j) * rp_2d(i, 1)
+              end if
+
+              rp_2d(i, j) = val / ns%schur_aP(i, j)
+            end do
+          end do
+
+          ! Balayage arrière
+          do j = mesh%ny_local, 1, -1
+            do i = mesh%nx_local, 1, -1
+              val = zp_2d(i, j)
+              if (i > 1) then
+                val = val + ns%schur_aW(i, j) * rp_2d(i - 1, j)
+              else if (cfg%bc_left%btype == BC_PERIODIC) then
+                val = val + ns%schur_aW(i, j) * rp_2d(mesh%nx_local, j)
+              end if
+
+              if (i < mesh%nx_local) then
+                val = val + ns%schur_aE(i, j) * rp_2d(i + 1, j)
+              else if (cfg%bc_right%btype == BC_PERIODIC) then
+                val = val + ns%schur_aE(i, j) * rp_2d(1, j)
+              end if
+
+              if (j > 1) then
+                val = val + ns%schur_aS(i, j) * rp_2d(i, j - 1)
+              else if (cfg%bc_bottom%btype == BC_PERIODIC) then
+                val = val + ns%schur_aS(i, j) * rp_2d(i, mesh%ny_local)
+              end if
+
+              if (j < mesh%ny_local) then
+                val = val + ns%schur_aN(i, j) * rp_2d(i, j + 1)
+              else if (cfg%bc_top%btype == BC_PERIODIC) then
+                val = val + ns%schur_aN(i, j) * rp_2d(i, 1)
+              end if
+
+              rp_2d(i, j) = val / ns%schur_aP(i, j)
+            end do
+          end do
+        end do
+
+        ! 2. Second membre pour vitesse u : rhs_u = zu - G_u * rp
+        allocate(rhs_u(nu), ru(nu))
+        rhs_u = 0.0_dp
+        do j = 1, mesh%ny_local
+          do i = 1, u_nx
+            dof = (j - 1) * u_nx + i
+            is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
+                      (i == u_nx .and. mesh%is_boundary_right) .or. &
+                      is_u_face_in_obstacle(mesh, cfg, i, j)
+            if (is_wall) then
+              rhs_u(dof) = src(dof)
+            else
+              grad_p = (rp_2d(i, j) - rp_2d(i - 1, j)) * mesh%dy
+              rhs_u(dof) = src(dof) - grad_p
+            end if
+          end do
+        end do
+
+        ! 4 balayages de Gauss-Seidel symétrique sur Fu * ru = rhs_u
+        ru = 0.0_dp
+        do sweep = 1, 4
+          ! Forward
+          do j = 1, mesh%ny_local
+            do i = 1, u_nx
+              dof = (j - 1) * u_nx + i
+              is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
+                        (i == u_nx .and. mesh%is_boundary_right) .or. &
+                        is_u_face_in_obstacle(mesh, cfg, i, j)
+              if (is_wall) then
+                ru(dof) = rhs_u(dof) / ns%u_aP(dof)
+                cycle
+              end if
+              val = rhs_u(dof)
+              if (i > 1) val = val + ns%u_aW(dof) * ru(dof - 1)
+              if (i < u_nx) val = val + ns%u_aE(dof) * ru(dof + 1)
+              if (j > 1) val = val + ns%u_aS(dof) * ru(dof - u_nx)
+              if (j < mesh%ny_local) val = val + ns%u_aN(dof) * ru(dof + u_nx)
+              ru(dof) = val / ns%u_aP(dof)
+            end do
+          end do
+          ! Backward
+          do j = mesh%ny_local, 1, -1
+            do i = u_nx, 1, -1
+              dof = (j - 1) * u_nx + i
+              is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
+                        (i == u_nx .and. mesh%is_boundary_right) .or. &
+                        is_u_face_in_obstacle(mesh, cfg, i, j)
+              if (is_wall) then
+                ru(dof) = rhs_u(dof) / ns%u_aP(dof)
+                cycle
+              end if
+              val = rhs_u(dof)
+              if (i > 1) val = val + ns%u_aW(dof) * ru(dof - 1)
+              if (i < u_nx) val = val + ns%u_aE(dof) * ru(dof + 1)
+              if (j > 1) val = val + ns%u_aS(dof) * ru(dof - u_nx)
+              if (j < mesh%ny_local) val = val + ns%u_aN(dof) * ru(dof + u_nx)
+              ru(dof) = val / ns%u_aP(dof)
+            end do
+          end do
+        end do
+        dst(1:nu) = ru(1:nu)
+        deallocate(rhs_u, ru)
+
+        ! 3. Second membre pour vitesse v : rhs_v = zv - G_v * rp
+        allocate(rhs_v(nv), rv(nv))
+        rhs_v = 0.0_dp
+        do j = 1, v_ny
+          do i = 1, mesh%nx_local
+            dof = (j - 1) * mesh%nx_local + i
+            is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
+                       (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
+                      (j == v_ny .and. mesh%is_boundary_top .and. &
+                       (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
+                      is_v_face_in_obstacle(mesh, cfg, i, j)
+            if (is_wall) then
+              rhs_v(dof) = src(nu + dof)
+            else
+              grad_p = (rp_2d(i, j) - rp_2d(i, j - 1)) * mesh%dx
+              rhs_v(dof) = src(nu + dof) - grad_p
+            end if
+          end do
+        end do
+
+        ! 4 balayages de Gauss-Seidel symétrique sur Fv * rv = rhs_v
+        rv = 0.0_dp
+        do sweep = 1, 4
+          ! Forward
+          do j = 1, v_ny
+            do i = 1, mesh%nx_local
+              dof = (j - 1) * mesh%nx_local + i
+              is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
+                         (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
+                        (j == v_ny .and. mesh%is_boundary_top .and. &
+                         (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
+                        is_v_face_in_obstacle(mesh, cfg, i, j)
+              if (is_wall) then
+                rv(dof) = rhs_v(dof) / ns%v_aP(dof)
+                cycle
+              end if
+              val = rhs_v(dof)
+              if (i > 1) val = val + ns%v_aW(dof) * rv(dof - 1)
+              if (i < mesh%nx_local) val = val + ns%v_aE(dof) * rv(dof + 1)
+              if (j > 1) val = val + ns%v_aS(dof) * rv(dof - mesh%nx_local)
+              if (j < v_ny) val = val + ns%v_aN(dof) * rv(dof + mesh%nx_local)
+              rv(dof) = val / ns%v_aP(dof)
+            end do
+          end do
+          ! Backward
+          do j = v_ny, 1, -1
+            do i = mesh%nx_local, 1, -1
+              dof = (j - 1) * mesh%nx_local + i
+              is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
+                         (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
+                        (j == v_ny .and. mesh%is_boundary_top .and. &
+                         (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
+                        is_v_face_in_obstacle(mesh, cfg, i, j)
+              if (is_wall) then
+                rv(dof) = rhs_v(dof) / ns%v_aP(dof)
+                cycle
+              end if
+              val = rhs_v(dof)
+              if (i > 1) val = val + ns%v_aW(dof) * rv(dof - 1)
+              if (i < mesh%nx_local) val = val + ns%v_aE(dof) * rv(dof + 1)
+              if (j > 1) val = val + ns%v_aS(dof) * rv(dof - mesh%nx_local)
+              if (j < v_ny) val = val + ns%v_aN(dof) * rv(dof + mesh%nx_local)
+              rv(dof) = val / ns%v_aP(dof)
+            end do
+          end do
+        end do
+        dst(nu + 1 : nu + nv) = rv(1:nv)
+        deallocate(rhs_v, rv)
+
+        ! 4. Pression
+        do j = 1, mesh%ny_local
+          do i = 1, mesh%nx_local
+            dof = nu + nv + (j - 1) * mesh%nx_local + i
+            dst(dof) = rp_2d(i, j)
+          end do
+        end do
+
+        deallocate(rp_2d, zp_2d)
+
+      else
+        ! Mode Lagrangien augmenté : diagonale Jacobi
+        do i = 1, nu
+          d = ns%diag_u(i)
+          if (abs(d) < 1.0e-15_dp) d = 1.0_dp
+          dst(i) = src(i) / d
+        end do
+        do i = 1, nv
+          d = ns%diag_v(i)
+          if (abs(d) < 1.0e-15_dp) d = 1.0_dp
+          dst(nu + i) = src(nu + i) / d
+        end do
+      end if
+
     case default
       ! Affectation et calcul numérique
       dst(1:n) = src(1:n)
@@ -179,7 +427,7 @@ contains
     ! Appel de sous-programme modulaire
     call ns%apply_system_matrix(mesh, cfg, fields_old, dt, src, tmp)
     ! Appel de sous-programme modulaire
-    call apply_preconditioner(ns, cfg, tmp, dst)
+    call apply_preconditioner(ns, mesh, cfg, tmp, dst)
 
     ! Libération de la mémoire allouée
     deallocate(tmp)
@@ -247,7 +495,7 @@ contains
     r2 = 0.0_dp
 
     ! Second membre préconditionné b_hat = P^{-1} b
-    call apply_preconditioner(ns, cfg, b, b_hat)
+    call apply_preconditioner(ns, mesh, cfg, b, b_hat)
 
     ! Résidu initial r0 = b_hat - P^{-1} A x0
     call apply_PA(ns, mesh, cfg, fields_old, dt, x, r0)
@@ -437,7 +685,7 @@ contains
     allocate(b_hat(n), r(n), r_tilde(n), p(n), v(n), s(n), t(n))
 
     ! Appel de sous-programme modulaire
-    call apply_preconditioner(ns, cfg, b, b_hat)
+    call apply_preconditioner(ns, mesh, cfg, b, b_hat)
     ! Appel de sous-programme modulaire
     call apply_PA(ns, mesh, cfg, fields_old, dt, x, r)
     ! Affectation et calcul numérique
@@ -603,7 +851,7 @@ contains
     end if
 
     ! Appel de sous-programme modulaire
-    call apply_preconditioner(ns, cfg, r, z)
+    call apply_preconditioner(ns, mesh, cfg, r, z)
     ! Actualisation de la pression statique au centre de la maille
     p(1:n) = z(1:n)
     ! Affectation et calcul numérique
@@ -637,7 +885,7 @@ contains
       end if
 
       ! Appel de sous-programme modulaire
-      call apply_preconditioner(ns, cfg, r, z)
+      call apply_preconditioner(ns, mesh, cfg, r, z)
       ! Affectation et calcul numérique
       rz_new = global_dot_product(mesh, r, z, n)
       ! Affectation et calcul numérique
@@ -700,7 +948,7 @@ contains
     allocate(V(n, m + 1), H(m + 1, m), c_rot(m), s_rot(m))
 
     ! Appel de sous-programme modulaire
-    call apply_preconditioner(ns, cfg, b, b_hat)
+    call apply_preconditioner(ns, mesh, cfg, b, b_hat)
 
     ! Affectation et calcul numérique
     total_iters = 0

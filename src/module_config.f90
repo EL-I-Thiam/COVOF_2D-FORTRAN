@@ -430,6 +430,11 @@ contains
        cfg%solver_type = SOLVER_AUGMENTED_LAGRANGIAN
        ! Affectation et calcul numérique
        cfg%linear_solver = LINEAR_CG
+    else if (trim(str_val) == "MONOLITHIC") then
+       ! Affectation et calcul numérique
+       cfg%solver_type = SOLVER_MONOLITHIC
+       ! Affectation et calcul numérique
+       cfg%linear_solver = LINEAR_BICGSTAB2
     ! Branche par défaut si condition non satisfaite
     else
        ! Affectation et calcul numérique
@@ -464,6 +469,19 @@ contains
     call json_get_int(buf, "solver.uzawa_iter", cfg%uzawa_iter, 1)
     ! Appel de sous-programme modulaire
     call json_get_bool(buf, "solver.use_precond", cfg%use_precond, .true.)
+    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "solver.precond_type", str_val, "JACOBI")
+    if (trim(str_val) == "JACOBI" .or. trim(str_val) == "DIAGONAL") then
+       cfg%precond_type = PRECOND_JACOBI
+    else if (trim(str_val) == "SSOR" .or. trim(str_val) == "GAUSS_SEIDEL") then
+       cfg%precond_type = PRECOND_SSOR
+    else if (trim(str_val) == "ILU0" .or. trim(str_val) == "ILU") then
+       cfg%precond_type = PRECOND_ILU0
+    else if (trim(str_val) == "BLOCK_TRIANGULAR" .or. trim(str_val) == "SCHUR") then
+       cfg%precond_type = PRECOND_BLOCK_TRIANGULAR
+    else if (trim(str_val) == "NONE") then
+       cfg%precond_type = PRECOND_NONE
+    end if
     ! Appel de sous-programme modulaire
     call json_get_real(buf, "steady_state_tol", cfg%steady_state_tol, cfg%steady_state_tol)
     ! Appel de sous-programme modulaire

@@ -38,6 +38,17 @@ module module_navier_stokes
     real(dp), allocatable :: diag_v(:)
     ! Déclaration de variable locale / paramètre de calcul
     real(dp), allocatable :: diag_p(:)
+
+    ! Complément de Schur 5-points pour le préconditionneur par blocs triangulaires (M. El Ouafa 2022/2023)
+    real(dp), allocatable :: schur_aE(:, :)
+    real(dp), allocatable :: schur_aW(:, :)
+    real(dp), allocatable :: schur_aN(:, :)
+    real(dp), allocatable :: schur_aS(:, :)
+    real(dp), allocatable :: schur_aP(:, :)
+
+    ! Stencils 5-points pour blocs vitesse Fu et Fv (M. El Ouafa 2022/2023)
+    real(dp), allocatable :: u_aE(:), u_aW(:), u_aN(:), u_aS(:), u_aP(:)
+    real(dp), allocatable :: v_aE(:), v_aW(:), v_aN(:), v_aS(:), v_aP(:)
   contains
     ! Affectation et calcul numérique
     procedure :: init => ns_init
@@ -158,20 +169,53 @@ contains
     if (allocated(this%diag_u)) deallocate(this%diag_u)
     if (allocated(this%diag_v)) deallocate(this%diag_v)
     if (allocated(this%diag_p)) deallocate(this%diag_p)
+    if (allocated(this%schur_aE)) deallocate(this%schur_aE)
+    if (allocated(this%schur_aW)) deallocate(this%schur_aW)
+    if (allocated(this%schur_aN)) deallocate(this%schur_aN)
+    if (allocated(this%schur_aS)) deallocate(this%schur_aS)
+    if (allocated(this%schur_aP)) deallocate(this%schur_aP)
+    if (allocated(this%u_aE)) deallocate(this%u_aE)
+    if (allocated(this%u_aW)) deallocate(this%u_aW)
+    if (allocated(this%u_aN)) deallocate(this%u_aN)
+    if (allocated(this%u_aS)) deallocate(this%u_aS)
+    if (allocated(this%u_aP)) deallocate(this%u_aP)
+    if (allocated(this%v_aE)) deallocate(this%v_aE)
+    if (allocated(this%v_aW)) deallocate(this%v_aW)
+    if (allocated(this%v_aN)) deallocate(this%v_aN)
+    if (allocated(this%v_aS)) deallocate(this%v_aS)
+    if (allocated(this%v_aP)) deallocate(this%v_aP)
 
     ! Allocation dynamique de tableau contigu en mémoire
     allocate(this%diag_u(this%n_owned_u))
-    ! Allocation dynamique de tableau contigu en mémoire
     allocate(this%diag_v(this%n_owned_v))
-    ! Allocation dynamique de tableau contigu en mémoire
     allocate(this%diag_p(this%n_owned_p))
+
+    allocate(this%schur_aE(mesh%nx_local, mesh%ny_local))
+    allocate(this%schur_aW(mesh%nx_local, mesh%ny_local))
+    allocate(this%schur_aN(mesh%nx_local, mesh%ny_local))
+    allocate(this%schur_aS(mesh%nx_local, mesh%ny_local))
+    allocate(this%schur_aP(mesh%nx_local, mesh%ny_local))
+
+    allocate(this%u_aE(this%n_owned_u), this%u_aW(this%n_owned_u), &
+             this%u_aN(this%n_owned_u), this%u_aS(this%n_owned_u), &
+             this%u_aP(this%n_owned_u))
+    allocate(this%v_aE(this%n_owned_v), this%v_aW(this%n_owned_v), &
+             this%v_aN(this%n_owned_v), this%v_aS(this%n_owned_v), &
+             this%v_aP(this%n_owned_v))
 
     ! Affectation et calcul numérique
     this%diag_u = 1.0_dp
-    ! Affectation et calcul numérique
     this%diag_v = 1.0_dp
-    ! Affectation et calcul numérique
     this%diag_p = 1.0_dp
+
+    this%schur_aE = 0.0_dp
+    this%schur_aW = 0.0_dp
+    this%schur_aN = 0.0_dp
+    this%schur_aS = 0.0_dp
+    this%schur_aP = 1.0_dp
+
+    this%u_aE = 0.0_dp; this%u_aW = 0.0_dp; this%u_aN = 0.0_dp; this%u_aS = 0.0_dp; this%u_aP = 1.0_dp
+    this%v_aE = 0.0_dp; this%v_aW = 0.0_dp; this%v_aN = 0.0_dp; this%v_aS = 0.0_dp; this%v_aP = 1.0_dp
   end subroutine ns_init
 
   !-----------------------------------------------------------------------------
@@ -512,10 +556,11 @@ contains
         ! Affectation et calcul numérique
         val = val - (shear_N - shear_S)
 
-        ! Lagrangien augmenté : - r * d(div)/dx * dvol
-        grad_div_x = (div_cell(i, j) - div_cell(i - 1, j)) * dy
-        ! Affectation et calcul numérique
-        val = val - cfg%r_al * grad_div_x
+        ! Lagrangien augmenté : - r * d(div)/dx * dvol (uniquement en Augmented Lagrangian)
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+          grad_div_x = (div_cell(i, j) - div_cell(i - 1, j)) * dy
+          val = val - cfg%r_al * grad_div_x
+        end if
 
         ! Gradient de pression discret B_u^T (si monolithique)
         if (cfg%solver_type == SOLVER_MONOLITHIC) then
@@ -621,10 +666,11 @@ contains
         ! Affectation et calcul numérique
         val = val - (shear_E - shear_W)
 
-        ! Affectation et calcul numérique
-        grad_div_y = (div_cell(i, j) - div_cell(i, j - 1)) * dx
-        ! Affectation et calcul numérique
-        val = val - cfg%r_al * grad_div_y
+        ! Lagrangien augmenté : - r * d(div)/dy * dvol (uniquement en Augmented Lagrangian)
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+          grad_div_y = (div_cell(i, j) - div_cell(i, j - 1)) * dx
+          val = val - cfg%r_al * grad_div_y
+        end if
 
         ! Évaluation de la condition logique
         if (cfg%solver_type == SOLVER_MONOLITHIC) then
@@ -653,10 +699,7 @@ contains
           dof = p_offset + (j - 1) * mesh%nx_local + i
           ! Affectation et calcul numérique
           div_val = div_cell(i, j) * dvol
-          ! Affectation et calcul numérique
-          diag_p_term = (dvol / cfg%r_al) * tf%p(i, j)
-          ! Affectation et calcul numérique
-          y(dof) = div_val - diag_p_term
+          y(dof) = div_val
         end do
       end do
     end if
@@ -930,7 +973,7 @@ contains
           ! Affectation et calcul numérique
           dof = p_offset + (j - 1) * mesh%nx_local + i
           ! Affectation et calcul numérique
-          rhs(dof) = - (dvol / cfg%r_al) * fields%p(i, j)
+          rhs(dof) = 0.0_dp
         end do
       end do
     end if
@@ -992,9 +1035,10 @@ contains
     real(dp), intent(in)                  :: dt
 
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: dx, dy, dvol, rho_u, rho_v, mu_c, d_val
+    real(dp) :: dx, dy, dvol, rho_u, rho_v, mu_c, d_val, al_u, al_v
+    real(dp) :: Du, Dv, mu_e, mu_w, mu_n, mu_s, mu_avg
     ! Déclaration de variable locale / paramètre de calcul
-    integer :: i, j, dof, u_nx, v_ny
+    integer :: i, j, dof, u_nx, v_ny, dof_u, dof_v
     ! Déclaration de variable locale / paramètre de calcul
     logical :: is_wall
 
@@ -1015,7 +1059,7 @@ contains
     ! Affectation et calcul numérique
     if (mesh%is_boundary_top) v_ny = v_ny + 1
 
-    ! 1. Diagonale Bloc u
+    ! 1. Diagonale et Stencil Bloc u
     do j = 1, mesh%ny_local
       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
       do i = 1, u_nx
@@ -1023,6 +1067,7 @@ contains
         dof = (j - 1) * u_nx + i
         ! Calcul de la masse volumique locale ou interpolée aux faces
         rho_u = fields%rho_u(i, j)
+        Du = (rho_u / dt) * dvol
         ! Affectation et calcul numérique
         is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
                   ! Affectation et calcul numérique
@@ -1031,29 +1076,40 @@ contains
 
         ! Évaluation de la condition logique
         if (is_wall) then
-          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-          this%diag_u(dof) = (rho_u / dt) * dvol
+          this%diag_u(dof) = Du
+          if (allocated(this%u_aP)) then
+            this%u_aE(dof) = 0.0_dp
+            this%u_aW(dof) = 0.0_dp
+            this%u_aN(dof) = 0.0_dp
+            this%u_aS(dof) = 0.0_dp
+            this%u_aP(dof) = merge(Du, 1.0_dp, Du > 1.0e-30_dp)
+          end if
           cycle
         end if
 
         ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
         mu_c = fields%mu(i, j)
-        ! Affectation et calcul numérique
-        d_val = (rho_u / dt) * dvol + 4.0_dp * mu_c * (dy / dx) + 2.0_dp * mu_c * (dx / dy) + &
-                2.0_dp * cfg%r_al * (dy / dx)
-        ! Évaluation de la condition logique
-        if (d_val > 1.0e-15_dp) then
-          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-          this%diag_u(dof) = d_val
-        ! Branche par défaut si condition non satisfaite
-        else
-          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-          this%diag_u(dof) = 1.0_dp
+        al_u = 0.0_dp
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+          al_u = 2.0_dp * cfg%r_al * (dy / dx)
+        end if
+        d_val = Du + 4.0_dp * mu_c * (dy / dx) + 2.0_dp * mu_c * (dx / dy) + al_u
+        this%diag_u(dof) = merge(d_val, 1.0_dp, d_val > 1.0e-15_dp)
+
+        if (allocated(this%u_aP)) then
+          mu_e = fields%mu(i, j)
+          mu_w = fields%mu(i - 1, j)
+          mu_avg = 0.5_dp * (mu_e + mu_w)
+          this%u_aE(dof) = 2.0_dp * mu_e * (dy / dx)
+          this%u_aW(dof) = 2.0_dp * mu_w * (dy / dx)
+          this%u_aN(dof) = mu_avg * (dx / dy)
+          this%u_aS(dof) = mu_avg * (dx / dy)
+          this%u_aP(dof) = Du + this%u_aE(dof) + this%u_aW(dof) + this%u_aN(dof) + this%u_aS(dof)
         end if
       end do
     end do
 
-    ! 2. Diagonale Bloc v
+    ! 2. Diagonale et Stencil Bloc v
     do j = 1, v_ny
       ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
       do i = 1, mesh%nx_local
@@ -1061,6 +1117,7 @@ contains
         dof = (j - 1) * mesh%nx_local + i
         ! Calcul de la masse volumique locale ou interpolée aux faces
         rho_v = fields%rho_v(i, j)
+        Dv = (rho_v / dt) * dvol
         ! Affectation et calcul numérique
         is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
                    ! Affectation et calcul numérique
@@ -1073,32 +1130,102 @@ contains
 
         ! Évaluation de la condition logique
         if (is_wall) then
-          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-          this%diag_v(dof) = (rho_v / dt) * dvol
+          this%diag_v(dof) = Dv
+          if (allocated(this%v_aP)) then
+            this%v_aE(dof) = 0.0_dp
+            this%v_aW(dof) = 0.0_dp
+            this%v_aN(dof) = 0.0_dp
+            this%v_aS(dof) = 0.0_dp
+            this%v_aP(dof) = merge(Dv, 1.0_dp, Dv > 1.0e-30_dp)
+          end if
           cycle
         end if
 
         ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
         mu_c = fields%mu(i, j)
-        ! Affectation et calcul numérique
-        d_val = (rho_v / dt) * dvol + 4.0_dp * mu_c * (dx / dy) + 2.0_dp * mu_c * (dy / dx) + &
-                2.0_dp * cfg%r_al * (dx / dy)
-        ! Évaluation de la condition logique
-        if (d_val > 1.0e-15_dp) then
-          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-          this%diag_v(dof) = d_val
-        ! Branche par défaut si condition non satisfaite
-        else
-          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-          this%diag_v(dof) = 1.0_dp
+        al_v = 0.0_dp
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+          al_v = 2.0_dp * cfg%r_al * (dx / dy)
+        end if
+        d_val = Dv + 4.0_dp * mu_c * (dx / dy) + 2.0_dp * mu_c * (dy / dx) + al_v
+        this%diag_v(dof) = merge(d_val, 1.0_dp, d_val > 1.0e-15_dp)
+
+        if (allocated(this%v_aP)) then
+          mu_n = fields%mu(i, j)
+          mu_s = fields%mu(i, j - 1)
+          mu_avg = 0.5_dp * (mu_n + mu_s)
+          this%v_aN(dof) = 2.0_dp * mu_n * (dx / dy)
+          this%v_aS(dof) = 2.0_dp * mu_s * (dx / dy)
+          this%v_aE(dof) = mu_avg * (dy / dx)
+          this%v_aW(dof) = mu_avg * (dy / dx)
+          this%v_aP(dof) = Dv + this%v_aN(dof) + this%v_aS(dof) + this%v_aE(dof) + this%v_aW(dof)
         end if
       end do
     end do
 
     ! 3. Diagonale Bloc p (si monolithique)
     if (cfg%solver_type == SOLVER_MONOLITHIC) then
-      ! Affectation et calcul numérique
-      this%diag_p = dvol / cfg%r_al
+      this%diag_p = 1.0_dp
+    end if
+
+    ! 4. Assemblage du complément de Schur pour préconditionneur par blocs (M. El Ouafa 2022/2023)
+    if (allocated(this%schur_aP)) then
+      this%schur_aE = 0.0_dp
+      this%schur_aW = 0.0_dp
+      this%schur_aN = 0.0_dp
+      this%schur_aS = 0.0_dp
+
+      do j = 1, mesh%ny_local
+        do i = 1, mesh%nx_local
+          ! Face Ouest (u_i, j)
+          is_wall = (i == 1 .and. mesh%is_boundary_left .and. &
+                     (cfg%bc_left%btype == BC_DIRICHLET .or. cfg%bc_left%btype == BC_FREESLIP)) .or. &
+                    is_u_face_in_obstacle(mesh, cfg, i, j)
+          if (.not. is_wall) then
+            dof_u = (j - 1) * u_nx + i
+            Du = this%u_aP(dof_u)
+            if (abs(Du) < 1.0e-30_dp) Du = 1.0_dp
+            this%schur_aW(i, j) = (dy * dy) / Du
+          end if
+
+          ! Face Est (u_i+1, j)
+          is_wall = (i == mesh%nx_local .and. mesh%is_boundary_right .and. &
+                     (cfg%bc_right%btype == BC_DIRICHLET .or. cfg%bc_right%btype == BC_FREESLIP)) .or. &
+                    is_u_face_in_obstacle(mesh, cfg, i + 1, j)
+          if (.not. is_wall) then
+            dof_u = (j - 1) * u_nx + (i + 1)
+            Du = this%u_aP(dof_u)
+            if (abs(Du) < 1.0e-30_dp) Du = 1.0_dp
+            this%schur_aE(i, j) = (dy * dy) / Du
+          end if
+
+          ! Face Sud (v_i, j)
+          is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
+                     (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
+                    is_v_face_in_obstacle(mesh, cfg, i, j)
+          if (.not. is_wall) then
+            dof_v = (j - 1) * mesh%nx_local + i
+            Dv = this%v_aP(dof_v)
+            if (abs(Dv) < 1.0e-30_dp) Dv = 1.0_dp
+            this%schur_aS(i, j) = (dx * dx) / Dv
+          end if
+
+          ! Face Nord (v_i, j+1)
+          is_wall = (j == mesh%ny_local .and. mesh%is_boundary_top .and. &
+                     (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
+                    is_v_face_in_obstacle(mesh, cfg, i, j + 1)
+          if (.not. is_wall) then
+            dof_v = j * mesh%nx_local + i
+            Dv = this%v_aP(dof_v)
+            if (abs(Dv) < 1.0e-30_dp) Dv = 1.0_dp
+            this%schur_aN(i, j) = (dx * dx) / Dv
+          end if
+
+          this%schur_aP(i, j) = this%schur_aW(i, j) + this%schur_aE(i, j) + &
+                                this%schur_aS(i, j) + this%schur_aN(i, j) + &
+                                1.0e-12_dp * dvol
+        end do
+      end do
     end if
   end subroutine ns_assemble_preconditioner_blocks
 
