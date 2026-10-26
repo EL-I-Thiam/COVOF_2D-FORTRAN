@@ -23,7 +23,7 @@
     },
     "time": {
         "dt": 6.25e-05,
-        "t_final": 0.005,
+        "t_final": 0.144,
         "cfl_max": 0.5,
         "adaptive_dt": false
     },
@@ -72,8 +72,8 @@
     "output": {
         "output_dir": "output_free_fall_dense_cylinder_monolithic",
         "case_name": "free_fall_dense_cylinder_monolithic",
-        "vtk_interval": 10,
-        "log_interval": 1,
+        "vtk_interval": 100,
+        "log_interval": 50,
         "write_csv_history": true
     }
 }
