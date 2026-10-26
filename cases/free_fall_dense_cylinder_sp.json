@@ -1,0 +1,77 @@
+{
+    "mesh": {
+        "nx": 50,
+        "ny": 100,
+        "lx": 0.1,
+        "ly": 0.2
+    },
+    "physics": {
+        "enable_two_phase": true,
+        "enable_surface_tension": false,
+        "enable_convection": true,
+        "sigma": 0.0,
+        "gx": 0.0,
+        "gy": -9.81,
+        "fluid1": {
+            "rho": 1.1768,
+            "mu": 1.85e-05
+        },
+        "fluid2": {
+            "rho": 100000.0,
+            "mu": 100000.0
+        }
+    },
+    "time": {
+        "dt": 6.25e-05,
+        "t_final": 0.0002,
+        "cfl_max": 0.5,
+        "adaptive_dt": false
+    },
+    "boundary_conditions": {
+        "left": {
+            "type": "FREE_SLIP",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "right": {
+            "type": "FREE_SLIP",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "bottom": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        },
+        "top": {
+            "type": "DIRICHLET",
+            "u": 0.0,
+            "v": 0.0
+        }
+    },
+    "initial_condition": {
+        "type": "CYLINDER",
+        "center_x": 0.05,
+        "center_y": 0.15,
+        "radius": 0.0125
+    },
+    "solver": {
+        "type": "STANDARD_PROJECTION",
+        "tol": 1e-06,
+        "max_iter": 500,
+        "use_precond": true,
+        "precond_type": "JACOBI"
+    },
+    "vof": {
+        "advection_method": "WEYMOUTH_YUE",
+        "reconstruction_method": "PLIC",
+        "cfl_vof": 0.5
+    },
+    "output": {
+        "output_dir": "output_dense_cylinder_sp",
+        "case_name": "dense_cylinder_sp",
+        "vtk_interval": 1,
+        "log_interval": 1,
+        "write_csv_history": true
+    }
+}

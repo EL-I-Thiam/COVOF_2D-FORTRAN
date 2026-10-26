@@ -435,6 +435,11 @@ contains
        cfg%solver_type = SOLVER_MONOLITHIC
        ! Affectation et calcul numérique
        cfg%linear_solver = LINEAR_BICGSTAB2
+    else if (trim(str_val) == "STANDARD_PROJECTION" .or. trim(str_val) == "PROJECTION") then
+       ! Affectation et calcul numérique
+       cfg%solver_type = SOLVER_STANDARD_PROJECTION
+       ! Affectation et calcul numérique
+       cfg%linear_solver = LINEAR_BICGSTAB2
     ! Branche par défaut si condition non satisfaite
     else
        ! Affectation et calcul numérique

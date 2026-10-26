@@ -41,6 +41,8 @@ module module_constants
   integer, parameter, public :: SOLVER_AUGMENTED_LAGRANGIAN = 1
   ! Formulation couplée monolithique directe avec intégration du gradient de pression
   integer, parameter, public :: SOLVER_MONOLITHIC           = 2
+  ! Méthode de projection standard de Chorin-Temam (fractional step)
+  integer, parameter, public :: SOLVER_STANDARD_PROJECTION  = 3
 
   ! --- 5. Algorithmes de Résolution Linéaire de Krylov (Matrix-Free) ---
   ! Biconjugué Gradient Stabilisé d'ordre 2 (Sleijpen & van der Vorst) pour systèmes asymétriques

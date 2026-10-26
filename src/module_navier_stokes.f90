@@ -157,7 +157,8 @@ contains
     this%n_owned_p = mesh%nx_local * mesh%ny_local
 
     ! Évaluation de la condition logique
-    if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+    if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+        cfg%solver_type == SOLVER_STANDARD_PROJECTION) then
       ! Affectation et calcul numérique
       this%n_owned_total = this%n_owned_u + this%n_owned_v
     ! Branche par défaut si condition non satisfaite

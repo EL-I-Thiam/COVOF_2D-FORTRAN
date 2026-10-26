@@ -49,6 +49,8 @@ module module_simulation
      procedure :: run_laplacian => sim_run_laplacian
      ! Affectation et calcul numérique
      procedure :: run_vortex_advection => sim_run_vortex_advection
+     ! Affectation et calcul numérique
+     procedure :: solve_standard_projection => sim_solve_standard_projection
   end type simulation_t
 
 contains
@@ -411,39 +413,43 @@ contains
 
        ! Affectation et calcul numérique
        total_iters = 0
-       ! Évaluation de la condition logique
-       if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
-          ! Affectation et calcul numérique
-          uzawa_max = this%config%uzawa_iter
-       ! Branche par défaut si condition non satisfaite
+       ! Évaluation de la méthode de résolution Navier-Stokes
+       if (this%config%solver_type == SOLVER_STANDARD_PROJECTION) then
+          call this%solve_standard_projection(dt, total_iters)
        else
-          ! Affectation et calcul numérique
-          uzawa_max = 1
-       end if
-
-       ! Boucle d'itération numérique
-       do m = 1, uzawa_max
-          ! 3. Construction du second membre rhs
-          call this%ns_solver%assemble_rhs(this%mesh, this%config, this%fields, dt, rhs)
-
-          ! 4. Initialisation du vecteur d'état à partir des champs courants
-          call this%ns_solver%pack_vector(this%mesh, this%config, this%fields, state_vector)
-
-          ! 5. Résolution du système linéaire par Krylov (BiCGSTAB2 / PCG / GMRES)
-          call solve_linear_system(this%ns_solver, this%mesh, this%config, this%fields, dt, &
-                                   rhs, state_vector, iters)
-          ! Affectation et calcul numérique
-          total_iters = total_iters + iters
-
-          ! 6. Déballage de la vitesse résolue
-          call this%ns_solver%unpack_vector(this%mesh, this%config, state_vector, this%fields, .false.)
-
-          ! 7. Mise à jour de la pression par Lagrangien augmenté (étape d'Uzawa)
           if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
-             ! Appel de sous-programme modulaire
-             call this%ns_solver%update_pressure_al(this%mesh, this%config, this%fields)
+             ! Affectation et calcul numérique
+             uzawa_max = this%config%uzawa_iter
+          ! Branche par défaut si condition non satisfaite
+          else
+             ! Affectation et calcul numérique
+             uzawa_max = 1
           end if
-       end do
+
+          ! Boucle d'itération numérique
+          do m = 1, uzawa_max
+             ! 3. Construction du second membre rhs
+             call this%ns_solver%assemble_rhs(this%mesh, this%config, this%fields, dt, rhs)
+
+             ! 4. Initialisation du vecteur d'état à partir des champs courants
+             call this%ns_solver%pack_vector(this%mesh, this%config, this%fields, state_vector)
+
+             ! 5. Résolution du système linéaire par Krylov (BiCGSTAB2 / PCG / GMRES)
+             call solve_linear_system(this%ns_solver, this%mesh, this%config, this%fields, dt, &
+                                      rhs, state_vector, iters)
+             ! Affectation et calcul numérique
+             total_iters = total_iters + iters
+
+             ! 6. Déballage de la vitesse résolue
+             call this%ns_solver%unpack_vector(this%mesh, this%config, state_vector, this%fields, .false.)
+
+             ! 7. Mise à jour de la pression par Lagrangien augmenté (étape d'Uzawa)
+             if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+                ! Appel de sous-programme modulaire
+                call this%ns_solver%update_pressure_al(this%mesh, this%config, this%fields)
+             end if
+          end do
+       end if
 
        ! 7.5 Résolution de l'énergie thermique si activée
        if (this%config%enable_energy) then
@@ -1007,5 +1013,357 @@ contains
     ! Libération de la mémoire allouée
     deallocate(C_initial)
   end subroutine sim_run_vortex_advection
+
+  !-----------------------------------------------------------------------------
+  ! Résout un pas de temps par la méthode de Projection Standard (Chorin-Temam)
+  ! 1. Prédiction de vitesse visqueuse u* et v* sans pression
+  ! 2. Équation de Poisson pour la pression : div((dt/rho)*grad(p)) = div(u*)
+  ! 3. Correction / Projection de vitesse : u^{n+1} = u* - (dt/rho)*grad(p)
+  !-----------------------------------------------------------------------------
+  subroutine sim_solve_standard_projection(this, dt, total_iters)
+    class(simulation_t), intent(inout) :: this
+    real(dp), intent(in)               :: dt
+    integer, intent(out)               :: total_iters
+
+    real(dp), allocatable :: rhs(:), state_vector(:)
+    real(dp), allocatable :: a_W(:,:), a_E(:,:), a_S(:,:), a_N(:,:), a_P(:,:), b_p(:,:), p_sol(:,:)
+    real(dp), allocatable :: r_p(:,:), Ap_p(:,:), z_p(:,:), d_p(:,:), Ad_p(:,:)
+    integer :: iters_u, iters_p, nx, ny, u_nx, v_ny, i, j, iter
+    real(dp) :: dx, dy, dvol, b_norm, r_norm, rz_old, rz_new, alpha, beta, dAd
+    real(dp) :: rho_u, rho_v, div_u_star, grad_p_x, grad_p_y, p_w, p_e, p_s, p_n
+    real(dp) :: local_p_sum, p_total_sum, p_mean
+    logical  :: is_wall_W, is_wall_E, is_wall_S, is_wall_N, is_wall
+    real(dp), parameter :: tol_p = 1.0e-7_dp
+    integer, parameter  :: max_iter_p = 1000
+
+    nx = this%mesh%nx_local
+    ny = this%mesh%ny_local
+    dx = this%mesh%dx
+    dy = this%mesh%dy
+    dvol = dx * dy
+
+    u_nx = nx
+    if (this%mesh%is_boundary_right) u_nx = u_nx + 1
+    v_ny = ny
+    if (this%mesh%is_boundary_top) v_ny = v_ny + 1
+
+    ! =========================================================================
+    ! 1. Étape de Prédiction : u* et v*
+    ! =========================================================================
+    call this%ns_solver%assemble_preconditioner_blocks(this%mesh, this%config, this%fields, dt)
+
+    allocate(rhs(this%ns_solver%n_owned_total))
+    allocate(state_vector(this%ns_solver%n_owned_total))
+
+    call this%ns_solver%assemble_rhs(this%mesh, this%config, this%fields, dt, rhs)
+    call this%ns_solver%pack_vector(this%mesh, this%config, this%fields, state_vector)
+
+    call solve_linear_system(this%ns_solver, this%mesh, this%config, this%fields, dt, &
+                             rhs, state_vector, iters_u)
+
+    call this%ns_solver%unpack_vector(this%mesh, this%config, state_vector, this%fields, .false.)
+
+    deallocate(rhs, state_vector)
+
+    ! =========================================================================
+    ! 2. Étape de Poisson : div( (dt/rho) * grad(p) ) = div(u*)
+    ! =========================================================================
+    allocate(a_W(nx, ny), a_E(nx, ny), a_S(nx, ny), a_N(nx, ny), a_P(nx, ny))
+    allocate(b_p(nx, ny), p_sol(nx, ny))
+    allocate(r_p(nx, ny), Ap_p(nx, ny), z_p(nx, ny), d_p(nx, ny), Ad_p(nx, ny))
+
+    a_W = 0.0_dp; a_E = 0.0_dp; a_S = 0.0_dp; a_N = 0.0_dp; a_P = 0.0_dp
+
+    do j = 1, ny
+       do i = 1, nx
+          ! Second membre : divergence de vitesse prédite (négative)
+          div_u_star = (this%fields%u(i + 1, j) - this%fields%u(i, j)) * dy + &
+                       (this%fields%v(i, j + 1) - this%fields%v(i, j)) * dx
+          b_p(i, j) = -div_u_star
+
+          ! Face Ouest (u_i, j)
+          is_wall_W = (i == 1 .and. this%mesh%is_boundary_left .and. &
+                      (this%config%bc_left%btype == BC_DIRICHLET .or. this%config%bc_left%btype == BC_FREESLIP)) .or. &
+                      is_u_face_in_obstacle(this%mesh, this%config, i, j)
+          if (.not. is_wall_W) then
+             rho_u = this%fields%rho_u(i, j)
+             if (rho_u < 1.0e-12_dp) rho_u = 1.0_dp
+             a_W(i, j) = (dt * dy) / (rho_u * dx)
+          end if
+
+          ! Face Est (u_i+1, j)
+          is_wall_E = (i == nx .and. this%mesh%is_boundary_right .and. &
+                      (this%config%bc_right%btype == BC_DIRICHLET .or. this%config%bc_right%btype == BC_FREESLIP)) .or. &
+                      is_u_face_in_obstacle(this%mesh, this%config, i + 1, j)
+          if (.not. is_wall_E) then
+             rho_u = this%fields%rho_u(i + 1, j)
+             if (rho_u < 1.0e-12_dp) rho_u = 1.0_dp
+             a_E(i, j) = (dt * dy) / (rho_u * dx)
+          end if
+
+          ! Face Sud (v_i, j)
+          is_wall_S = (j == 1 .and. this%mesh%is_boundary_bottom .and. &
+                      (this%config%bc_bottom%btype == BC_DIRICHLET .or. this%config%bc_bottom%btype == BC_FREESLIP)) .or. &
+                      is_v_face_in_obstacle(this%mesh, this%config, i, j)
+          if (.not. is_wall_S) then
+             rho_v = this%fields%rho_v(i, j)
+             if (rho_v < 1.0e-12_dp) rho_v = 1.0_dp
+             a_S(i, j) = (dt * dx) / (rho_v * dy)
+          end if
+
+          ! Face Nord (v_i, j+1)
+          is_wall_N = (j == ny .and. this%mesh%is_boundary_top .and. &
+                      (this%config%bc_top%btype == BC_DIRICHLET .or. this%config%bc_top%btype == BC_FREESLIP)) .or. &
+                      is_v_face_in_obstacle(this%mesh, this%config, i, j + 1)
+          if (.not. is_wall_N) then
+             rho_v = this%fields%rho_v(i, j + 1)
+             if (rho_v < 1.0e-12_dp) rho_v = 1.0_dp
+             a_N(i, j) = (dt * dx) / (rho_v * dy)
+          end if
+
+          ! Diagonale
+          a_P(i, j) = a_W(i, j) + a_E(i, j) + a_S(i, j) + a_N(i, j) + 1.0e-12_dp * dvol
+       end do
+    end do
+
+    ! Initialisation avec la pression précédente
+    p_sol = this%fields%p(1:nx, 1:ny)
+
+    ! Résolution de A_p * p = b_p par PCG avec SSOR
+    call poisson_matvec(nx, ny, this%config, a_P, a_W, a_E, a_S, a_N, p_sol, Ap_p)
+    r_p = b_p - Ap_p
+
+    b_norm = global_norm2_2d(this%mesh, b_p, nx, ny)
+    if (b_norm < 1.0e-30_dp) b_norm = 1.0_dp
+
+    r_norm = global_norm2_2d(this%mesh, r_p, nx, ny)
+    iters_p = 0
+
+    if (r_norm / b_norm > tol_p) then
+       call poisson_ssor(nx, ny, this%config, a_P, a_W, a_E, a_S, a_N, r_p, z_p)
+       d_p = z_p
+       rz_old = global_dot_product_2d(this%mesh, r_p, z_p, nx, ny)
+
+       do iter = 1, max_iter_p
+          iters_p = iters_p + 1
+          call poisson_matvec(nx, ny, this%config, a_P, a_W, a_E, a_S, a_N, d_p, Ad_p)
+
+          dAd = global_dot_product_2d(this%mesh, d_p, Ad_p, nx, ny)
+          if (abs(dAd) < 1.0e-35_dp) exit
+
+          alpha = rz_old / dAd
+          p_sol = p_sol + alpha * d_p
+          r_p   = r_p - alpha * Ad_p
+
+          r_norm = global_norm2_2d(this%mesh, r_p, nx, ny)
+          if (r_norm / b_norm <= tol_p) exit
+
+          call poisson_ssor(nx, ny, this%config, a_P, a_W, a_E, a_S, a_N, r_p, z_p)
+          rz_new = global_dot_product_2d(this%mesh, r_p, z_p, nx, ny)
+
+          if (abs(rz_old) < 1.0e-35_dp) exit
+          beta = rz_new / rz_old
+          rz_old = rz_new
+
+          d_p = z_p + beta * d_p
+       end do
+    end if
+
+    ! Pression à moyenne nulle
+    local_p_sum = sum(p_sol)
+    p_total_sum = global_sum(this%mesh, local_p_sum)
+    p_mean = p_total_sum / real(this%mesh%nx_global * this%mesh%ny_global, dp)
+    p_sol = p_sol - p_mean
+
+    this%fields%p(1:nx, 1:ny) = p_sol
+
+    ! =========================================================================
+    ! 3. Étape de Correction / Projection de Vitesse : u = u* - (dt/rho) * grad(p)
+    ! =========================================================================
+    do j = 1, ny
+       do i = 1, u_nx
+          is_wall = (i == 1 .and. this%mesh%is_boundary_left .and. &
+                    (this%config%bc_left%btype == BC_DIRICHLET .or. this%config%bc_left%btype == BC_FREESLIP)) .or. &
+                    (i == u_nx .and. this%mesh%is_boundary_right .and. &
+                    (this%config%bc_right%btype == BC_DIRICHLET .or. this%config%bc_right%btype == BC_FREESLIP)) .or. &
+                    is_u_face_in_obstacle(this%mesh, this%config, i, j)
+          if (is_wall) cycle
+
+          rho_u = this%fields%rho_u(i, j)
+          if (rho_u < 1.0e-12_dp) rho_u = 1.0_dp
+
+          if (i > 1) then
+             p_w = this%fields%p(i - 1, j)
+          else if (this%config%bc_left%btype == BC_PERIODIC) then
+             p_w = this%fields%p(nx, j)
+          else
+             p_w = this%fields%p(1, j)
+          end if
+
+          if (i <= nx) then
+             p_e = this%fields%p(i, j)
+          else if (this%config%bc_right%btype == BC_PERIODIC) then
+             p_e = this%fields%p(1, j)
+          else
+             p_e = this%fields%p(nx, j)
+          end if
+
+          grad_p_x = (p_e - p_w) / dx
+          this%fields%u(i, j) = this%fields%u(i, j) - (dt / rho_u) * grad_p_x
+       end do
+    end do
+
+    do j = 1, v_ny
+       do i = 1, nx
+          is_wall = (j == 1 .and. this%mesh%is_boundary_bottom .and. &
+                    (this%config%bc_bottom%btype == BC_DIRICHLET .or. this%config%bc_bottom%btype == BC_FREESLIP)) .or. &
+                    (j == v_ny .and. this%mesh%is_boundary_top .and. &
+                    (this%config%bc_top%btype == BC_DIRICHLET .or. this%config%bc_top%btype == BC_FREESLIP)) .or. &
+                    is_v_face_in_obstacle(this%mesh, this%config, i, j)
+          if (is_wall) cycle
+
+          rho_v = this%fields%rho_v(i, j)
+          if (rho_v < 1.0e-12_dp) rho_v = 1.0_dp
+
+          if (j > 1) then
+             p_s = this%fields%p(i, j - 1)
+          else if (this%config%bc_bottom%btype == BC_PERIODIC) then
+             p_s = this%fields%p(i, ny)
+          else
+             p_s = this%fields%p(i, 1)
+          end if
+
+          if (j <= ny) then
+             p_n = this%fields%p(i, j)
+          else if (this%config%bc_top%btype == BC_PERIODIC) then
+             p_n = this%fields%p(i, 1)
+          else
+             p_n = this%fields%p(i, ny)
+          end if
+
+          grad_p_y = (p_n - p_s) / dy
+          this%fields%v(i, j) = this%fields%v(i, j) - (dt / rho_v) * grad_p_y
+       end do
+    end do
+
+    ! Synchronisations MPI et conditions aux limites
+    call sync_u(this%mesh, this%fields%u)
+    call sync_v(this%mesh, this%fields%v)
+    call sync_cell_scalar(this%mesh, this%fields%p)
+    call apply_boundary_conditions(this%mesh, this%config, this%fields, .false.)
+
+    deallocate(a_W, a_E, a_S, a_N, a_P, b_p, p_sol)
+    deallocate(r_p, Ap_p, z_p, d_p, Ad_p)
+
+    total_iters = iters_u + iters_p
+  end subroutine sim_solve_standard_projection
+
+  subroutine poisson_matvec(nx, ny, cfg, a_P, a_W, a_E, a_S, a_N, x, y)
+    integer, intent(in) :: nx, ny
+    type(config_t), intent(in) :: cfg
+    real(dp), intent(in) :: a_P(nx, ny), a_W(nx, ny), a_E(nx, ny), a_S(nx, ny), a_N(nx, ny)
+    real(dp), intent(in) :: x(nx, ny)
+    real(dp), intent(out) :: y(nx, ny)
+    integer :: i, j
+    real(dp) :: val
+
+    do j = 1, ny
+       do i = 1, nx
+          val = a_P(i, j) * x(i, j)
+          if (i > 1) then
+             val = val - a_W(i, j) * x(i - 1, j)
+          else if (cfg%bc_left%btype == BC_PERIODIC) then
+             val = val - a_W(i, j) * x(nx, j)
+          end if
+
+          if (i < nx) then
+             val = val - a_E(i, j) * x(i + 1, j)
+          else if (cfg%bc_right%btype == BC_PERIODIC) then
+             val = val - a_E(i, j) * x(1, j)
+          end if
+
+          if (j > 1) then
+             val = val - a_S(i, j) * x(i, j - 1)
+          else if (cfg%bc_bottom%btype == BC_PERIODIC) then
+             val = val - a_S(i, j) * x(i, ny)
+          end if
+
+          if (j < ny) then
+             val = val - a_N(i, j) * x(i, j + 1)
+          else if (cfg%bc_top%btype == BC_PERIODIC) then
+             val = val - a_N(i, j) * x(i, 1)
+          end if
+
+          y(i, j) = val
+       end do
+    end do
+  end subroutine poisson_matvec
+
+  subroutine poisson_ssor(nx, ny, cfg, a_P, a_W, a_E, a_S, a_N, r, z)
+    integer, intent(in) :: nx, ny
+    type(config_t), intent(in) :: cfg
+    real(dp), intent(in) :: a_P(nx, ny), a_W(nx, ny), a_E(nx, ny), a_S(nx, ny), a_N(nx, ny)
+    real(dp), intent(in) :: r(nx, ny)
+    real(dp), intent(out) :: z(nx, ny)
+    integer :: i, j
+    real(dp) :: val
+
+    z = 0.0_dp
+    ! Forward sweep
+    do j = 1, ny
+       do i = 1, nx
+          val = r(i, j)
+          if (i > 1) then
+             val = val + a_W(i, j) * z(i - 1, j)
+          else if (cfg%bc_left%btype == BC_PERIODIC) then
+             val = val + a_W(i, j) * z(nx, j)
+          end if
+
+          if (j > 1) then
+             val = val + a_S(i, j) * z(i, j - 1)
+          else if (cfg%bc_bottom%btype == BC_PERIODIC) then
+             val = val + a_S(i, j) * z(i, ny)
+          end if
+
+          z(i, j) = val / a_P(i, j)
+       end do
+    end do
+
+    ! Backward sweep
+    do j = ny, 1, -1
+       do i = nx, 1, -1
+          val = a_P(i, j) * z(i, j)
+          if (i < nx) then
+             val = val + a_E(i, j) * z(i + 1, j)
+          else if (cfg%bc_right%btype == BC_PERIODIC) then
+             val = val + a_E(i, j) * z(1, j)
+          end if
+
+          if (j < ny) then
+             val = val + a_N(i, j) * z(i, j + 1)
+          else if (cfg%bc_top%btype == BC_PERIODIC) then
+             val = val + a_N(i, j) * z(i, 1)
+          end if
+
+          z(i, j) = val / a_P(i, j)
+       end do
+    end do
+  end subroutine poisson_ssor
+
+  real(dp) function global_dot_product_2d(mesh, x, y, nx, ny)
+    type(mesh_2d_t), intent(in) :: mesh
+    integer, intent(in)          :: nx, ny
+    real(dp), intent(in)         :: x(nx, ny), y(nx, ny)
+    real(dp) :: local_dot
+    local_dot = sum(x * y)
+    global_dot_product_2d = global_sum(mesh, local_dot)
+  end function global_dot_product_2d
+
+  real(dp) function global_norm2_2d(mesh, x, nx, ny)
+    type(mesh_2d_t), intent(in) :: mesh
+    integer, intent(in)          :: nx, ny
+    real(dp), intent(in)         :: x(nx, ny)
+    global_norm2_2d = sqrt(global_dot_product_2d(mesh, x, x, nx, ny))
+  end function global_norm2_2d
 
 end module module_simulation
