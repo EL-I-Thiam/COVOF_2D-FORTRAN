@@ -23,7 +23,7 @@
     },
     "time": {
         "dt": 6.25e-05,
-        "t_final": 0.0002,
+        "t_final": 0.144,
         "cfl_max": 0.5,
         "adaptive_dt": false
     },
@@ -68,10 +68,10 @@
         "cfl_vof": 0.5
     },
     "output": {
-        "output_dir": "output_dense_cylinder_sp",
-        "case_name": "dense_cylinder_sp",
-        "vtk_interval": 1,
-        "log_interval": 1,
+        "output_dir": "output_free_fall_dense_cylinder_sp",
+        "case_name": "free_fall_dense_cylinder_sp",
+        "vtk_interval": 100,
+        "log_interval": 100,
         "write_csv_history": true
     }
 }
