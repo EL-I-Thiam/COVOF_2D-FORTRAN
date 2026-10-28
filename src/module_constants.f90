@@ -112,4 +112,10 @@ module module_constants
   ! Obstacle circulaire cylindrique défini par son centre (xc, yc) et son rayon R
   integer, parameter, public :: OBS_CYLINDER = 2
 
+  ! --- 11. Lois d'État Thermodynamiques (EOS - Fluids 2024) ---
+  integer, parameter, public :: EOS_INCOMPRESSIBLE = 0
+  integer, parameter, public :: EOS_LINEAR         = 1
+  integer, parameter, public :: EOS_IDEAL_GAS      = 2
+  integer, parameter, public :: EOS_NASG           = 3
+
 end module module_constants

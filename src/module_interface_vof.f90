@@ -6,6 +6,7 @@ module module_interface_vof
   use module_fields, only: flow_fields_t
   use module_config, only: config_t
   use module_mpi_comm, only: exchange_halos_scalar, apply_vof_bc
+  use module_eos, only: eos_compute_chi_T
   use module_interface_reconstruction, only: interface_segment_t, cut_box_area, compute_alpha, &
                                             reconstruct_interface, evaluate_limiter
   implicit none
@@ -243,7 +244,7 @@ contains
     ! Déclaration de variable locale / paramètre de calcul
     integer :: i, j, nx, ny
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: c, y, z, mu_val, m_sw, m_se, m_nw, m_ne
+    real(dp) :: c, y, z, mu_val, m_sw, m_se, m_nw, m_ne, chi1, chi2
 
     ! Affectation et calcul numérique
     nx = mesh%nx_local
@@ -312,6 +313,12 @@ contains
           fields%rho(i, j) = c * cfg%rho1 + (1.0_dp - c) * cfg%rho2
           ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
           fields%mu(i, j)  = c * cfg%mu1  + (1.0_dp - c) * cfg%mu2
+
+          if (cfg%compressible) then
+             chi1 = eos_compute_chi_T(cfg%eos1_type, cfg%chi_T1, fields%p(i, j), cfg%rho1, cfg%p_inf1, cfg%b_nasg1)
+             chi2 = eos_compute_chi_T(cfg%eos2_type, cfg%chi_T2, fields%p(i, j), cfg%rho2, cfg%p_inf2, cfg%b_nasg2)
+             fields%chi_T(i, j) = c * chi1 + (1.0_dp - c) * chi2
+          end if
        end do
     end do
 
@@ -423,9 +430,13 @@ contains
        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
           ! Calcul de la métrique spatiale élémentaire
-          dc_dx = (fields%C(i+1, j) - fields%C(i-1, j)) / (2.0_dp * dx)
-          ! Calcul de la métrique spatiale élémentaire
-          dc_dy = (fields%C(i, j+1) - fields%C(i, j-1)) / (2.0_dp * dy)
+          if (cfg%enable_diffusion_smoothing) then
+             dc_dx = (fields%C_tilde(i+1, j) - fields%C_tilde(i-1, j)) / (2.0_dp * dx)
+             dc_dy = (fields%C_tilde(i, j+1) - fields%C_tilde(i, j-1)) / (2.0_dp * dy)
+          else
+             dc_dx = (fields%C(i+1, j) - fields%C(i-1, j)) / (2.0_dp * dx)
+             dc_dy = (fields%C(i, j+1) - fields%C(i, j-1)) / (2.0_dp * dy)
+          end if
           ! Affectation et calcul numérique
           grad_mag = sqrt(dc_dx * dc_dx + dc_dy * dc_dy)
           ! Évaluation de la condition logique
@@ -512,6 +523,9 @@ contains
     call exchange_halos_scalar(fields%C, mesh)
     call apply_vof_bc(fields, mesh, cfg)
     call update_physical_properties(fields, mesh, cfg)
+    if (cfg%enable_diffusion_smoothing) then
+       call vof_smooth_diffusion(fields, mesh, cfg)
+    end if
     call compute_curvature_and_csf(fields, mesh, cfg)
   end subroutine advect_vof
 
@@ -1018,5 +1032,45 @@ contains
     ! Appel de sous-programme modulaire
     call compute_curvature_and_csf(fields, mesh, this%cfg)
   end subroutine vof_advect_step
+
+  ! [Procédure/Module] subroutine vof_smooth_diffusion
+  subroutine vof_smooth_diffusion(fields, mesh, cfg)
+    type(flow_fields_t), intent(inout) :: fields
+    type(mesh_2d_t),     intent(in)    :: mesh
+    type(config_t),      intent(in)    :: cfg
+
+    integer  :: i, j, s, nx, ny, steps
+    real(dp) :: dx, dy, dtau, lap_x, lap_y
+    real(dp), allocatable :: c_next(:, :)
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+
+    fields%C_tilde = fields%C
+    dtau = 0.2_dp * min(dx * dx, dy * dy)
+    steps = cfg%diffusion_smoothing_steps
+    if (steps < 1) steps = 3
+
+    allocate(c_next(0:nx+1, 0:ny+1))
+
+    do s = 1, steps
+       call exchange_halos_scalar(fields%C_tilde, mesh)
+       c_next = fields%C_tilde
+
+       do j = 1, ny
+          do i = 1, nx
+             lap_x = (fields%C_tilde(i+1, j) - 2.0_dp * fields%C_tilde(i, j) + fields%C_tilde(i-1, j)) / (dx * dx)
+             lap_y = (fields%C_tilde(i, j+1) - 2.0_dp * fields%C_tilde(i, j) + fields%C_tilde(i, j-1)) / (dy * dy)
+             c_next(i, j) = fields%C_tilde(i, j) + dtau * (lap_x + lap_y)
+          end do
+       end do
+       fields%C_tilde = c_next
+    end do
+
+    call exchange_halos_scalar(fields%C_tilde, mesh)
+    deallocate(c_next)
+  end subroutine vof_smooth_diffusion
 
 end module module_interface_vof

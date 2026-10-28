@@ -3,6 +3,7 @@ module module_config
   use module_precision, only: dp
   use module_constants
   use module_json
+  use module_eos, only: eos_parse_type
   implicit none
   private
 
@@ -58,6 +59,23 @@ module module_config
      real(dp) :: rho1 = 1.0_dp, mu1 = 1.0e-3_dp
      ! Déclaration de variable locale / paramètre de calcul
      real(dp) :: rho2 = 1.0_dp, mu2 = 1.0e-3_dp
+
+     ! Formulation All-Mach / Compressible (Fluids 2024, El Ouafa et al.)
+     logical  :: compressible = .false.
+     character(len=32) :: flow_regime = "INCOMPRESSIBLE"
+     logical  :: enable_ssp_rk3_momentum = .false.
+     logical  :: enable_diffusion_smoothing = .false.
+     integer  :: diffusion_smoothing_steps = 3
+
+     ! Fluid 1 EOS
+     integer  :: eos1_type = EOS_INCOMPRESSIBLE
+     real(dp) :: chi_T1 = 0.0_dp, gamma1 = 1.4_dp, r_gas1 = 287.05_dp, cv1 = 717.5_dp
+     real(dp) :: p_inf1 = 0.0_dp, b_nasg1 = 0.0_dp, q_nasg1 = 0.0_dp
+
+     ! Fluid 2 EOS
+     integer  :: eos2_type = EOS_INCOMPRESSIBLE
+     real(dp) :: chi_T2 = 0.0_dp, gamma2 = 1.4_dp, r_gas2 = 287.05_dp, cv2 = 717.5_dp
+     real(dp) :: p_inf2 = 0.0_dp, b_nasg2 = 0.0_dp, q_nasg2 = 0.0_dp
 
      ! VOF and interface tracking
      character(len=32) :: reconstruction_method = "PLIC"
@@ -305,6 +323,39 @@ contains
     call json_get_real(buf, "physics.fluid2.rho", cfg%rho2, cfg%rho1)
     ! Appel de sous-programme modulaire
     call json_get_real(buf, "physics.fluid2.mu", cfg%mu2, cfg%mu1)
+
+    ! Formulation Compressible / All-Mach (Fluids 2024)
+    call json_get_bool(buf, "physics.compressible", cfg%compressible, .false.)
+    call json_get_string(buf, "physics.flow_regime", str_val, "INCOMPRESSIBLE")
+    cfg%flow_regime = trim(str_val)
+    if (trim(str_val) == "COMPRESSIBLE" .or. trim(str_val) == "ALL_MACH") then
+       cfg%compressible = .true.
+    end if
+    call json_get_bool(buf, "physics.enable_ssp_rk3_momentum", cfg%enable_ssp_rk3_momentum, cfg%compressible)
+    call json_get_bool(buf, "physics.enable_diffusion_smoothing", cfg%enable_diffusion_smoothing, .false.)
+    call json_get_int(buf, "physics.diffusion_smoothing_steps", cfg%diffusion_smoothing_steps, 3)
+
+    ! EOS Fluide 1
+    call json_get_string(buf, "physics.fluid1.eos", str_val, "INCOMPRESSIBLE")
+    cfg%eos1_type = eos_parse_type(str_val)
+    call json_get_real(buf, "physics.fluid1.chi_T", cfg%chi_T1, 0.0_dp)
+    call json_get_real(buf, "physics.fluid1.gamma", cfg%gamma1, 1.4_dp)
+    call json_get_real(buf, "physics.fluid1.r_gas", cfg%r_gas1, 287.05_dp)
+    call json_get_real(buf, "physics.fluid1.cv", cfg%cv1, 717.5_dp)
+    call json_get_real(buf, "physics.fluid1.p_inf", cfg%p_inf1, 0.0_dp)
+    call json_get_real(buf, "physics.fluid1.b_nasg", cfg%b_nasg1, 0.0_dp)
+    call json_get_real(buf, "physics.fluid1.q_nasg", cfg%q_nasg1, 0.0_dp)
+
+    ! EOS Fluide 2
+    call json_get_string(buf, "physics.fluid2.eos", str_val, "INCOMPRESSIBLE")
+    cfg%eos2_type = eos_parse_type(str_val)
+    call json_get_real(buf, "physics.fluid2.chi_T", cfg%chi_T2, 0.0_dp)
+    call json_get_real(buf, "physics.fluid2.gamma", cfg%gamma2, 1.4_dp)
+    call json_get_real(buf, "physics.fluid2.r_gas", cfg%r_gas2, 287.05_dp)
+    call json_get_real(buf, "physics.fluid2.cv", cfg%cv2, 717.5_dp)
+    call json_get_real(buf, "physics.fluid2.p_inf", cfg%p_inf2, 0.0_dp)
+    call json_get_real(buf, "physics.fluid2.b_nasg", cfg%b_nasg2, 0.0_dp)
+    call json_get_real(buf, "physics.fluid2.q_nasg", cfg%q_nasg2, 0.0_dp)
 
     ! Thermal
     call json_get_bool(buf, "physics.enable_energy", cfg%enable_energy, .false.)

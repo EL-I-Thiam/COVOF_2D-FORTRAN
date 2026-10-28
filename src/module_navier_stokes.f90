@@ -66,6 +66,8 @@ module module_navier_stokes
     procedure :: assemble_preconditioner_blocks => ns_assemble_preconditioner_blocks
     ! Affectation et calcul numérique
     procedure :: solve_energy => ns_solve_energy
+    procedure :: advect_ssp_rk3_momentum => ns_advect_ssp_rk3_momentum
+    procedure :: solve_total_energy => ns_solve_total_energy
     ! Affectation et calcul numérique
     procedure :: compute_mean_nusselt_hot_wall => ns_compute_mean_nusselt_hot_wall
   end type navier_stokes_t
@@ -415,6 +417,7 @@ contains
     real(dp) :: mu_node_E, mu_node_W, shear_E, shear_W
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: div_val, diag_p_term
+    real(dp) :: chi, u_c, v_c, dp_dx, dp_dy
     ! Déclaration de variable locale / paramètre de calcul
     logical  :: is_wall_bot, is_wall_top, in_obs
 
@@ -687,7 +690,7 @@ contains
     end do
 
     ! =========================================================================
-    ! 3. Équation de Continuité (si monolithique régularisé)
+    ! 3. Équation de Continuité (si monolithique régularisé ou compressible)
     ! =========================================================================
     if (cfg%solver_type == SOLVER_MONOLITHIC) then
       ! Affectation et calcul numérique
@@ -700,6 +703,17 @@ contains
           dof = p_offset + (j - 1) * mesh%nx_local + i
           ! Affectation et calcul numérique
           div_val = div_cell(i, j) * dvol
+
+          if (cfg%compressible) then
+             chi = fields_old%chi_T(i, j)
+             div_val = div_val + (chi / dt) * tf%p(i, j) * dvol
+             u_c = 0.5_dp * (tf%u(i, j) + tf%u(i + 1, j))
+             v_c = 0.5_dp * (tf%v(i, j) + tf%v(i, j + 1))
+             dp_dx = (fields_old%p(i + 1, j) - fields_old%p(i - 1, j)) / (2.0_dp * dx)
+             dp_dy = (fields_old%p(i, j + 1) - fields_old%p(i, j - 1)) / (2.0_dp * dy)
+             div_val = div_val + chi * (u_c * dp_dx + v_c * dp_dy) * dvol
+          end if
+
           y(dof) = div_val
         end do
       end do
@@ -820,7 +834,11 @@ contains
         end if
 
         ! Affectation et calcul numérique
-        val = (rho_u / dt) * fields%u(i, j) * dvol
+        if (cfg%enable_ssp_rk3_momentum .and. allocated(fields%rhou_star)) then
+          val = (fields%rhou_star(i, j) / dt) * dvol
+        else
+          val = (rho_u / dt) * fields%u(i, j) * dvol
+        end if
         ! Affectation et calcul numérique
         val = val + rho_u * cfg%gx * dvol
         ! Affectation et calcul numérique
@@ -918,7 +936,11 @@ contains
         end if
 
         ! Affectation et calcul numérique
-        val = (rho_v / dt) * fields%v(i, j) * dvol
+        if (cfg%enable_ssp_rk3_momentum .and. allocated(fields%rhov_star)) then
+          val = (fields%rhov_star(i, j) / dt) * dvol
+        else
+          val = (rho_v / dt) * fields%v(i, j) * dvol
+        end if
         ! Affectation et calcul numérique
         val = val + rho_v * cfg%gy * dvol
 
@@ -973,8 +995,11 @@ contains
         do i = 1, mesh%nx_local
           ! Affectation et calcul numérique
           dof = p_offset + (j - 1) * mesh%nx_local + i
-          ! Affectation et calcul numérique
-          rhs(dof) = 0.0_dp
+          if (cfg%compressible) then
+             rhs(dof) = (fields%chi_T(i, j) / dt) * fields%p(i, j) * dvol
+          else
+             rhs(dof) = 0.0_dp
+          end if
         end do
       end do
     end if
@@ -1225,6 +1250,9 @@ contains
           this%schur_aP(i, j) = this%schur_aW(i, j) + this%schur_aE(i, j) + &
                                 this%schur_aS(i, j) + this%schur_aN(i, j) + &
                                 1.0e-12_dp * dvol
+          if (cfg%compressible) then
+             this%schur_aP(i, j) = this%schur_aP(i, j) + (fields%chi_T(i, j) / dt) * dvol
+          end if
         end do
       end do
     end if
@@ -1675,5 +1703,340 @@ contains
       nu_mean = 1.0_dp
     end if
   end function ns_compute_mean_nusselt_hot_wall
+
+  !-----------------------------------------------------------------------------
+  ! Transport inertiel SSP-RK3 préservant la quantité de mouvement (Fluids 2024, Étape 1)
+  !-----------------------------------------------------------------------------
+  subroutine ns_advect_ssp_rk3_momentum(this, mesh, cfg, fields, dt)
+    class(navier_stokes_t), intent(in) :: this
+    type(mesh_2d_t),        intent(in) :: mesh
+    type(config_t),         intent(in) :: cfg
+    type(flow_fields_t),    intent(inout) :: fields
+    real(dp),               intent(in) :: dt
+
+    integer  :: i, j, nx, ny, u_nx, v_ny
+    real(dp) :: dx, dy
+    real(dp), allocatable :: u_adv1(:, :), v_adv1(:, :), u_adv2(:, :), v_adv2(:, :)
+    real(dp), allocatable :: rho_n(:, :), rho_1(:, :), rho_2(:, :), div_rho(:, :)
+    real(dp), allocatable :: rhou_n(:, :), rhou_1(:, :), rhou_2(:, :), div_u_k(:, :)
+    real(dp), allocatable :: rhov_n(:, :), rhov_1(:, :), rhov_2(:, :), div_v_k(:, :)
+    real(dp), allocatable :: rhoe_n(:, :), rhoe_1(:, :), rhoe_2(:, :), div_e(:, :)
+    real(dp) :: u_e, u_w, v_n, v_s, phi_e, phi_w, phi_n, phi_s
+    real(dp) :: u_c, v_c, v_node_n, v_node_s, u_node_e, u_node_w, val_e, val_w, val_n, val_s
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+    u_nx = nx + merge(1, 0, mesh%is_boundary_right)
+    v_ny = ny + merge(1, 0, mesh%is_boundary_top)
+
+    allocate(u_adv1(0:nx+1, 0:ny+1), v_adv1(0:nx+1, 0:ny+1))
+    allocate(u_adv2(0:nx+1, 0:ny+1), v_adv2(0:nx+1, 0:ny+1))
+
+    ! Vitesses advectrices extrapolées
+    u_adv1 = 2.0_dp * fields%u - fields%u_old
+    v_adv1 = 2.0_dp * fields%v - fields%v_old
+    u_adv2 = 1.5_dp * fields%u - 0.5_dp * fields%u_old
+    v_adv2 = 1.5_dp * fields%v - 0.5_dp * fields%v_old
+
+    ! 1. Advection SSP-RK3 pour rho
+    allocate(rho_n(0:nx+1, 0:ny+1), rho_1(0:nx+1, 0:ny+1), rho_2(0:nx+1, 0:ny+1), div_rho(0:nx+1, 0:ny+1))
+    rho_n = fields%rho
+
+    ! Étape 1a
+    div_rho = 0.0_dp
+    do j = 1, ny
+       do i = 1, nx
+          u_e = fields%u(i + 1, j)
+          u_w = fields%u(i, j)
+          v_n = fields%v(i, j + 1)
+          v_s = fields%v(i, j)
+          phi_e = merge(rho_n(i, j), rho_n(i + 1, j), u_e >= 0.0_dp)
+          phi_w = merge(rho_n(i - 1, j), rho_n(i, j), u_w >= 0.0_dp)
+          phi_n = merge(rho_n(i, j), rho_n(i, j + 1), v_n >= 0.0_dp)
+          phi_s = merge(rho_n(i, j - 1), rho_n(i, j), v_s >= 0.0_dp)
+          div_rho(i, j) = (u_e * phi_e - u_w * phi_w) / dx + (v_n * phi_n - v_s * phi_s) / dy
+       end do
+    end do
+    rho_1 = rho_n - dt * div_rho
+    call exchange_halos_scalar(rho_1, mesh)
+
+    ! Étape 1b
+    div_rho = 0.0_dp
+    do j = 1, ny
+       do i = 1, nx
+          u_e = u_adv1(i + 1, j)
+          u_w = u_adv1(i, j)
+          v_n = v_adv1(i, j + 1)
+          v_s = v_adv1(i, j)
+          phi_e = merge(rho_1(i, j), rho_1(i + 1, j), u_e >= 0.0_dp)
+          phi_w = merge(rho_1(i - 1, j), rho_1(i, j), u_w >= 0.0_dp)
+          phi_n = merge(rho_1(i, j), rho_1(i, j + 1), v_n >= 0.0_dp)
+          phi_s = merge(rho_1(i, j - 1), rho_1(i, j), v_s >= 0.0_dp)
+          div_rho(i, j) = (u_e * phi_e - u_w * phi_w) / dx + (v_n * phi_n - v_s * phi_s) / dy
+       end do
+    end do
+    rho_2 = 0.75_dp * rho_n + 0.25_dp * rho_1 - 0.25_dp * dt * div_rho
+    call exchange_halos_scalar(rho_2, mesh)
+
+    ! Étape 1c
+    div_rho = 0.0_dp
+    do j = 1, ny
+       do i = 1, nx
+          u_e = u_adv2(i + 1, j)
+          u_w = u_adv2(i, j)
+          v_n = v_adv2(i, j + 1)
+          v_s = v_adv2(i, j)
+          phi_e = merge(rho_2(i, j), rho_2(i + 1, j), u_e >= 0.0_dp)
+          phi_w = merge(rho_2(i - 1, j), rho_2(i, j), u_w >= 0.0_dp)
+          phi_n = merge(rho_2(i, j), rho_2(i, j + 1), v_n >= 0.0_dp)
+          phi_s = merge(rho_2(i, j - 1), rho_2(i, j), v_s >= 0.0_dp)
+          div_rho(i, j) = (u_e * phi_e - u_w * phi_w) / dx + (v_n * phi_n - v_s * phi_s) / dy
+       end do
+    end do
+    fields%rho = (1.0_dp / 3.0_dp) * rho_n + (2.0_dp / 3.0_dp) * rho_2 - (2.0_dp / 3.0_dp) * dt * div_rho
+    call exchange_halos_scalar(fields%rho, mesh)
+
+    ! Actualiser rho_u et rho_v
+    do j = 1, ny
+       do i = 1, nx + 1
+          fields%rho_u(i, j) = 0.5_dp * (fields%rho(i - 1, j) + fields%rho(i, j))
+       end do
+    end do
+    do j = 1, ny + 1
+       do i = 1, nx
+          fields%rho_v(i, j) = 0.5_dp * (fields%rho(i, j - 1) + fields%rho(i, j))
+       end do
+    end do
+
+    ! 2. Advection SSP-RK3 pour rhou
+    allocate(rhou_n(0:nx+1, 0:ny+1), rhou_1(0:nx+1, 0:ny+1), rhou_2(0:nx+1, 0:ny+1), div_u_k(0:nx+1, 0:ny+1))
+    rhou_n = fields%rho_u * fields%u
+
+    div_u_k = 0.0_dp
+    do j = 1, ny
+       do i = 1, u_nx
+          u_c = 0.5_dp * (fields%u(i, j) + merge(fields%u(i + 1, j), fields%u(i, j), i < nx + 1))
+          u_w = 0.5_dp * (fields%u(i, j) + merge(fields%u(i - 1, j), fields%u(i, j), i > 1))
+          v_node_n = 0.5_dp * (fields%v(min(nx, i), j + 1) + fields%v(max(1, i - 1), j + 1))
+          v_node_s = 0.5_dp * (fields%v(min(nx, i), j) + fields%v(max(1, i - 1), j))
+          val_e = merge(rhou_n(i, j), rhou_n(min(nx + 1, i + 1), j), u_c >= 0.0_dp)
+          val_w = merge(rhou_n(max(1, i - 1), j), rhou_n(i, j), u_w >= 0.0_dp)
+          val_n = merge(rhou_n(i, j), rhou_n(i, min(ny, j + 1)), v_node_n >= 0.0_dp)
+          val_s = merge(rhou_n(i, max(1, j - 1)), rhou_n(i, j), v_node_s >= 0.0_dp)
+          div_u_k(i, j) = (u_c * val_e - u_w * val_w) / dx + (v_node_n * val_n - v_node_s * val_s) / dy
+       end do
+    end do
+    rhou_1 = rhou_n - dt * div_u_k
+
+    div_u_k = 0.0_dp
+    do j = 1, ny
+       do i = 1, u_nx
+          u_c = 0.5_dp * (u_adv1(i, j) + merge(u_adv1(i + 1, j), u_adv1(i, j), i < nx + 1))
+          u_w = 0.5_dp * (u_adv1(i, j) + merge(u_adv1(i - 1, j), u_adv1(i, j), i > 1))
+          v_node_n = 0.5_dp * (v_adv1(min(nx, i), j + 1) + v_adv1(max(1, i - 1), j + 1))
+          v_node_s = 0.5_dp * (v_adv1(min(nx, i), j) + v_adv1(max(1, i - 1), j))
+          val_e = merge(rhou_1(i, j), rhou_1(min(nx + 1, i + 1), j), u_c >= 0.0_dp)
+          val_w = merge(rhou_1(max(1, i - 1), j), rhou_1(i, j), u_w >= 0.0_dp)
+          val_n = merge(rhou_1(i, j), rhou_1(i, min(ny, j + 1)), v_node_n >= 0.0_dp)
+          val_s = merge(rhou_1(i, max(1, j - 1)), rhou_1(i, j), v_node_s >= 0.0_dp)
+          div_u_k(i, j) = (u_c * val_e - u_w * val_w) / dx + (v_node_n * val_n - v_node_s * val_s) / dy
+       end do
+    end do
+    rhou_2 = 0.75_dp * rhou_n + 0.25_dp * rhou_1 - 0.25_dp * dt * div_u_k
+
+    div_u_k = 0.0_dp
+    do j = 1, ny
+       do i = 1, u_nx
+          u_c = 0.5_dp * (u_adv2(i, j) + merge(u_adv2(i + 1, j), u_adv2(i, j), i < nx + 1))
+          u_w = 0.5_dp * (u_adv2(i, j) + merge(u_adv2(i - 1, j), u_adv2(i, j), i > 1))
+          v_node_n = 0.5_dp * (v_adv2(min(nx, i), j + 1) + v_adv2(max(1, i - 1), j + 1))
+          v_node_s = 0.5_dp * (v_adv2(min(nx, i), j) + v_adv2(max(1, i - 1), j))
+          val_e = merge(rhou_2(i, j), rhou_2(min(nx + 1, i + 1), j), u_c >= 0.0_dp)
+          val_w = merge(rhou_2(max(1, i - 1), j), rhou_2(i, j), u_w >= 0.0_dp)
+          val_n = merge(rhou_2(i, j), rhou_2(i, min(ny, j + 1)), v_node_n >= 0.0_dp)
+          val_s = merge(rhou_2(i, max(1, j - 1)), rhou_2(i, j), v_node_s >= 0.0_dp)
+          div_u_k(i, j) = (u_c * val_e - u_w * val_w) / dx + (v_node_n * val_n - v_node_s * val_s) / dy
+       end do
+    end do
+    fields%rhou_star = (1.0_dp / 3.0_dp) * rhou_n + (2.0_dp / 3.0_dp) * rhou_2 - (2.0_dp / 3.0_dp) * dt * div_u_k
+
+    ! 3. Advection SSP-RK3 pour rhov
+    allocate(rhov_n(0:nx+1, 0:ny+1), rhov_1(0:nx+1, 0:ny+1), rhov_2(0:nx+1, 0:ny+1), div_v_k(0:nx+1, 0:ny+1))
+    rhov_n = fields%rho_v * fields%v
+
+    div_v_k = 0.0_dp
+    do j = 1, v_ny
+       do i = 1, nx
+          v_c = 0.5_dp * (fields%v(i, j) + merge(fields%v(i, j + 1), fields%v(i, j), j < ny + 1))
+          v_s = 0.5_dp * (fields%v(i, j) + merge(fields%v(i, j - 1), fields%v(i, j), j > 1))
+          u_node_e = 0.5_dp * (fields%u(i + 1, min(ny, j)) + fields%u(i + 1, max(1, j - 1)))
+          u_node_w = 0.5_dp * (fields%u(i, min(ny, j)) + fields%u(i, max(1, j - 1)))
+          val_e = merge(rhov_n(max(1, i - 1), j), rhov_n(i, j), u_node_e >= 0.0_dp)
+          val_w = merge(rhov_n(i, j), rhov_n(min(nx, i + 1), j), u_node_w >= 0.0_dp)
+          val_n = merge(rhov_n(i, j), rhov_n(i, min(ny + 1, j + 1)), v_c >= 0.0_dp)
+          val_s = merge(rhov_n(i, max(1, j - 1)), rhov_n(i, j), v_s >= 0.0_dp)
+          div_v_k(i, j) = (u_node_e * val_w - u_node_w * val_e) / dx + (v_c * val_n - v_s * val_s) / dy
+       end do
+    end do
+    rhov_1 = rhov_n - dt * div_v_k
+
+    div_v_k = 0.0_dp
+    do j = 1, v_ny
+       do i = 1, nx
+          v_c = 0.5_dp * (v_adv1(i, j) + merge(v_adv1(i, j + 1), v_adv1(i, j), j < ny + 1))
+          v_s = 0.5_dp * (v_adv1(i, j) + merge(v_adv1(i, j - 1), v_adv1(i, j), j > 1))
+          u_node_e = 0.5_dp * (u_adv1(i + 1, min(ny, j)) + u_adv1(i + 1, max(1, j - 1)))
+          u_node_w = 0.5_dp * (u_adv1(i, min(ny, j)) + u_adv1(i, max(1, j - 1)))
+          val_e = merge(rhov_1(max(1, i - 1), j), rhov_1(i, j), u_node_e >= 0.0_dp)
+          val_w = merge(rhov_1(i, j), rhov_1(min(nx, i + 1), j), u_node_w >= 0.0_dp)
+          val_n = merge(rhov_1(i, j), rhov_1(i, min(ny + 1, j + 1)), v_c >= 0.0_dp)
+          val_s = merge(rhov_1(i, max(1, j - 1)), rhov_1(i, j), v_s >= 0.0_dp)
+          div_v_k(i, j) = (u_node_e * val_w - u_node_w * val_e) / dx + (v_c * val_n - v_s * val_s) / dy
+       end do
+    end do
+    rhov_2 = 0.75_dp * rhov_n + 0.25_dp * rhov_1 - 0.25_dp * dt * div_v_k
+
+    div_v_k = 0.0_dp
+    do j = 1, v_ny
+       do i = 1, nx
+          v_c = 0.5_dp * (v_adv2(i, j) + merge(v_adv2(i, j + 1), v_adv2(i, j), j < ny + 1))
+          v_s = 0.5_dp * (v_adv2(i, j) + merge(v_adv2(i, j - 1), v_adv2(i, j), j > 1))
+          u_node_e = 0.5_dp * (u_adv2(i + 1, min(ny, j)) + u_adv2(i + 1, max(1, j - 1)))
+          u_node_w = 0.5_dp * (u_adv2(i, min(ny, j)) + u_adv2(i, max(1, j - 1)))
+          val_e = merge(rhov_2(max(1, i - 1), j), rhov_2(i, j), u_node_e >= 0.0_dp)
+          val_w = merge(rhov_2(i, j), rhov_2(min(nx, i + 1), j), u_node_w >= 0.0_dp)
+          val_n = merge(rhov_2(i, j), rhov_2(i, min(ny + 1, j + 1)), v_c >= 0.0_dp)
+          val_s = merge(rhov_2(i, max(1, j - 1)), rhov_2(i, j), v_s >= 0.0_dp)
+          div_v_k(i, j) = (u_node_e * val_w - u_node_w * val_e) / dx + (v_c * val_n - v_s * val_s) / dy
+       end do
+    end do
+    fields%rhov_star = (1.0_dp / 3.0_dp) * rhov_n + (2.0_dp / 3.0_dp) * rhov_2 - (2.0_dp / 3.0_dp) * dt * div_v_k
+
+    ! 4. Advection SSP-RK3 pour rhoe si compressible
+    if (cfg%compressible) then
+       allocate(rhoe_n(0:nx+1, 0:ny+1), rhoe_1(0:nx+1, 0:ny+1), rhoe_2(0:nx+1, 0:ny+1), div_e(0:nx+1, 0:ny+1))
+       rhoe_n = fields%rho * fields%energy
+
+       div_e = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx
+             u_e = fields%u(i + 1, j)
+             u_w = fields%u(i, j)
+             v_n = fields%v(i, j + 1)
+             v_s = fields%v(i, j)
+             phi_e = merge(rhoe_n(i, j), rhoe_n(i + 1, j), u_e >= 0.0_dp)
+             phi_w = merge(rhoe_n(i - 1, j), rhoe_n(i, j), u_w >= 0.0_dp)
+             phi_n = merge(rhoe_n(i, j), rhoe_n(i, j + 1), v_n >= 0.0_dp)
+             phi_s = merge(rhoe_n(i, j - 1), rhoe_n(i, j), v_s >= 0.0_dp)
+             div_e(i, j) = (u_e * phi_e - u_w * phi_w) / dx + (v_n * phi_n - v_s * phi_s) / dy
+          end do
+       end do
+       rhoe_1 = rhoe_n - dt * div_e
+       call exchange_halos_scalar(rhoe_1, mesh)
+
+       div_e = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx
+             u_e = u_adv1(i + 1, j)
+             u_w = u_adv1(i, j)
+             v_n = v_adv1(i, j + 1)
+             v_s = v_adv1(i, j)
+             phi_e = merge(rhoe_1(i, j), rhoe_1(i + 1, j), u_e >= 0.0_dp)
+             phi_w = merge(rhoe_1(i - 1, j), rhoe_1(i, j), u_w >= 0.0_dp)
+             phi_n = merge(rhoe_1(i, j), rhoe_1(i, j + 1), v_n >= 0.0_dp)
+             phi_s = merge(rhoe_1(i, j - 1), rhoe_1(i, j), v_s >= 0.0_dp)
+             div_e(i, j) = (u_e * phi_e - u_w * phi_w) / dx + (v_n * phi_n - v_s * phi_s) / dy
+          end do
+       end do
+       rhoe_2 = 0.75_dp * rhoe_n + 0.25_dp * rhoe_1 - 0.25_dp * dt * div_e
+       call exchange_halos_scalar(rhoe_2, mesh)
+
+       div_e = 0.0_dp
+       do j = 1, ny
+          do i = 1, nx
+             u_e = u_adv2(i + 1, j)
+             u_w = u_adv2(i, j)
+             v_n = v_adv2(i, j + 1)
+             v_s = v_adv2(i, j)
+             phi_e = merge(rhoe_2(i, j), rhoe_2(i + 1, j), u_e >= 0.0_dp)
+             phi_w = merge(rhoe_2(i - 1, j), rhoe_2(i, j), u_w >= 0.0_dp)
+             phi_n = merge(rhoe_2(i, j), rhoe_2(i, j + 1), v_n >= 0.0_dp)
+             phi_s = merge(rhoe_2(i, j - 1), rhoe_2(i, j), v_s >= 0.0_dp)
+             div_e(i, j) = (u_e * phi_e - u_w * phi_w) / dx + (v_n * phi_n - v_s * phi_s) / dy
+          end do
+       end do
+       fields%rhoe_star = (1.0_dp / 3.0_dp) * rhoe_n + (2.0_dp / 3.0_dp) * rhoe_2 - (2.0_dp / 3.0_dp) * dt * div_e
+       deallocate(rhoe_n, rhoe_1, rhoe_2, div_e)
+    end if
+
+    deallocate(u_adv1, v_adv1, u_adv2, v_adv2)
+    deallocate(rho_n, rho_1, rho_2, div_rho)
+    deallocate(rhou_n, rhou_1, rhou_2, div_u_k)
+    deallocate(rhov_n, rhov_1, rhov_2, div_v_k)
+  end subroutine ns_advect_ssp_rk3_momentum
+
+  !-----------------------------------------------------------------------------
+  ! Résolution de l'équation de l'énergie totale (Fluids 2024, Étape 7, Éq. 13)
+  !-----------------------------------------------------------------------------
+  subroutine ns_solve_total_energy(this, mesh, cfg, fields, dt)
+    class(navier_stokes_t), intent(in) :: this
+    type(mesh_2d_t),        intent(in) :: mesh
+    type(config_t),         intent(in) :: cfg
+    type(flow_fields_t),    intent(inout) :: fields
+    real(dp),               intent(in) :: dt
+
+    integer  :: i, j, nx, ny
+    real(dp) :: dx, dy, u_e, u_w, v_n, v_s, p_e, p_w, p_n, p_s, div_vp
+    real(dp) :: uc, vc, v_sq, grav_work, rhoe_star_val, rhoe_new, rho_new, e_new, u_int
+
+    if (.not. cfg%compressible) return
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+
+    do j = 1, ny
+       do i = 1, nx
+          u_e = fields%u(i + 1, j)
+          u_w = fields%u(i, j)
+          v_n = fields%v(i, j + 1)
+          v_s = fields%v(i, j)
+
+          p_e = 0.5_dp * (fields%p(i, j) + fields%p(i + 1, j))
+          p_w = 0.5_dp * (fields%p(i, j) + fields%p(i - 1, j))
+          p_n = 0.5_dp * (fields%p(i, j) + fields%p(i, j + 1))
+          p_s = 0.5_dp * (fields%p(i, j) + fields%p(i, j - 1))
+
+          div_vp = (u_e * p_e - u_w * p_w) / dx + (v_n * p_n - v_s * p_s) / dy
+
+          uc = 0.5_dp * (u_e + u_w)
+          vc = 0.5_dp * (v_n + v_s)
+          v_sq = uc * uc + vc * vc
+
+          grav_work = fields%rho(i, j) * (cfg%gx * uc + cfg%gy * vc)
+
+          rhoe_star_val = fields%rho(i, j) * fields%energy(i, j)
+          if (allocated(fields%rhoe_star)) then
+             rhoe_star_val = fields%rhoe_star(i, j)
+          end if
+          rhoe_new = rhoe_star_val + dt * (-div_vp + grav_work)
+
+          rho_new = max(1.0e-6_dp, fields%rho(i, j))
+          e_new = rhoe_new / rho_new
+
+          fields%rho_e(i, j) = rhoe_new
+          fields%energy(i, j) = e_new
+
+          u_int = max(1.0_dp, e_new - 0.5_dp * v_sq)
+          fields%T(i, j) = (1.4_dp - 1.0_dp) / 287.05_dp * u_int
+       end do
+    end do
+
+    call exchange_halos_scalar(fields%energy, mesh)
+    call exchange_halos_scalar(fields%T, mesh)
+  end subroutine ns_solve_total_energy
 
 end module module_navier_stokes

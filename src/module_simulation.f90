@@ -399,7 +399,18 @@ contains
        end if
        if (dt < 1.0e-12_dp) exit
 
-       ! 1. Transport de l'interface si écoulement diphasique
+       ! Sauvegarde de l'état n pour dérivées temporelles et vitesse advectrice extrapolée
+       this%fields%u_old = this%fields%u
+       this%fields%v_old = this%fields%v
+       this%fields%p_old = this%fields%p
+       this%fields%T_old = this%fields%T
+
+       ! Étape 1 : Transport inertiel préservant la quantité de mouvement (SSP-RK3, Fluids 2024)
+       if (this%config%enable_ssp_rk3_momentum) then
+          call this%ns_solver%advect_ssp_rk3_momentum(this%mesh, this%config, this%fields, dt)
+       end if
+
+       ! Étape 2 : Transport de l'interface si écoulement diphasique
        if (this%config%enable_two_phase) then
           ! Appel de sous-programme modulaire
           call this%tracker%advect(this%mesh, this%fields, dt)
@@ -451,9 +462,10 @@ contains
           end do
        end if
 
-       ! 7.5 Résolution de l'énergie thermique si activée
-       if (this%config%enable_energy) then
-          ! Appel de sous-programme modulaire
+       ! 7.5 Résolution de l'énergie (totale si compressible, thermique si Boussinesq)
+       if (this%config%compressible) then
+          call this%ns_solver%solve_total_energy(this%mesh, this%config, this%fields, dt)
+       else if (this%config%enable_energy) then
           call this%ns_solver%solve_energy(this%mesh, this%config, this%fields, dt)
        end if
 

@@ -52,6 +52,19 @@ module module_fields
      ! --- Masque d'Obstacle Immergé (Pénalisation de Brinkman) ---
      integer,  allocatable :: solid_mask(:, :)! 1 si la cellule est dans le solide, 0 en fluide pur
 
+     ! --- Formulation Compressible / All-Mach (Fluids 2024) ---
+     real(dp), allocatable :: chi_T(:, :)     ! Compressibilité isotherme au centre des mailles [1/Pa]
+     real(dp), allocatable :: p_old(:, :)     ! Pression au pas précédent p^n [Pa]
+     real(dp), allocatable :: T_old(:, :)     ! Température au pas précédent T^n [K]
+     real(dp), allocatable :: u_old(:, :)     ! Vitesse axiale au pas précédent
+     real(dp), allocatable :: v_old(:, :)     ! Vitesse transversale au pas précédent
+     real(dp), allocatable :: energy(:, :)    ! Énergie totale massique e [J/kg]
+     real(dp), allocatable :: rho_e(:, :)     ! Énergie totale volumique rho*e [J/m^3]
+     real(dp), allocatable :: rhou_star(:, :) ! Quantité de mouvement intermédiaire (rho*u)* aux faces u
+     real(dp), allocatable :: rhov_star(:, :) ! Quantité de mouvement intermédiaire (rho*v)* aux faces v
+     real(dp), allocatable :: rhoe_star(:, :) ! Énergie totale intermédiaire (rho*e)* aux cellules
+     real(dp), allocatable :: C_tilde(:, :)   ! Fraction volumique lissée par diffusion pour CSF
+
      ! --- Indicateurs et Diagnostics de Validation ---
      real(dp) :: mean_nusselt = 0.0_dp       ! Nombre de Nusselt moyen mesuré à la paroi chaude
 
@@ -111,6 +124,17 @@ contains
     allocate(fields%fy_sigma(0:nx+1, 0:ny+1))
     allocate(fields%curvature(0:nx+1, 0:ny+1))
     allocate(fields%solid_mask(0:nx+1, 0:ny+1))
+    allocate(fields%chi_T(0:nx+1, 0:ny+1))
+    allocate(fields%p_old(0:nx+1, 0:ny+1))
+    allocate(fields%T_old(0:nx+1, 0:ny+1))
+    allocate(fields%u_old(0:nx+1, 0:ny+1))
+    allocate(fields%v_old(0:nx+1, 0:ny+1))
+    allocate(fields%energy(0:nx+1, 0:ny+1))
+    allocate(fields%rho_e(0:nx+1, 0:ny+1))
+    allocate(fields%rhou_star(0:nx+1, 0:ny+1))
+    allocate(fields%rhov_star(0:nx+1, 0:ny+1))
+    allocate(fields%rhoe_star(0:nx+1, 0:ny+1))
+    allocate(fields%C_tilde(0:nx+1, 0:ny+1))
 
     ! Remise à zéro des valeurs initiales
     call reset_fields(fields)
@@ -138,6 +162,17 @@ contains
     if (allocated(fields%fy_sigma))   deallocate(fields%fy_sigma)
     if (allocated(fields%curvature))  deallocate(fields%curvature)
     if (allocated(fields%solid_mask)) deallocate(fields%solid_mask)
+    if (allocated(fields%chi_T))      deallocate(fields%chi_T)
+    if (allocated(fields%p_old))      deallocate(fields%p_old)
+    if (allocated(fields%T_old))      deallocate(fields%T_old)
+    if (allocated(fields%u_old))      deallocate(fields%u_old)
+    if (allocated(fields%v_old))      deallocate(fields%v_old)
+    if (allocated(fields%energy))     deallocate(fields%energy)
+    if (allocated(fields%rho_e))      deallocate(fields%rho_e)
+    if (allocated(fields%rhou_star))  deallocate(fields%rhou_star)
+    if (allocated(fields%rhov_star))  deallocate(fields%rhov_star)
+    if (allocated(fields%rhoe_star))  deallocate(fields%rhoe_star)
+    if (allocated(fields%C_tilde))    deallocate(fields%C_tilde)
 
     fields%nx = 0
     fields%ny = 0
@@ -166,6 +201,18 @@ contains
     fields%curvature    = 0.0_dp
     fields%solid_mask   = 0          ! 100% domaine fluide sans obstacle
     fields%mean_nusselt = 0.0_dp
+
+    fields%chi_T        = 0.0_dp
+    fields%p_old        = 0.0_dp
+    fields%T_old        = 0.0_dp
+    fields%u_old        = 0.0_dp
+    fields%v_old        = 0.0_dp
+    fields%energy       = 0.0_dp
+    fields%rho_e        = 0.0_dp
+    fields%rhou_star    = 0.0_dp
+    fields%rhov_star    = 0.0_dp
+    fields%rhoe_star    = 0.0_dp
+    fields%C_tilde      = 1.0_dp
   end subroutine reset_fields
 
 end module module_fields

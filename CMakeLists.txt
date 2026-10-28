@@ -11,6 +11,7 @@ set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -O3 -march=native")
 set(SOURCES
     src/module_precision.f90
     src/module_constants.f90
+    src/module_eos.f90
     src/module_json.f90
     src/module_config.f90
     src/module_mesh.f90
