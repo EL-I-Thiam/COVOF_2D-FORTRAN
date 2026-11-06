@@ -16,6 +16,7 @@ module module_navier_stokes
   use module_mesh
   use module_fields
   use module_mpi_comm
+  use module_eos, only: eos_compute_temperature
   implicit none
   private
 
@@ -60,6 +61,7 @@ module module_navier_stokes
     procedure :: apply_system_matrix => ns_apply_system_matrix
     ! Affectation et calcul numérique
     procedure :: assemble_rhs => ns_assemble_rhs
+    procedure :: compute_adaptative_r_al => ns_compute_adaptative_r_al
     ! Évaluation de la norme du résidu ou de l'erreur numérique
     procedure :: update_pressure_al => ns_update_pressure_al
     ! Affectation et calcul numérique
@@ -389,8 +391,10 @@ contains
     ! Déclaration de variable locale / paramètre de calcul
     real(dp), intent(out)              :: y(:)
 
-    ! Déclaration de variable locale / paramètre de calcul
-    type(flow_fields_t) :: tf
+    ! Objet FlowFields persistant pré-alloué une seule fois (élimine 52000 allocations par pas de temps)
+    type(flow_fields_t), save :: tf
+    logical, save :: tf_allocated = .false.
+    integer, save :: tf_cached_nx = -1, tf_cached_ny = -1
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: dx, dy, dvol
     ! Déclaration de variable locale / paramètre de calcul
@@ -408,18 +412,20 @@ contains
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: mu_node_N, mu_node_S, shear_N, shear_S
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: grad_div_x, grad_div_y, grad_p
+    real(dp) :: grad_div_x, grad_div_y, grad_p, r_E, r_W, r_N, r_S
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: v_n, v_n_S_val
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: mu_cell_N, mu_cell_S, diff_elong_N, diff_elong_S
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: mu_node_E, mu_node_W, shear_E, shear_W
+    real(dp) :: alpha_time, du_dx, du_dy, tf_v_face, dv_dx, dv_dy, tf_u_face
+    real(dp) :: v_nm1_N, v_nm1_S, u_nm1_E, u_nm1_W
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: div_val, diag_p_term
     real(dp) :: chi, u_c, v_c, dp_dx, dp_dy
     ! Déclaration de variable locale / paramètre de calcul
-    logical  :: is_wall_bot, is_wall_top, in_obs
+    logical  :: is_wall_bot, is_wall_top, in_obs, is_solid_obs
 
     ! Calcul de la métrique spatiale élémentaire
     dx = mesh%dx
@@ -438,9 +444,14 @@ contains
     ! Affectation et calcul numérique
     if (mesh%is_boundary_top) v_ny = v_ny + 1
 
-    ! Appel de sous-programme modulaire
-    call tf%allocate(mesh)
-    ! Appel de sous-programme modulaire
+    ! Allocation de tf une seule fois (élimine les allocations à chaque MatVec)
+    if (.not. tf_allocated .or. tf_cached_nx /= mesh%nx_local .or. tf_cached_ny /= mesh%ny_local) then
+       if (tf_allocated) call tf%free()
+       call tf%allocate(mesh)
+       tf_allocated = .true.
+       tf_cached_nx = mesh%nx_local
+       tf_cached_ny = mesh%ny_local
+    end if
     call this%unpack_vector(mesh, cfg, x, tf, .true.)
 
     ! Précalcul de la divergence sur chaque cellule locale + halo (dans les bornes allouées 0:nx+1, 0:ny+1)
@@ -464,8 +475,13 @@ contains
         dof = (j - 1) * u_nx + i
         ! Calcul de la masse volumique locale ou interpolée aux faces
         rho_u = fields_old%rho_u(i, j)
+        if (cfg%time_scheme == TIME_SCHEME_GEAR .and. fields_old%has_nm1) then
+           alpha_time = 1.5_dp
+        else
+           alpha_time = 1.0_dp
+        end if
         ! Affectation et calcul numérique
-        diag_bc = (rho_u / dt) * dvol
+        diag_bc = (alpha_time * rho_u / dt) * dvol
 
         ! Condition aux limites physique sur les parois gauche / droite
         if (i == 1 .and. mesh%is_boundary_left) then
@@ -495,44 +511,60 @@ contains
           cycle
         end if
 
-        ! Face dans un obstacle solide (adhérence nulle)
+        ! Face dans un obstacle solide (adhérence nulle si imperméable)
         if (is_u_face_in_obstacle(mesh, cfg, i, j)) then
-          ! Affectation et calcul numérique
-          y(dof) = diag_bc * tf%u(i, j)
-          cycle
+          if (cfg%obs_perm <= 1.0e-12_dp) then
+            y(dof) = diag_bc * tf%u(i, j)
+            cycle
+          end if
         end if
 
-        ! Terme instationnaire
-        val = (rho_u / dt) * tf%u(i, j) * dvol
+        ! Terme instationnaire (Euler ou Gear / BDF2)
+        val = (alpha_time * rho_u / dt) * tf%u(i, j) * dvol
 
         ! Terme convectif semi-implicite F_uu (forme advective non-conservative a densite harmonique)
         if (cfg%enable_convection) then
-          u_n = fields_old%u(i, j)
-          u_n_E = fields_old%u(i + 1, j)
-          u_n_W = fields_old%u(i - 1, j)
-
-          v_n_N = 0.5_dp * (fields_old%v(i - 1, j + 1) + fields_old%v(i, j + 1))
-          v_n_S = 0.5_dp * (fields_old%v(i - 1, j) + fields_old%v(i, j))
-
-          mu_cell_E = (2.0_dp * rho_u * fields_old%rho_u(i + 1, j)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i + 1, j))
-          mu_cell_W = (2.0_dp * rho_u * fields_old%rho_u(i - 1, j)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i - 1, j))
-          if (j < mesh%ny_local) then
-            mu_node_N = (2.0_dp * rho_u * fields_old%rho_u(i, j + 1)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i, j + 1))
+          if (cfg%convective_linearization == CONV_LIN_ADAMS_BASHFORTH .and. allocated(fields_old%u_old)) then
+             u_n   = fields_old%u_old(i, j)
+             u_n_E = fields_old%u_old(i + 1, j)
+             u_n_W = fields_old%u_old(i - 1, j)
+             v_n_N = 0.5_dp * (fields_old%v_old(i - 1, j + 1) + fields_old%v_old(i, j + 1))
+             v_n_S = 0.5_dp * (fields_old%v_old(i - 1, j)     + fields_old%v_old(i, j))
           else
-            mu_node_N = rho_u
-          end if
-          if (j > 1) then
-            mu_node_S = (2.0_dp * rho_u * fields_old%rho_u(i, j - 1)) / max(1.0e-12_dp, rho_u + fields_old%rho_u(i, j - 1))
-          else
-            mu_node_S = rho_u
+             u_n   = fields_old%u(i, j)
+             u_n_E = fields_old%u(i + 1, j)
+             u_n_W = fields_old%u(i - 1, j)
+             v_n_N = 0.5_dp * (fields_old%v(i - 1, j + 1) + fields_old%v(i, j + 1))
+             v_n_S = 0.5_dp * (fields_old%v(i - 1, j)     + fields_old%v(i, j))
           end if
 
-          conv_E = 0.5_dp * (u_n + u_n_E) * 0.5_dp * (tf%u(i + 1, j) - tf%u(i, j)) * dy
-          conv_W = 0.5_dp * (u_n_W + u_n) * 0.5_dp * (tf%u(i, j) - tf%u(i - 1, j)) * dy
-          conv_N = v_n_N * 0.5_dp * (tf%u(i, j + 1) - tf%u(i, j)) * dx
-          conv_S = v_n_S * 0.5_dp * (tf%u(i, j) - tf%u(i, j - 1)) * dx
+          if (cfg%convective_linearization == CONV_LIN_ADAMS_BASHFORTH .and. fields_old%has_nm1) then
+             u_n   = 2.0_dp * u_n   - fields_old%u_nm1(i, j)
+             u_n_E = 2.0_dp * u_n_E - fields_old%u_nm1(i + 1, j)
+             u_n_W = 2.0_dp * u_n_W - fields_old%u_nm1(i - 1, j)
 
-          val = val + (mu_cell_E * conv_E + mu_cell_W * conv_W + mu_node_N * conv_N + mu_node_S * conv_S)
+             v_nm1_N = 0.5_dp * (fields_old%v_nm1(i - 1, j + 1) + fields_old%v_nm1(i, j + 1))
+             v_nm1_S = 0.5_dp * (fields_old%v_nm1(i - 1, j) + fields_old%v_nm1(i, j))
+             v_n_N = 2.0_dp * v_n_N - v_nm1_N
+             v_n_S = 2.0_dp * v_n_S - v_nm1_S
+          end if
+
+          conv_E = 0.5_dp * (u_n + u_n_E) * dy
+          conv_W = 0.5_dp * (u_n_W + u_n) * dy
+          conv_N = v_n_N * dx
+          conv_S = v_n_S * dx
+
+          val = val + rho_u * 0.5_dp * (conv_E * (tf%u(i + 1, j) + tf%u(i, j)) - &
+                                        conv_W * (tf%u(i - 1, j) + tf%u(i, j)) + &
+                                        conv_N * (tf%u(i, j + 1) + tf%u(i, j)) - &
+                                        conv_S * (tf%u(i, j - 1) + tf%u(i, j)))
+
+          if (cfg%convective_linearization == CONV_LIN_NEWTON) then
+             du_dx = (fields_old%u(i + 1, j) - fields_old%u(i - 1, j)) / (2.0_dp * dx)
+             du_dy = (fields_old%u(i, j + 1) - fields_old%u(i, j - 1)) / (2.0_dp * dy)
+             tf_v_face = 0.25_dp * (tf%v(i - 1, j) + tf%v(i, j) + tf%v(i - 1, j + 1) + tf%v(i, j + 1))
+             val = val + rho_u * (tf%u(i, j) * du_dx + tf_v_face * du_dy) * dvol
+          end if
         end if
 
         ! Termes visqueux implicites d'ordre 2
@@ -560,10 +592,16 @@ contains
         ! Affectation et calcul numérique
         val = val - (shear_N - shear_S)
 
-        ! Lagrangien augmenté : - r * d(div)/dx * dvol (uniquement en Augmented Lagrangian)
+        ! Lagrangien augmenté (adaptatif Éq. 15 : -d(r*div)/dx * dvol)
         if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
-          grad_div_x = (div_cell(i, j) - div_cell(i - 1, j)) * dy
-          val = val - cfg%r_al * grad_div_x
+          if (cfg%adaptative_al .and. allocated(fields_old%r_aal)) then
+            r_E = fields_old%r_aal(i, j)
+            r_W = fields_old%r_aal(i - 1, j)
+          else
+            r_E = cfg%r_al
+            r_W = cfg%r_al
+          end if
+          val = val - (r_E * div_cell(i, j) - r_W * div_cell(i - 1, j)) * dy
         end if
 
         ! Gradient de pression discret B_u^T (si monolithique)
@@ -572,6 +610,13 @@ contains
           grad_p = (tf%p(i, j) - tf%p(i - 1, j)) * dy
           ! Affectation et calcul numérique
           val = val + grad_p
+        end if
+
+        ! Traînée poreuse de Darcy-Brinkman pour obstacle perméable
+        if (is_u_face_in_obstacle(mesh, cfg, i, j)) then
+          if (cfg%obs_perm > 1.0e-12_dp) then
+            val = val + (0.5_dp * (fields_old%mu(i - 1, j) + fields_old%mu(i, j)) / cfg%obs_perm) * dvol * tf%u(i, j)
+          end if
         end if
 
         ! Affectation et calcul numérique
@@ -591,8 +636,13 @@ contains
         dof = v_offset + (j - 1) * mesh%nx_local + i
         ! Calcul de la masse volumique locale ou interpolée aux faces
         rho_v = fields_old%rho_v(i, j)
+        if (cfg%time_scheme == TIME_SCHEME_GEAR .and. fields_old%has_nm1) then
+           alpha_time = 1.5_dp
+        else
+           alpha_time = 1.0_dp
+        end if
         ! Affectation et calcul numérique
-        diag_bc = (rho_v / dt) * dvol
+        diag_bc = (alpha_time * rho_v / dt) * dvol
 
         ! Affectation et calcul numérique
         is_wall_bot = (j == 1 .and. mesh%is_boundary_bottom .and. &
@@ -604,45 +654,61 @@ contains
                        (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP))
         ! Affectation et calcul numérique
         in_obs = is_v_face_in_obstacle(mesh, cfg, i, j)
+        is_solid_obs = in_obs .and. (cfg%obs_perm <= 1.0e-12_dp)
 
         ! Évaluation de la condition logique
-        if (is_wall_bot .or. is_wall_top .or. in_obs) then
+        if (is_wall_bot .or. is_wall_top .or. is_solid_obs) then
           ! Affectation et calcul numérique
           y(dof) = diag_bc * tf%v(i, j)
           cycle
         end if
 
-        ! Affectation et calcul numérique
-        val = (rho_v / dt) * tf%v(i, j) * dvol
+        ! Terme instationnaire (Euler ou Gear / BDF2)
+        val = (alpha_time * rho_v / dt) * tf%v(i, j) * dvol
 
         ! Évaluation de la condition logique
         if (cfg%enable_convection) then
-          v_n = fields_old%v(i, j)
-          v_n_N = fields_old%v(i, j + 1)
-          v_n_S_val = fields_old%v(i, j - 1)
-
-          u_n_E = 0.5_dp * (fields_old%u(i + 1, j - 1) + fields_old%u(i + 1, j))
-          u_n_W = 0.5_dp * (fields_old%u(i, j - 1) + fields_old%u(i, j))
-
-          if (i < mesh%nx_local) then
-            mu_node_E = (2.0_dp * rho_v * fields_old%rho_v(i + 1, j)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i + 1, j))
+          if (cfg%convective_linearization == CONV_LIN_ADAMS_BASHFORTH .and. allocated(fields_old%v_old)) then
+             v_n       = fields_old%v_old(i, j)
+             v_n_N     = fields_old%v_old(i, j + 1)
+             v_n_S_val = fields_old%v_old(i, j - 1)
+             u_n_E     = 0.5_dp * (fields_old%u_old(i + 1, j - 1) + fields_old%u_old(i + 1, j))
+             u_n_W     = 0.5_dp * (fields_old%u_old(i, j - 1)     + fields_old%u_old(i, j))
           else
-            mu_node_E = rho_v
+             v_n       = fields_old%v(i, j)
+             v_n_N     = fields_old%v(i, j + 1)
+             v_n_S_val = fields_old%v(i, j - 1)
+             u_n_E     = 0.5_dp * (fields_old%u(i + 1, j - 1) + fields_old%u(i + 1, j))
+             u_n_W     = 0.5_dp * (fields_old%u(i, j - 1)     + fields_old%u(i, j))
           end if
-          if (i > 1) then
-            mu_node_W = (2.0_dp * rho_v * fields_old%rho_v(i - 1, j)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i - 1, j))
-          else
-            mu_node_W = rho_v
+
+          if (cfg%convective_linearization == CONV_LIN_ADAMS_BASHFORTH .and. fields_old%has_nm1) then
+             v_n       = 2.0_dp * v_n       - fields_old%v_nm1(i, j)
+             v_n_N     = 2.0_dp * v_n_N     - fields_old%v_nm1(i, j + 1)
+             v_n_S_val = 2.0_dp * v_n_S_val - fields_old%v_nm1(i, j - 1)
+
+             u_nm1_E = 0.5_dp * (fields_old%u_nm1(i + 1, j - 1) + fields_old%u_nm1(i + 1, j))
+             u_nm1_W = 0.5_dp * (fields_old%u_nm1(i, j - 1) + fields_old%u_nm1(i, j))
+             u_n_E = 2.0_dp * u_n_E - u_nm1_E
+             u_n_W = 2.0_dp * u_n_W - u_nm1_W
           end if
-          mu_cell_N = (2.0_dp * rho_v * fields_old%rho_v(i, j + 1)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i, j + 1))
-          mu_cell_S = (2.0_dp * rho_v * fields_old%rho_v(i, j - 1)) / max(1.0e-12_dp, rho_v + fields_old%rho_v(i, j - 1))
 
-          conv_E = u_n_E * 0.5_dp * (tf%v(i + 1, j) - tf%v(i, j)) * dy
-          conv_W = u_n_W * 0.5_dp * (tf%v(i, j) - tf%v(i - 1, j)) * dy
-          conv_N = 0.5_dp * (v_n + v_n_N) * 0.5_dp * (tf%v(i, j + 1) - tf%v(i, j)) * dx
-          conv_S = 0.5_dp * (v_n_S_val + v_n) * 0.5_dp * (tf%v(i, j) - tf%v(i, j - 1)) * dx
+          conv_E = u_n_E * dy
+          conv_W = u_n_W * dy
+          conv_N = 0.5_dp * (v_n + v_n_N) * dx
+          conv_S = 0.5_dp * (v_n_S_val + v_n) * dx
 
-          val = val + (mu_node_E * conv_E + mu_node_W * conv_W + mu_cell_N * conv_N + mu_cell_S * conv_S)
+          val = val + rho_v * 0.5_dp * (conv_E * (tf%v(i + 1, j) + tf%v(i, j)) - &
+                                        conv_W * (tf%v(i - 1, j) + tf%v(i, j)) + &
+                                        conv_N * (tf%v(i, j + 1) + tf%v(i, j)) - &
+                                        conv_S * (tf%v(i, j - 1) + tf%v(i, j)))
+
+          if (cfg%convective_linearization == CONV_LIN_NEWTON) then
+             dv_dx = (fields_old%v(i + 1, j) - fields_old%v(i - 1, j)) / (2.0_dp * dx)
+             dv_dy = (fields_old%v(i, j + 1) - fields_old%v(i, j - 1)) / (2.0_dp * dy)
+             tf_u_face = 0.25_dp * (tf%u(i, j - 1) + tf%u(i + 1, j - 1) + tf%u(i, j) + tf%u(i + 1, j))
+             val = val + rho_v * (tf_u_face * dv_dx + tf%v(i, j) * dv_dy) * dvol
+          end if
         end if
 
         ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
@@ -670,10 +736,16 @@ contains
         ! Affectation et calcul numérique
         val = val - (shear_E - shear_W)
 
-        ! Lagrangien augmenté : - r * d(div)/dy * dvol (uniquement en Augmented Lagrangian)
+        ! Lagrangien augmenté (adaptatif Éq. 15 : -d(r*div)/dy * dvol)
         if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
-          grad_div_y = (div_cell(i, j) - div_cell(i, j - 1)) * dx
-          val = val - cfg%r_al * grad_div_y
+          if (cfg%adaptative_al .and. allocated(fields_old%r_aal)) then
+            r_N = fields_old%r_aal(i, j)
+            r_S = fields_old%r_aal(i, j - 1)
+          else
+            r_N = cfg%r_al
+            r_S = cfg%r_al
+          end if
+          val = val - (r_N * div_cell(i, j) - r_S * div_cell(i, j - 1)) * dx
         end if
 
         ! Évaluation de la condition logique
@@ -682,6 +754,13 @@ contains
           grad_p = (tf%p(i, j) - tf%p(i, j - 1)) * dx
           ! Affectation et calcul numérique
           val = val + grad_p
+        end if
+
+        ! Traînée poreuse de Darcy-Brinkman pour obstacle perméable
+        if (in_obs) then
+          if (cfg%obs_perm > 1.0e-12_dp) then
+            val = val + (0.5_dp * (fields_old%mu(i, j - 1) + fields_old%mu(i, j)) / cfg%obs_perm) * dvol * tf%v(i, j)
+          end if
         end if
 
         ! Affectation et calcul numérique
@@ -702,25 +781,21 @@ contains
           ! Affectation et calcul numérique
           dof = p_offset + (j - 1) * mesh%nx_local + i
           ! Affectation et calcul numérique
-          div_val = div_cell(i, j) * dvol
-
-          if (cfg%compressible) then
-             chi = fields_old%chi_T(i, j)
-             div_val = div_val + (chi / dt) * tf%p(i, j) * dvol
-             u_c = 0.5_dp * (tf%u(i, j) + tf%u(i + 1, j))
-             v_c = 0.5_dp * (tf%v(i, j) + tf%v(i, j + 1))
-             dp_dx = (fields_old%p(i + 1, j) - fields_old%p(i - 1, j)) / (2.0_dp * dx)
-             dp_dy = (fields_old%p(i, j + 1) - fields_old%p(i, j - 1)) / (2.0_dp * dy)
-             div_val = div_val + chi * (u_c * dp_dx + v_c * dp_dy) * dvol
+          ! Régularisation minimale du mode constant de pression sans briser la contrainte d'incompressibilité
+          if (i == 1 .and. j == 1 .and. .not. cfg%compressible) then
+             div_val = div_cell(i, j) * dvol + 1.0e-10_dp * tf%p(1, 1) * dvol
+          else
+             div_val = div_cell(i, j) * dvol
+             if (cfg%compressible) then
+                chi = fields_old%chi_T(i, j)
+                div_val = div_val + (chi / dt) * tf%p(i, j) * dvol
+             end if
           end if
 
           y(dof) = div_val
         end do
       end do
     end if
-
-    ! Appel de sous-programme modulaire
-    call tf%free()
   end subroutine ns_apply_system_matrix
 
   !-----------------------------------------------------------------------------
@@ -748,6 +823,7 @@ contains
     real(dp) :: rho_u, rho_v, diag_bc, val, u_bc, v_bc, y_pos, h_step, grad_p
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: mu_N, mu_S, mu_W, mu_E, T_v
+    real(dp) :: alpha_time, u_inertial, v_inertial, u_face, v_face, du_dx, du_dy, dv_dx, dv_dy
     ! Déclaration des variables pour l'injecteur JET_INLET (Cas 3.3 Fluids 2021)
     real(dp) :: xc_jet, half_w_jet
 
@@ -781,14 +857,20 @@ contains
         dof = (j - 1) * u_nx + i
         ! Calcul de la masse volumique locale ou interpolée aux faces
         rho_u = fields%rho_u(i, j)
+        if (cfg%time_scheme == TIME_SCHEME_GEAR .and. fields%has_nm1) then
+           alpha_time = 1.5_dp
+        else
+           alpha_time = 1.0_dp
+        end if
         ! Affectation et calcul numérique
-        diag_bc = (rho_u / dt) * dvol
+        diag_bc = (alpha_time * rho_u / dt) * dvol
 
         ! Évaluation de la condition logique
         if (is_u_face_in_obstacle(mesh, cfg, i, j)) then
-          ! Affectation et calcul numérique
-          rhs(dof) = 0.0_dp
-          cycle
+          if (cfg%obs_perm <= 1.0e-12_dp) then
+            rhs(dof) = 0.0_dp
+            cycle
+          end if
         end if
 
         ! Évaluation de la condition logique
@@ -797,20 +879,16 @@ contains
           u_bc = 0.0_dp
           ! Évaluation de la condition logique
           if (cfg%bc_left%btype == BC_DIRICHLET) then
-            ! Évaluation de la condition logique
-            if (cfg%obs_enabled .and. cfg%obs_type == OBS_BOX) then
-              ! Affectation et calcul numérique
+            if (trim(cfg%bc_left%profile) == "PARABOLIC") then
               y_pos = y_center(mesh, j)
-              ! Évaluation de la condition logique
+              u_bc = 6.0_dp * cfg%bc_left%u * y_pos * (mesh%ly - y_pos) / (mesh%ly * mesh%ly)
+            else if (cfg%obs_enabled .and. cfg%obs_type == OBS_BOX) then
+              y_pos = y_center(mesh, j)
               if (y_pos >= cfg%obs_y1) then
-                ! Affectation et calcul numérique
                 h_step = mesh%ly - cfg%obs_y1
-                ! Affectation et calcul numérique
                 u_bc = 6.0_dp * cfg%bc_left%u * (y_pos - cfg%obs_y1) * (mesh%ly - y_pos) / (h_step * h_step)
               end if
-            ! Branche par défaut si condition non satisfaite
             else
-              ! Affectation et calcul numérique
               u_bc = cfg%bc_left%u
             end if
           end if
@@ -834,15 +912,25 @@ contains
         end if
 
         ! Affectation et calcul numérique
-        if (cfg%enable_ssp_rk3_momentum .and. allocated(fields%rhou_star)) then
+        if (cfg%time_scheme == TIME_SCHEME_GEAR .and. fields%has_nm1) then
+          u_inertial = rho_u * (2.0_dp * fields%u_old(i, j) - 0.5_dp * fields%u_nm1(i, j))
+          val = (u_inertial / dt) * dvol
+        else if (cfg%enable_ssp_rk3_momentum .and. allocated(fields%rhou_star)) then
           val = (fields%rhou_star(i, j) / dt) * dvol
         else
-          val = (rho_u / dt) * fields%u(i, j) * dvol
+          val = (rho_u / dt) * fields%u_old(i, j) * dvol
         end if
         ! Affectation et calcul numérique
         val = val + rho_u * cfg%gx * dvol
         ! Affectation et calcul numérique
         val = val + fields%fx_sigma(i, j) * dvol
+
+        if (cfg%convective_linearization == CONV_LIN_NEWTON) then
+          du_dx = (fields%u(i + 1, j) - fields%u(i - 1, j)) / (2.0_dp * dx)
+          du_dy = (fields%u(i, j + 1) - fields%u(i, j - 1)) / (2.0_dp * dy)
+          v_face = 0.25_dp * (fields%v(i - 1, j) + fields%v(i, j) + fields%v(i - 1, j + 1) + fields%v(i, j + 1))
+          val = val + rho_u * (fields%u(i, j) * du_dx + v_face * du_dy) * dvol
+        end if
 
         ! Évaluation de la condition logique
         if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
@@ -884,14 +972,20 @@ contains
         dof = v_offset + (j - 1) * mesh%nx_local + i
         ! Calcul de la masse volumique locale ou interpolée aux faces
         rho_v = fields%rho_v(i, j)
+        if (cfg%time_scheme == TIME_SCHEME_GEAR .and. fields%has_nm1) then
+           alpha_time = 1.5_dp
+        else
+           alpha_time = 1.0_dp
+        end if
         ! Affectation et calcul numérique
-        diag_bc = (rho_v / dt) * dvol
+        diag_bc = (alpha_time * rho_v / dt) * dvol
 
         ! Évaluation de la condition logique
         if (is_v_face_in_obstacle(mesh, cfg, i, j)) then
-          ! Affectation et calcul numérique
-          rhs(dof) = 0.0_dp
-          cycle
+          if (cfg%obs_perm <= 1.0e-12_dp) then
+            rhs(dof) = 0.0_dp
+            cycle
+          end if
         end if
 
         ! Affectation et calcul numérique
@@ -936,10 +1030,13 @@ contains
         end if
 
         ! Affectation et calcul numérique
-        if (cfg%enable_ssp_rk3_momentum .and. allocated(fields%rhov_star)) then
+        if (cfg%time_scheme == TIME_SCHEME_GEAR .and. fields%has_nm1) then
+          v_inertial = rho_v * (2.0_dp * fields%v_old(i, j) - 0.5_dp * fields%v_nm1(i, j))
+          val = (v_inertial / dt) * dvol
+        else if (cfg%enable_ssp_rk3_momentum .and. allocated(fields%rhov_star)) then
           val = (fields%rhov_star(i, j) / dt) * dvol
         else
-          val = (rho_v / dt) * fields%v(i, j) * dvol
+          val = (rho_v / dt) * fields%v_old(i, j) * dvol
         end if
         ! Affectation et calcul numérique
         val = val + rho_v * cfg%gy * dvol
@@ -954,6 +1051,13 @@ contains
 
         ! Affectation et calcul numérique
         val = val + fields%fy_sigma(i, j) * dvol
+
+        if (cfg%convective_linearization == CONV_LIN_NEWTON) then
+          dv_dx = (fields%v(i + 1, j) - fields%v(i - 1, j)) / (2.0_dp * dx)
+          dv_dy = (fields%v(i, j + 1) - fields%v(i, j - 1)) / (2.0_dp * dy)
+          u_face = 0.25_dp * (fields%u(i, j - 1) + fields%u(i + 1, j - 1) + fields%u(i, j) + fields%u(i + 1, j))
+          val = val + rho_v * (u_face * dv_dx + fields%v(i, j) * dv_dy) * dvol
+        end if
 
         ! Évaluation de la condition logique
         if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
@@ -1006,42 +1110,115 @@ contains
   end subroutine ns_assemble_rhs
 
   !-----------------------------------------------------------------------------
-  ! Mise à jour de la pression par l'étape d'Uzawa du Lagrangien augmenté :
-  !   p^{m+1} = p^m - r_al * div(u^{m+1})
+  ! Calcul du champ de pénalité adaptatif r(t, M) (Vincent et al. 2004, Éq. 14)
   !-----------------------------------------------------------------------------
-  subroutine ns_update_pressure_al(this, mesh, cfg, fields)
-    ! Déclaration de variable locale / paramètre de calcul
+  subroutine ns_compute_adaptative_r_al(this, mesh, cfg, fields, dt)
     class(navier_stokes_t), intent(in) :: this
-    ! Déclaration de variable locale / paramètre de calcul
     type(mesh_2d_t), intent(in)        :: mesh
-    ! Déclaration de variable locale / paramètre de calcul
     type(config_t), intent(in)         :: cfg
-    ! Déclaration de variable locale / paramètre de calcul
     type(flow_fields_t), intent(inout) :: fields
+    real(dp), intent(in)               :: dt
 
-    ! Déclaration de variable locale / paramètre de calcul
-    integer :: i, j
-    ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: dx, dy, div_val
+    integer  :: i, j
+    real(dp) :: L0, t0, u0, p0, g_norm, sigma_val, mu_max, u_grav, u_cap
+    real(dp) :: loc_u_max, loc_p_max, u_max, p_max, uc, vc, spd, p_abs
+    real(dp) :: rho_M, mu_M, t_unsteady, t_inert, t_grav, t_press, t_visc, t_cap, r_loc
 
-    ! Calcul de la métrique spatiale élémentaire
-    dx = mesh%dx
-    ! Calcul de la métrique spatiale élémentaire
-    dy = mesh%dy
+    if (.not. allocated(fields%r_aal)) then
+      allocate(fields%r_aal(0:mesh%nx_local+1, 0:mesh%ny_local+1))
+    end if
 
-    ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+    if (.not. cfg%adaptative_al) then
+      fields%r_aal = cfg%r_al
+      return
+    end if
+
+    if (cfg%l0_ref > 0.0_dp) then
+      L0 = cfg%l0_ref
+    else if (cfg%enable_two_phase .and. cfg%ic_radius > 0.0_dp) then
+      L0 = 2.0_dp * cfg%ic_radius
+    else
+      L0 = min(mesh%lx, mesh%ly)
+    end if
+
+    t0 = merge(cfg%t0_ref, dt, cfg%t0_ref > 0.0_dp)
+    g_norm = sqrt(cfg%gx**2 + cfg%gy**2)
+    sigma_val = merge(cfg%sigma, 0.0_dp, cfg%enable_two_phase)
+
+    loc_u_max = 0.0_dp
+    loc_p_max = 0.0_dp
     do j = 1, mesh%ny_local
-      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
       do i = 1, mesh%nx_local
-        ! Affectation et calcul numérique
-        div_val = (fields%u(i + 1, j) - fields%u(i, j)) / dx + &
-                  (fields%v(i, j + 1) - fields%v(i, j)) / dy
-        ! Actualisation de la pression statique au centre de la maille
-        fields%p(i, j) = fields%p(i, j) - cfg%r_al * div_val
+        uc = 0.5_dp * (fields%u(i, j) + fields%u(i + 1, j))
+        vc = 0.5_dp * (fields%v(i, j) + fields%v(i, j + 1))
+        spd = sqrt(uc * uc + vc * vc)
+        if (spd > loc_u_max) loc_u_max = spd
+        p_abs = abs(fields%p(i, j))
+        if (p_abs > loc_p_max) loc_p_max = p_abs
+      end do
+    end do
+    u_max = global_max(mesh, loc_u_max)
+    p_max = global_max(mesh, loc_p_max)
+
+    u0 = merge(cfg%u0_ref, u_max, cfg%u0_ref > 0.0_dp)
+    if (u0 < 1.0e-12_dp) then
+      u_grav = merge(sqrt(g_norm * L0), 0.0_dp, g_norm > 0.0_dp)
+      mu_max = max(cfg%mu1, cfg%mu2)
+      u_cap  = merge(sigma_val / mu_max, 0.0_dp, sigma_val > 0.0_dp .and. mu_max > 1.0e-30_dp)
+      u0 = max(u_grav, u_cap, L0 / max(t0, 1.0e-12_dp), 1.0e-3_dp)
+    end if
+    p0 = merge(cfg%p0_ref, p_max, cfg%p0_ref > 0.0_dp)
+
+    ! Équation (14) de Vincent et al. (2004)
+    do j = 1, mesh%ny_local
+      do i = 1, mesh%nx_local
+        rho_M = fields%rho(i, j)
+        mu_M  = fields%mu(i, j)
+
+        t_unsteady = rho_M * (L0 * L0) / max(t0, 1.0e-30_dp)
+        t_inert    = rho_M * u0 * L0
+        t_grav     = rho_M * (L0 * L0 / u0) * g_norm
+        t_press    = (p0 * L0) / u0
+        t_visc     = mu_M
+        t_cap      = sigma_val / u0
+
+        r_loc = cfg%k_aal * max(t_unsteady, t_inert, t_grav, t_press, t_visc, t_cap)
+        fields%r_aal(i, j) = merge(r_loc, cfg%r_al, r_loc > 1.0e-15_dp)
       end do
     end do
 
-    ! Appel de sous-programme modulaire
+    call sync_cell_scalar(mesh, fields%r_aal)
+  end subroutine ns_compute_adaptative_r_al
+
+  !-----------------------------------------------------------------------------
+  ! Mise à jour de la pression par l'étape d'Uzawa du Lagrangien augmenté :
+  !   p^{m+1} = p^m - r_loc * div(u^{m+1})
+  !-----------------------------------------------------------------------------
+  subroutine ns_update_pressure_al(this, mesh, cfg, fields)
+    class(navier_stokes_t), intent(in) :: this
+    type(mesh_2d_t), intent(in)        :: mesh
+    type(config_t), intent(in)         :: cfg
+    type(flow_fields_t), intent(inout) :: fields
+
+    integer  :: i, j
+    real(dp) :: dx, dy, div_val, r_loc
+
+    dx = mesh%dx
+    dy = mesh%dy
+
+    do j = 1, mesh%ny_local
+      do i = 1, mesh%nx_local
+        div_val = (fields%u(i + 1, j) - fields%u(i, j)) / dx + &
+                  (fields%v(i, j + 1) - fields%v(i, j)) / dy
+        if (cfg%adaptative_al .and. allocated(fields%r_aal)) then
+          r_loc = fields%r_aal(i, j)
+        else
+          r_loc = cfg%r_al
+        end if
+        fields%p(i, j) = fields%p(i, j) - r_loc * div_val
+      end do
+    end do
+
     call sync_cell_scalar(mesh, fields%p)
   end subroutine ns_update_pressure_al
 
@@ -1062,11 +1239,17 @@ contains
 
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: dx, dy, dvol, rho_u, rho_v, mu_c, d_val, al_u, al_v
-    real(dp) :: Du, Dv, mu_e, mu_w, mu_n, mu_s, mu_avg
+    real(dp) :: Du, Dv, mu_e, mu_w, mu_n, mu_s, mu_avg, alpha_time
     ! Déclaration de variable locale / paramètre de calcul
     integer :: i, j, dof, u_nx, v_ny, dof_u, dof_v
     ! Déclaration de variable locale / paramètre de calcul
-    logical :: is_wall
+    logical :: is_wall, is_solid_obs
+
+    if (cfg%time_scheme == TIME_SCHEME_GEAR .and. fields%has_nm1) then
+      alpha_time = 1.5_dp
+    else
+      alpha_time = 1.0_dp
+    end if
 
     ! Calcul de la métrique spatiale élémentaire
     dx = mesh%dx
@@ -1093,12 +1276,13 @@ contains
         dof = (j - 1) * u_nx + i
         ! Calcul de la masse volumique locale ou interpolée aux faces
         rho_u = fields%rho_u(i, j)
-        Du = (rho_u / dt) * dvol
+        Du = (alpha_time * rho_u / dt) * dvol
         ! Affectation et calcul numérique
+        is_solid_obs = is_u_face_in_obstacle(mesh, cfg, i, j) .and. (cfg%obs_perm <= 1.0e-12_dp)
         is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
                   ! Affectation et calcul numérique
                   (i == u_nx .and. mesh%is_boundary_right) .or. &
-                  is_u_face_in_obstacle(mesh, cfg, i, j)
+                  is_solid_obs
 
         ! Évaluation de la condition logique
         if (is_wall) then
@@ -1117,9 +1301,18 @@ contains
         mu_c = fields%mu(i, j)
         al_u = 0.0_dp
         if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
-          al_u = 2.0_dp * cfg%r_al * (dy / dx)
+          if (cfg%adaptative_al .and. allocated(fields%r_aal)) then
+            al_u = (fields%r_aal(i, j) + fields%r_aal(i - 1, j)) * (dy / dx)
+          else
+            al_u = 2.0_dp * cfg%r_al * (dy / dx)
+          end if
         end if
         d_val = Du + 4.0_dp * mu_c * (dy / dx) + 2.0_dp * mu_c * (dx / dy) + al_u
+        if (is_u_face_in_obstacle(mesh, cfg, i, j)) then
+          if (cfg%obs_perm > 1.0e-12_dp) then
+            d_val = d_val + (0.5_dp * (fields%mu(i - 1, j) + fields%mu(i, j)) / cfg%obs_perm) * dvol
+          end if
+        end if
         this%diag_u(dof) = merge(d_val, 1.0_dp, d_val > 1.0e-15_dp)
 
         if (allocated(this%u_aP)) then
@@ -1131,6 +1324,11 @@ contains
           this%u_aN(dof) = mu_avg * (dx / dy)
           this%u_aS(dof) = mu_avg * (dx / dy)
           this%u_aP(dof) = Du + this%u_aE(dof) + this%u_aW(dof) + this%u_aN(dof) + this%u_aS(dof)
+          if (is_u_face_in_obstacle(mesh, cfg, i, j)) then
+            if (cfg%obs_perm > 1.0e-12_dp) then
+              this%u_aP(dof) = this%u_aP(dof) + (0.5_dp * (fields%mu(i - 1, j) + fields%mu(i, j)) / cfg%obs_perm) * dvol
+            end if
+          end if
         end if
       end do
     end do
@@ -1143,8 +1341,9 @@ contains
         dof = (j - 1) * mesh%nx_local + i
         ! Calcul de la masse volumique locale ou interpolée aux faces
         rho_v = fields%rho_v(i, j)
-        Dv = (rho_v / dt) * dvol
+        Dv = (alpha_time * rho_v / dt) * dvol
         ! Affectation et calcul numérique
+        is_solid_obs = is_v_face_in_obstacle(mesh, cfg, i, j) .and. (cfg%obs_perm <= 1.0e-12_dp)
         is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
                    ! Affectation et calcul numérique
                    (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
@@ -1152,7 +1351,7 @@ contains
                   (j == v_ny .and. mesh%is_boundary_top .and. &
                    ! Affectation et calcul numérique
                    (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
-                  is_v_face_in_obstacle(mesh, cfg, i, j)
+                  is_solid_obs
 
         ! Évaluation de la condition logique
         if (is_wall) then
@@ -1171,9 +1370,18 @@ contains
         mu_c = fields%mu(i, j)
         al_v = 0.0_dp
         if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
-          al_v = 2.0_dp * cfg%r_al * (dx / dy)
+          if (cfg%adaptative_al .and. allocated(fields%r_aal)) then
+            al_v = (fields%r_aal(i, j) + fields%r_aal(i, j - 1)) * (dx / dy)
+          else
+            al_v = 2.0_dp * cfg%r_al * (dx / dy)
+          end if
         end if
         d_val = Dv + 4.0_dp * mu_c * (dx / dy) + 2.0_dp * mu_c * (dy / dx) + al_v
+        if (is_v_face_in_obstacle(mesh, cfg, i, j)) then
+          if (cfg%obs_perm > 1.0e-12_dp) then
+            d_val = d_val + (0.5_dp * (fields%mu(i, j - 1) + fields%mu(i, j)) / cfg%obs_perm) * dvol
+          end if
+        end if
         this%diag_v(dof) = merge(d_val, 1.0_dp, d_val > 1.0e-15_dp)
 
         if (allocated(this%v_aP)) then
@@ -1185,6 +1393,11 @@ contains
           this%v_aE(dof) = mu_avg * (dy / dx)
           this%v_aW(dof) = mu_avg * (dy / dx)
           this%v_aP(dof) = Dv + this%v_aN(dof) + this%v_aS(dof) + this%v_aE(dof) + this%v_aW(dof)
+          if (is_v_face_in_obstacle(mesh, cfg, i, j)) then
+            if (cfg%obs_perm > 1.0e-12_dp) then
+              this%v_aP(dof) = this%v_aP(dof) + (0.5_dp * (fields%mu(i, j - 1) + fields%mu(i, j)) / cfg%obs_perm) * dvol
+            end if
+          end if
         end if
       end do
     end do
@@ -1206,7 +1419,7 @@ contains
           ! Face Ouest (u_i, j)
           is_wall = (i == 1 .and. mesh%is_boundary_left .and. &
                      (cfg%bc_left%btype == BC_DIRICHLET .or. cfg%bc_left%btype == BC_FREESLIP)) .or. &
-                    is_u_face_in_obstacle(mesh, cfg, i, j)
+                    (is_u_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
           if (.not. is_wall) then
             dof_u = (j - 1) * u_nx + i
             Du = this%u_aP(dof_u)
@@ -1217,9 +1430,13 @@ contains
           ! Face Est (u_i+1, j)
           is_wall = (i == mesh%nx_local .and. mesh%is_boundary_right .and. &
                      (cfg%bc_right%btype == BC_DIRICHLET .or. cfg%bc_right%btype == BC_FREESLIP)) .or. &
-                    is_u_face_in_obstacle(mesh, cfg, i + 1, j)
+                    (is_u_face_in_obstacle(mesh, cfg, i + 1, j) .and. cfg%obs_perm <= 1.0e-12_dp)
           if (.not. is_wall) then
-            dof_u = (j - 1) * u_nx + (i + 1)
+            if (i < mesh%nx_local) then
+              dof_u = (j - 1) * u_nx + (i + 1)
+            else
+              dof_u = (j - 1) * u_nx + 1
+            end if
             Du = this%u_aP(dof_u)
             if (abs(Du) < 1.0e-30_dp) Du = 1.0_dp
             this%schur_aE(i, j) = (dy * dy) / Du
@@ -1228,7 +1445,7 @@ contains
           ! Face Sud (v_i, j)
           is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
                      (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
-                    is_v_face_in_obstacle(mesh, cfg, i, j)
+                    (is_v_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
           if (.not. is_wall) then
             dof_v = (j - 1) * mesh%nx_local + i
             Dv = this%v_aP(dof_v)
@@ -1239,9 +1456,13 @@ contains
           ! Face Nord (v_i, j+1)
           is_wall = (j == mesh%ny_local .and. mesh%is_boundary_top .and. &
                      (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
-                    is_v_face_in_obstacle(mesh, cfg, i, j + 1)
+                    (is_v_face_in_obstacle(mesh, cfg, i, j + 1) .and. cfg%obs_perm <= 1.0e-12_dp)
           if (.not. is_wall) then
-            dof_v = j * mesh%nx_local + i
+            if (j < mesh%ny_local) then
+              dof_v = j * mesh%nx_local + i
+            else
+              dof_v = i
+            end if
             Dv = this%v_aP(dof_v)
             if (abs(Dv) < 1.0e-30_dp) Dv = 1.0_dp
             this%schur_aN(i, j) = (dx * dx) / Dv
@@ -1276,7 +1497,7 @@ contains
     ! Déclaration de variable locale / paramètre de calcul
     integer :: nx, ny, n_cells, i, j, c_dof, iter, max_it
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: dx, dy, dvol, rho, Cp, k_th
+    real(dp) :: dx, dy, dvol, rho, Cp, k_th, rho_loc, rho_e, rho_w, rho_n, rho_s
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: u_e, u_w, v_n, v_s
     ! Déclaration de variable locale / paramètre de calcul
@@ -1293,6 +1514,13 @@ contains
     real(dp) :: rho_old, alpha, omega, rho_new, r0v, s_norm, tt, ts, r_norm, res_init
 
     if (.not. cfg%enable_energy) return
+
+    ! Échange des halos MPI pour les champs transportés et physiques
+    call sync_u(mesh, fields%u)
+    call sync_v(mesh, fields%v)
+    call sync_cell_scalar(mesh, fields%rho)
+    call sync_cell_scalar(mesh, fields%T)
+    call apply_thermal_boundary_conditions(mesh, cfg, fields)
 
     ! Affectation et calcul numérique
     nx = mesh%nx_local
@@ -1343,38 +1571,45 @@ contains
         ! Affectation et calcul numérique
         T_sol(c_dof) = fields%T(i, j)
 
-        ! Affectation et calcul numérique
-        a_c = (rho * Cp / dt) * dvol
-        ! Affectation et calcul numérique
-        rhs(c_dof) = (rho * Cp / dt) * dvol * fields%T(i, j)
+        rho_loc = fields%rho(i, j)
+        a_c = (rho_loc * Cp / dt) * dvol
+        rhs(c_dof) = a_c * fields%T(i, j)
 
-        ! Affectation et calcul numérique
         u_e = fields%u(i + 1, j)
-        ! Affectation et calcul numérique
         d_e = k_th * dy / dx
-        ! Affectation et calcul numérique
-        conv_e = rho * Cp * u_e * dy * 0.5_dp
+        if (i < nx) then
+           rho_e = 0.5_dp * (rho_loc + fields%rho(i + 1, j))
+        else
+           rho_e = rho_loc
+        end if
+        conv_e = rho_e * Cp * u_e * dy * 0.5_dp
 
-        ! Affectation et calcul numérique
         u_w = fields%u(i, j)
-        ! Affectation et calcul numérique
         d_w = k_th * dy / dx
-        ! Affectation et calcul numérique
-        conv_w = rho * Cp * u_w * dy * 0.5_dp
+        if (i > 1) then
+           rho_w = 0.5_dp * (fields%rho(i - 1, j) + rho_loc)
+        else
+           rho_w = rho_loc
+        end if
+        conv_w = rho_w * Cp * u_w * dy * 0.5_dp
 
-        ! Affectation et calcul numérique
         v_n = fields%v(i, j + 1)
-        ! Affectation et calcul numérique
         d_n = k_th * dx / dy
-        ! Affectation et calcul numérique
-        conv_n = rho * Cp * v_n * dx * 0.5_dp
+        if (j < ny) then
+           rho_n = 0.5_dp * (rho_loc + fields%rho(i, j + 1))
+        else
+           rho_n = rho_loc
+        end if
+        conv_n = rho_n * Cp * v_n * dx * 0.5_dp
 
-        ! Affectation et calcul numérique
         v_s = fields%v(i, j)
-        ! Affectation et calcul numérique
         d_s = k_th * dx / dy
-        ! Affectation et calcul numérique
-        conv_s = rho * Cp * v_s * dx * 0.5_dp
+        if (j > 1) then
+           rho_s = 0.5_dp * (fields%rho(i, j - 1) + rho_loc)
+        else
+           rho_s = rho_loc
+        end if
+        conv_s = rho_s * Cp * v_s * dx * 0.5_dp
 
         ! Évaluation de la condition logique
         if (i < nx) then
@@ -1506,7 +1741,7 @@ contains
     omega = 1.0_dp
 
     ! Évaluation de la norme du résidu ou de l'erreur numérique
-    res_init = sqrt(sum(r*r))
+    res_init = global_norm2(mesh, r, n_cells)
     ! Évaluation de la condition logique
     if (res_init > 1.0e-13_dp) then
       ! Affectation et calcul numérique
@@ -1514,7 +1749,7 @@ contains
       ! Boucle d'itération numérique
       do iter = 1, max_it
         ! Calcul de la masse volumique locale ou interpolée aux faces
-        rho_new = sum(r0_hat * r)
+        rho_new = global_dot_product(mesh, r0_hat, r, n_cells)
         if (abs(rho_new) < 1.0e-30_dp) exit
 
         ! Évaluation de la condition logique
@@ -1540,19 +1775,15 @@ contains
             val = a_diag(c_dof) * y_prec(c_dof)
             ! Affectation et calcul numérique
             if (i < nx) val = val + a_east(c_dof) * y_prec(c_dof + 1)
-            ! Affectation et calcul numérique
             if (i > 1)  val = val + a_west(c_dof) * y_prec(c_dof - 1)
-            ! Affectation et calcul numérique
             if (j < ny) val = val + a_north(c_dof) * y_prec(c_dof + nx)
-            ! Affectation et calcul numérique
             if (j > 1)  val = val + a_south(c_dof) * y_prec(c_dof - nx)
-            ! Affectation et calcul numérique
             v_vec(c_dof) = val
           end do
         end do
 
         ! Affectation et calcul numérique
-        r0v = sum(r0_hat * v_vec)
+        r0v = global_dot_product(mesh, r0_hat, v_vec, n_cells)
         if (abs(r0v) < 1.0e-30_dp) exit
         ! Affectation et calcul numérique
         alpha = rho_new / r0v
@@ -1560,7 +1791,7 @@ contains
         ! Affectation et calcul numérique
         s_vec = r - alpha * v_vec
         ! Évaluation de la norme du résidu ou de l'erreur numérique
-        s_norm = sqrt(sum(s_vec * s_vec))
+        s_norm = global_norm2(mesh, s_vec, n_cells)
         ! Évaluation de la condition logique
         if (s_norm / res_init < 1.0e-8_dp) then
           ! Affectation et calcul numérique
@@ -1581,21 +1812,16 @@ contains
             val = a_diag(c_dof) * z_prec(c_dof)
             ! Affectation et calcul numérique
             if (i < nx) val = val + a_east(c_dof) * z_prec(c_dof + 1)
-            ! Affectation et calcul numérique
             if (i > 1)  val = val + a_west(c_dof) * z_prec(c_dof - 1)
-            ! Affectation et calcul numérique
             if (j < ny) val = val + a_north(c_dof) * z_prec(c_dof + nx)
-            ! Affectation et calcul numérique
             if (j > 1)  val = val + a_south(c_dof) * z_prec(c_dof - nx)
-            ! Affectation et calcul numérique
             t_vec(c_dof) = val
           end do
         end do
 
         ! Affectation et calcul numérique
-        tt = sum(t_vec * t_vec)
-        ! Affectation et calcul numérique
-        ts = sum(t_vec * s_vec)
+        tt = global_dot_product(mesh, t_vec, t_vec, n_cells)
+        ts = global_dot_product(mesh, t_vec, s_vec, n_cells)
         ! Évaluation de la condition logique
         if (tt > 1.0e-30_dp) then
           ! Affectation et calcul numérique
@@ -1614,7 +1840,7 @@ contains
         rho_old = rho_new
 
         ! Évaluation de la norme du résidu ou de l'erreur numérique
-        r_norm = sqrt(sum(r * r))
+        r_norm = global_norm2(mesh, r, n_cells)
         if (r_norm / res_init < 1.0e-8_dp) exit
       end do
     end if
@@ -1873,14 +2099,15 @@ contains
           v_s = 0.5_dp * (fields%v(i, j) + merge(fields%v(i, j - 1), fields%v(i, j), j > 1))
           u_node_e = 0.5_dp * (fields%u(i + 1, min(ny, j)) + fields%u(i + 1, max(1, j - 1)))
           u_node_w = 0.5_dp * (fields%u(i, min(ny, j)) + fields%u(i, max(1, j - 1)))
-          val_e = merge(rhov_n(max(1, i - 1), j), rhov_n(i, j), u_node_e >= 0.0_dp)
-          val_w = merge(rhov_n(i, j), rhov_n(min(nx, i + 1), j), u_node_w >= 0.0_dp)
-          val_n = merge(rhov_n(i, j), rhov_n(i, min(ny + 1, j + 1)), v_c >= 0.0_dp)
-          val_s = merge(rhov_n(i, max(1, j - 1)), rhov_n(i, j), v_s >= 0.0_dp)
-          div_v_k(i, j) = (u_node_e * val_w - u_node_w * val_e) / dx + (v_c * val_n - v_s * val_s) / dy
+          val_e = merge(rhov_n(i, j), rhov_n(i + 1, j), u_node_e >= 0.0_dp)
+          val_w = merge(rhov_n(i - 1, j), rhov_n(i, j), u_node_w >= 0.0_dp)
+          val_n = merge(rhov_n(i, j), rhov_n(i, j + 1), v_c >= 0.0_dp)
+          val_s = merge(rhov_n(i, j - 1), rhov_n(i, j), v_s >= 0.0_dp)
+          div_v_k(i, j) = (u_node_e * val_e - u_node_w * val_w) / dx + (v_c * val_n - v_s * val_s) / dy
        end do
     end do
     rhov_1 = rhov_n - dt * div_v_k
+    call exchange_halos_velocity(rhou_1, rhov_1, mesh)
 
     div_v_k = 0.0_dp
     do j = 1, v_ny
@@ -1889,14 +2116,15 @@ contains
           v_s = 0.5_dp * (v_adv1(i, j) + merge(v_adv1(i, j - 1), v_adv1(i, j), j > 1))
           u_node_e = 0.5_dp * (u_adv1(i + 1, min(ny, j)) + u_adv1(i + 1, max(1, j - 1)))
           u_node_w = 0.5_dp * (u_adv1(i, min(ny, j)) + u_adv1(i, max(1, j - 1)))
-          val_e = merge(rhov_1(max(1, i - 1), j), rhov_1(i, j), u_node_e >= 0.0_dp)
-          val_w = merge(rhov_1(i, j), rhov_1(min(nx, i + 1), j), u_node_w >= 0.0_dp)
-          val_n = merge(rhov_1(i, j), rhov_1(i, min(ny + 1, j + 1)), v_c >= 0.0_dp)
-          val_s = merge(rhov_1(i, max(1, j - 1)), rhov_1(i, j), v_s >= 0.0_dp)
-          div_v_k(i, j) = (u_node_e * val_w - u_node_w * val_e) / dx + (v_c * val_n - v_s * val_s) / dy
+          val_e = merge(rhov_1(i, j), rhov_1(i + 1, j), u_node_e >= 0.0_dp)
+          val_w = merge(rhov_1(i - 1, j), rhov_1(i, j), u_node_w >= 0.0_dp)
+          val_n = merge(rhov_1(i, j), rhov_1(i, j + 1), v_c >= 0.0_dp)
+          val_s = merge(rhov_1(i, j - 1), rhov_1(i, j), v_s >= 0.0_dp)
+          div_v_k(i, j) = (u_node_e * val_e - u_node_w * val_w) / dx + (v_c * val_n - v_s * val_s) / dy
        end do
     end do
     rhov_2 = 0.75_dp * rhov_n + 0.25_dp * rhov_1 - 0.25_dp * dt * div_v_k
+    call exchange_halos_velocity(rhou_2, rhov_2, mesh)
 
     div_v_k = 0.0_dp
     do j = 1, v_ny
@@ -1905,14 +2133,15 @@ contains
           v_s = 0.5_dp * (v_adv2(i, j) + merge(v_adv2(i, j - 1), v_adv2(i, j), j > 1))
           u_node_e = 0.5_dp * (u_adv2(i + 1, min(ny, j)) + u_adv2(i + 1, max(1, j - 1)))
           u_node_w = 0.5_dp * (u_adv2(i, min(ny, j)) + u_adv2(i, max(1, j - 1)))
-          val_e = merge(rhov_2(max(1, i - 1), j), rhov_2(i, j), u_node_e >= 0.0_dp)
-          val_w = merge(rhov_2(i, j), rhov_2(min(nx, i + 1), j), u_node_w >= 0.0_dp)
-          val_n = merge(rhov_2(i, j), rhov_2(i, min(ny + 1, j + 1)), v_c >= 0.0_dp)
-          val_s = merge(rhov_2(i, max(1, j - 1)), rhov_2(i, j), v_s >= 0.0_dp)
-          div_v_k(i, j) = (u_node_e * val_w - u_node_w * val_e) / dx + (v_c * val_n - v_s * val_s) / dy
+          val_e = merge(rhov_2(i, j), rhov_2(i + 1, j), u_node_e >= 0.0_dp)
+          val_w = merge(rhov_2(i - 1, j), rhov_2(i, j), u_node_w >= 0.0_dp)
+          val_n = merge(rhov_2(i, j), rhov_2(i, j + 1), v_c >= 0.0_dp)
+          val_s = merge(rhov_2(i, j - 1), rhov_2(i, j), v_s >= 0.0_dp)
+          div_v_k(i, j) = (u_node_e * val_e - u_node_w * val_w) / dx + (v_c * val_n - v_s * val_s) / dy
        end do
     end do
     fields%rhov_star = (1.0_dp / 3.0_dp) * rhov_n + (2.0_dp / 3.0_dp) * rhov_2 - (2.0_dp / 3.0_dp) * dt * div_v_k
+    call exchange_halos_velocity(fields%rhou_star, fields%rhov_star, mesh)
 
     ! 4. Advection SSP-RK3 pour rhoe si compressible
     if (cfg%compressible) then
@@ -2030,8 +2259,7 @@ contains
           fields%rho_e(i, j) = rhoe_new
           fields%energy(i, j) = e_new
 
-          u_int = max(1.0_dp, e_new - 0.5_dp * v_sq)
-          fields%T(i, j) = (1.4_dp - 1.0_dp) / 287.05_dp * u_int
+          fields%T(i, j) = eos_compute_temperature(cfg%eos1_type, e_new, v_sq, cfg%gamma1, cfg%r_gas1)
        end do
     end do
 

@@ -6,7 +6,7 @@ module module_interface_vof
   use module_fields, only: flow_fields_t
   use module_config, only: config_t
   use module_mpi_comm, only: exchange_halos_scalar, apply_vof_bc
-  use module_eos, only: eos_compute_chi_T
+  use module_eos, only: eos_compute_chi_T, eos_compute_density
   use module_interface_reconstruction, only: interface_segment_t, cut_box_area, compute_alpha, &
                                             reconstruct_interface, evaluate_limiter
   implicit none
@@ -17,6 +17,7 @@ module module_interface_vof
   public :: advect_vof
   public :: update_physical_properties
   public :: compute_curvature_and_csf
+  public :: smooth_svof_helmholtz
 
   ! Compteur de pas pour Strang splitting alterné
   integer, save :: vof_step_count = 0
@@ -45,9 +46,10 @@ contains
     type(config_t), intent(in) :: cfg
 
     ! Déclaration de variable locale / paramètre de calcul
-    integer :: i, j, nx, ny
+    integer :: i, j, nx, ny, si, sj, count_out
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: x, y, dist, eps, int_y, x_c_jet, half_w_jet, stub_h_jet
+    real(dp) :: x_min, x_max, y_min, y_max, d00, d10, d01, d11, d_mid, diag, xs, ys
 
     ! Affectation et calcul numérique
     nx = mesh%nx_local
@@ -92,21 +94,63 @@ contains
                 fields%C(i, j) = 0.5_dp - dist / (2.0_dp * eps) - (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
              end if
 
-          case (IC_BUBBLE)
-             ! Affectation et calcul numérique
+          case (IC_CYLINDER, IC_BUBBLE)
              dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
-             ! Évaluation de la condition logique
-             if (dist < -eps) then
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 0.0_dp ! Intérieur bulle (fluide 2)
-             ! Branche conditionnelle alternative
-             else if (dist > eps) then
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 1.0_dp ! Extérieur (fluide 1)
-             ! Branche par défaut si condition non satisfaite
+             if (cfg%ic_type == IC_CYLINDER .or. trim(cfg%reconstruction_method) == "PLIC") then
+                x_min = x_face(mesh, i)
+                x_max = x_face(mesh, i + 1)
+                y_min = y_face(mesh, j)
+                y_max = y_face(mesh, j + 1)
+
+                d00 = hypot(x_min - cfg%ic_center_x, y_min - cfg%ic_center_y)
+                d10 = hypot(x_max - cfg%ic_center_x, y_min - cfg%ic_center_y)
+                d01 = hypot(x_min - cfg%ic_center_x, y_max - cfg%ic_center_y)
+                d11 = hypot(x_max - cfg%ic_center_x, y_max - cfg%ic_center_y)
+
+                if (d00 <= cfg%ic_radius .and. d10 <= cfg%ic_radius .and. &
+                    d01 <= cfg%ic_radius .and. d11 <= cfg%ic_radius) then
+                   fields%C(i, j) = 0.0_dp ! Intérieur cylindre / bulle : fluide 2
+                else if (d00 >= cfg%ic_radius .and. d10 >= cfg%ic_radius .and. &
+                         d01 >= cfg%ic_radius .and. d11 >= cfg%ic_radius) then
+                   d_mid = hypot(x - cfg%ic_center_x, y - cfg%ic_center_y)
+                   diag = 0.5_dp * hypot(mesh%dx, mesh%dy)
+                   if (d_mid > cfg%ic_radius + diag) then
+                      fields%C(i, j) = 1.0_dp ! Extérieur : fluide 1 (air)
+                   else
+                      count_out = 0
+                      do sj = 0, 15
+                         ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
+                         do si = 0, 15
+                            xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                            if (hypot(xs - cfg%ic_center_x, ys - cfg%ic_center_y) > cfg%ic_radius) then
+                               count_out = count_out + 1
+                            end if
+                         end do
+                      end do
+                      fields%C(i, j) = real(count_out, dp) / 256.0_dp
+                   end if
+                else
+                   count_out = 0
+                   do sj = 0, 15
+                      ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
+                      do si = 0, 15
+                         xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                         if (hypot(xs - cfg%ic_center_x, ys - cfg%ic_center_y) > cfg%ic_radius) then
+                            count_out = count_out + 1
+                         end if
+                      end do
+                   end do
+                   fields%C(i, j) = real(count_out, dp) / 256.0_dp
+                end if
              else
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 0.5_dp + dist / (2.0_dp * eps) + (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+                ! Évaluation de la condition logique diffuse standard
+                if (dist < -eps) then
+                   fields%C(i, j) = 0.0_dp
+                else if (dist > eps) then
+                   fields%C(i, j) = 1.0_dp
+                else
+                   fields%C(i, j) = 0.5_dp + dist / (2.0_dp * eps) + (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+                end if
              end if
 
           case (IC_DAM_BREAK)
@@ -226,11 +270,119 @@ contains
     call exchange_halos_scalar(fields%C, mesh)
     ! Appel de sous-programme modulaire
     call apply_vof_bc(fields, mesh, cfg)
+    if (cfg%compressible) then
+       if (cfg%ic_p0 > 0.0_dp) then
+          fields%p = cfg%ic_p0
+          fields%p_old = cfg%ic_p0
+       else
+          fields%p = 1.01325e5_dp
+          fields%p_old = 1.01325e5_dp
+       end if
+    end if
     ! Appel de sous-programme modulaire
+    if (cfg%enable_svof_smoothing) then
+       call smooth_svof_helmholtz(fields, mesh, cfg)
+    end if
     call update_physical_properties(fields, mesh, cfg)
     ! Appel de sous-programme modulaire
     call compute_curvature_and_csf(fields, mesh, cfg)
   end subroutine set_initial_conditions
+
+  !=============================================================================
+  ! Routine : smooth_svof_helmholtz
+  ! Rôle    : Lissage SVOF de la fonction indicatrice par filtre de Helmholtz
+  !           (I - D Delta) C_s = C avec dC_s/dn = 0 sur les frontières (Fluids 2021, Éq. 4-5)
+  !=============================================================================
+  subroutine smooth_svof_helmholtz(fields, mesh, cfg)
+    type(flow_fields_t), intent(inout) :: fields
+    type(mesh_2d_t), intent(in)        :: mesh
+    type(config_t), intent(in)         :: cfg
+
+    integer  :: i, j, iter, nx, ny
+    real(dp) :: dx, dy, k_width, D, wx, wy, a_E, a_W, a_N, a_S, a_P, sum_nb
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+    dx = mesh%dx
+    dy = mesh%dy
+
+    if (.not. allocated(fields%C_s)) then
+       allocate(fields%C_s(0:nx+1, 0:ny+1))
+    end if
+
+    k_width = cfg%svof_filter_width
+    if (k_width <= 0.0_dp) k_width = 1.0_dp
+    D = k_width * dx * dy
+    wx = D / (dx * dx)
+    wy = D / (dy * dy)
+
+    fields%C_s = fields%C
+
+    do iter = 1, 25
+       ! Conditions aux limites de Neumann homogènes dC_s/dn = 0
+       do j = 1, ny
+          if (mesh%is_boundary_left)  fields%C_s(0, j)    = fields%C_s(1, j)
+          if (mesh%is_boundary_right) fields%C_s(nx+1, j) = fields%C_s(nx, j)
+       end do
+       do i = 1, nx
+          if (mesh%is_boundary_bottom) fields%C_s(i, 0)    = fields%C_s(i, 1)
+          if (mesh%is_boundary_top)    fields%C_s(i, ny+1) = fields%C_s(i, ny)
+       end do
+       call exchange_halos_scalar(fields%C_s, mesh)
+
+       ! Balayage avant
+       do j = 1, ny
+          do i = 1, nx
+             a_E = merge(0.0_dp, wx, i == nx .and. mesh%is_boundary_right)
+             a_W = merge(0.0_dp, wx, i == 1  .and. mesh%is_boundary_left)
+             a_N = merge(0.0_dp, wy, j == ny .and. mesh%is_boundary_top)
+             a_S = merge(0.0_dp, wy, j == 1  .and. mesh%is_boundary_bottom)
+             a_P = 1.0_dp + a_E + a_W + a_N + a_S
+
+             sum_nb = a_E * fields%C_s(i+1, j) + a_W * fields%C_s(i-1, j) + &
+                      a_N * fields%C_s(i, j+1) + a_S * fields%C_s(i, j-1)
+             fields%C_s(i, j) = (fields%C(i, j) + sum_nb) / a_P
+          end do
+       end do
+
+       ! Balayage arrière symétrique
+       do j = ny, 1, -1
+          do i = nx, 1, -1
+             a_E = merge(0.0_dp, wx, i == nx .and. mesh%is_boundary_right)
+             a_W = merge(0.0_dp, wx, i == 1  .and. mesh%is_boundary_left)
+             a_N = merge(0.0_dp, wy, j == ny .and. mesh%is_boundary_top)
+             a_S = merge(0.0_dp, wy, j == 1  .and. mesh%is_boundary_bottom)
+             a_P = 1.0_dp + a_E + a_W + a_N + a_S
+
+             sum_nb = a_E * fields%C_s(i+1, j) + a_W * fields%C_s(i-1, j) + &
+                      a_N * fields%C_s(i, j+1) + a_S * fields%C_s(i, j-1)
+             fields%C_s(i, j) = (fields%C(i, j) + sum_nb) / a_P
+          end do
+       end do
+    end do
+
+    ! Bornage physique strict dans [0, 1]
+    do j = 1, ny
+       do i = 1, nx
+          fields%C_s(i, j) = max(0.0_dp, min(1.0_dp, fields%C_s(i, j)))
+       end do
+    end do
+
+    ! Synchronisation finale
+    do j = 1, ny
+       if (mesh%is_boundary_left)  fields%C_s(0, j)    = fields%C_s(1, j)
+       if (mesh%is_boundary_right) fields%C_s(nx+1, j) = fields%C_s(nx, j)
+    end do
+    do i = 1, nx
+       if (mesh%is_boundary_bottom) fields%C_s(i, 0)    = fields%C_s(i, 1)
+       if (mesh%is_boundary_top)    fields%C_s(i, ny+1) = fields%C_s(i, ny)
+    end do
+    fields%C_s(0, 0)       = fields%C_s(1, 1)
+    fields%C_s(nx+1, 0)    = fields%C_s(nx, 1)
+    fields%C_s(0, ny+1)    = fields%C_s(1, ny)
+    fields%C_s(nx+1, ny+1) = fields%C_s(nx, ny)
+    call exchange_halos_scalar(fields%C_s, mesh)
+  end subroutine smooth_svof_helmholtz
 
   ! [Procédure/Module] subroutine update_physical_properties
   subroutine update_physical_properties(fields, mesh, cfg)
@@ -244,7 +396,7 @@ contains
     ! Déclaration de variable locale / paramètre de calcul
     integer :: i, j, nx, ny
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: c, y, z, mu_val, m_sw, m_se, m_nw, m_ne, chi1, chi2
+    real(dp) :: c, y, z, mu_val, m_sw, m_se, m_nw, m_ne, chi1, chi2, rho1, rho2, c_node, denom
 
     ! Affectation et calcul numérique
     nx = mesh%nx_local
@@ -261,26 +413,17 @@ contains
        fields%rho_v = cfg%rho1
        ! Évaluation de la condition logique
        if (cfg%viscosity_model == VISC_EXPONENTIAL) then
-          ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
+          ! Loi de viscosité exponentielle : mu(z) = mu0 * exp(a * (z/e)^2) avec z = y - e
           do j = 0, ny + 1
-             ! Affectation et calcul numérique
              y = y_center(mesh, j)
-             ! Affectation et calcul numérique
              z = y - cfg%visc_e
-             ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
-             mu_val = cfg%visc_mu0 * exp(-cfg%visc_a * z / cfg%visc_e)
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+             mu_val = cfg%visc_mu0 * exp(cfg%visc_a * (z / cfg%visc_e)**2)
              fields%mu(:, j) = mu_val
           end do
-          ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
           do j = 0, ny + 1
-             ! Affectation et calcul numérique
              y = y_face(mesh, j)
-             ! Affectation et calcul numérique
              z = y - cfg%visc_e
-             ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
-             mu_val = cfg%visc_mu0 * exp(-cfg%visc_a * z / cfg%visc_e)
-             ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+             mu_val = cfg%visc_mu0 * exp(cfg%visc_a * (z / cfg%visc_e)**2)
              fields%mu_node(:, j) = mu_val
           end do
        ! Branche par défaut si condition non satisfaite
@@ -308,15 +451,25 @@ contains
        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 0, nx + 1
           ! Affectation et calcul numérique
-          c = max(0.0_dp, min(1.0_dp, fields%C(i, j)))
-          ! Calcul de la masse volumique locale ou interpolée aux faces
-          fields%rho(i, j) = c * cfg%rho1 + (1.0_dp - c) * cfg%rho2
-          ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
+          if (cfg%enable_svof_smoothing .and. allocated(fields%C_s)) then
+             c = max(0.0_dp, min(1.0_dp, fields%C_s(i, j)))
+          else
+             c = max(0.0_dp, min(1.0_dp, fields%C(i, j)))
+          end if
+          if (.not. cfg%compressible) then
+             fields%rho(i, j) = c * cfg%rho1 + (1.0_dp - c) * cfg%rho2
+          else
+             rho1 = eos_compute_density(cfg%eos1_type, cfg%rho1, cfg%chi_T1, fields%p(i, j), fields%T(i, j), &
+                                        r_gas=cfg%r_gas1, p_inf=cfg%p_inf1, b_nasg=cfg%b_nasg1, gamma=cfg%gamma1, cv=cfg%cv1)
+             rho2 = eos_compute_density(cfg%eos2_type, cfg%rho2, cfg%chi_T2, fields%p(i, j), fields%T(i, j), &
+                                        r_gas=cfg%r_gas2, p_inf=cfg%p_inf2, b_nasg=cfg%b_nasg2, gamma=cfg%gamma2, cv=cfg%cv2)
+             fields%rho(i, j) = c * rho1 + (1.0_dp - c) * rho2
+          end if
           fields%mu(i, j)  = c * cfg%mu1  + (1.0_dp - c) * cfg%mu2
 
           if (cfg%compressible) then
              chi1 = eos_compute_chi_T(cfg%eos1_type, cfg%chi_T1, fields%p(i, j), cfg%rho1, cfg%p_inf1, cfg%b_nasg1)
-             chi2 = eos_compute_chi_T(cfg%eos2_type, cfg%chi_T2, fields%p(i, j), cfg%rho2, cfg%p_inf2, cfg%b_nasg2)
+             chi2 = eos_compute_chi_T(cfg%eos2_type, cfg%chi_T2, fields%p(i, j), fields%rho(i, j), cfg%p_inf2, cfg%b_nasg2)
              fields%chi_T(i, j) = c * chi1 + (1.0_dp - c) * chi2
           end if
        end do
@@ -353,16 +506,23 @@ contains
     do j = 1, ny + 1
        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx + 1
-          ! Affectation et calcul numérique
-          m_sw = fields%mu(i-1, j-1)
-          ! Affectation et calcul numérique
-          m_se = fields%mu(i, j-1)
-          ! Affectation et calcul numérique
-          m_nw = fields%mu(i-1, j)
-          ! Affectation et calcul numérique
-          m_ne = fields%mu(i, j)
-          ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
-          fields%mu_node(i, j) = 4.0_dp / (1.0_dp / m_sw + 1.0_dp / m_se + 1.0_dp / m_nw + 1.0_dp / m_ne)
+          if (cfg%enable_svof_smoothing .and. allocated(fields%C_s)) then
+             c_node = 0.25_dp * (fields%C_s(i-1, j-1) + fields%C_s(i, j-1) + fields%C_s(i-1, j) + fields%C_s(i, j))
+             c_node = max(0.0_dp, min(1.0_dp, c_node))
+             denom = cfg%mu2 * c_node + cfg%mu1 * (1.0_dp - c_node)
+             fields%mu_node(i, j) = (cfg%mu1 * cfg%mu2) / max(1.0e-30_dp, denom)
+          else
+             ! Affectation et calcul numérique
+             m_sw = fields%mu(i-1, j-1)
+             ! Affectation et calcul numérique
+             m_se = fields%mu(i, j-1)
+             ! Affectation et calcul numérique
+             m_nw = fields%mu(i-1, j)
+             ! Affectation et calcul numérique
+             m_ne = fields%mu(i, j)
+             ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
+             fields%mu_node(i, j) = 4.0_dp / (1.0_dp / m_sw + 1.0_dp / m_se + 1.0_dp / m_nw + 1.0_dp / m_ne)
+          end if
        end do
     end do
   end subroutine update_physical_properties
@@ -430,9 +590,12 @@ contains
        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
           ! Calcul de la métrique spatiale élémentaire
-          if (cfg%enable_diffusion_smoothing) then
+          if (cfg%enable_diffusion_smoothing .and. allocated(fields%C_tilde)) then
              dc_dx = (fields%C_tilde(i+1, j) - fields%C_tilde(i-1, j)) / (2.0_dp * dx)
              dc_dy = (fields%C_tilde(i, j+1) - fields%C_tilde(i, j-1)) / (2.0_dp * dy)
+          else if (cfg%enable_svof_smoothing .and. allocated(fields%C_s)) then
+             dc_dx = (fields%C_s(i+1, j) - fields%C_s(i-1, j)) / (2.0_dp * dx)
+             dc_dy = (fields%C_s(i, j+1) - fields%C_s(i, j-1)) / (2.0_dp * dy)
           else
              dc_dx = (fields%C(i+1, j) - fields%C(i-1, j)) / (2.0_dp * dx)
              dc_dy = (fields%C(i, j+1) - fields%C(i, j-1)) / (2.0_dp * dy)
@@ -522,6 +685,9 @@ contains
 
     call exchange_halos_scalar(fields%C, mesh)
     call apply_vof_bc(fields, mesh, cfg)
+    if (cfg%enable_svof_smoothing) then
+       call smooth_svof_helmholtz(fields, mesh, cfg)
+    end if
     call update_physical_properties(fields, mesh, cfg)
     if (cfg%enable_diffusion_smoothing) then
        call vof_smooth_diffusion(fields, mesh, cfg)
@@ -688,6 +854,7 @@ contains
              end if
           end do
        end do
+       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) flux_vol(1, 1:ny) = flux_vol(nx + 1, 1:ny)
 
        c_star = fields%C
        do j = 1, ny
@@ -702,6 +869,9 @@ contains
           end do
        end do
        call exchange_halos_scalar(c_star, mesh)
+       fields%C = c_star
+       call apply_vof_bc(fields, mesh, cfg)
+       c_star = fields%C
 
        ! 2. Passe Y
        call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
@@ -725,6 +895,7 @@ contains
              end if
           end do
        end do
+       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) flux_vol(1:nx, 1) = flux_vol(1:nx, ny + 1)
 
        c_final = c_star
        do j = 1, ny
@@ -761,6 +932,7 @@ contains
              end if
           end do
        end do
+       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) flux_vol(1, 1:ny) = flux_vol(nx + 1, 1:ny)
 
        c_star = fields%C
        do j = 1, ny
@@ -775,6 +947,9 @@ contains
           end do
        end do
        call exchange_halos_scalar(c_star, mesh)
+       fields%C = c_star
+       call apply_vof_bc(fields, mesh, cfg)
+       c_star = fields%C
 
        ! 2. Passe X
        call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
@@ -798,6 +973,7 @@ contains
              end if
           end do
        end do
+       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) flux_vol(1:nx, 1) = flux_vol(1:nx, ny + 1)
 
        c_final = c_star
        do j = 1, ny
@@ -878,6 +1054,7 @@ contains
              end if
           end do
        end do
+       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) flux_vol(1, 1:ny) = flux_vol(nx + 1, 1:ny)
 
        c_star = fields%C
        do j = 1, ny
@@ -887,6 +1064,9 @@ contains
           end do
        end do
        call exchange_halos_scalar(c_star, mesh)
+       fields%C = c_star
+       call apply_vof_bc(fields, mesh, cfg)
+       c_star = fields%C
 
        ! 2. Passe Y (Eq. 16 Weymouth & Yue 2010)
        call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
@@ -910,6 +1090,7 @@ contains
              end if
           end do
        end do
+       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) flux_vol(1:nx, 1) = flux_vol(1:nx, ny + 1)
 
        c_final = c_star
        do j = 1, ny
@@ -942,6 +1123,7 @@ contains
              end if
           end do
        end do
+       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) flux_vol(1, 1:ny) = flux_vol(nx + 1, 1:ny)
 
        c_star = fields%C
        do j = 1, ny
@@ -951,6 +1133,9 @@ contains
           end do
        end do
        call exchange_halos_scalar(c_star, mesh)
+       fields%C = c_star
+       call apply_vof_bc(fields, mesh, cfg)
+       c_star = fields%C
 
        ! 2. Passe X (Eq. 15 Weymouth & Yue 2010)
        call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
@@ -974,6 +1159,7 @@ contains
              end if
           end do
        end do
+       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) flux_vol(1:nx, 1) = flux_vol(1:nx, ny + 1)
 
        c_final = c_star
        do j = 1, ny
@@ -1009,10 +1195,6 @@ contains
     type(flow_fields_t), intent(inout) :: fields
     ! Appel de sous-programme modulaire
     call set_initial_conditions(fields, mesh, this%cfg)
-    ! Appel de sous-programme modulaire
-    call update_physical_properties(fields, mesh, this%cfg)
-    ! Appel de sous-programme modulaire
-    call compute_curvature_and_csf(fields, mesh, this%cfg)
   end subroutine vof_set_ic
 
   ! [Procédure/Module] subroutine vof_advect_step
@@ -1027,10 +1209,6 @@ contains
     real(dp), intent(in) :: dt
     ! Appel de sous-programme modulaire
     call advect_vof(fields, mesh, this%cfg, dt)
-    ! Appel de sous-programme modulaire
-    call update_physical_properties(fields, mesh, this%cfg)
-    ! Appel de sous-programme modulaire
-    call compute_curvature_and_csf(fields, mesh, this%cfg)
   end subroutine vof_advect_step
 
   ! [Procédure/Module] subroutine vof_smooth_diffusion

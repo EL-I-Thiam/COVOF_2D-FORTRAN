@@ -42,7 +42,7 @@ contains
     ! Déclaration de variable locale / paramètre de calcul
     integer :: i, j, dof, nu, nv, np, n, u_nx, v_ny, sweep
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: d, val, grad_p
+    real(dp) :: d, val, grad_p, mean_rp
     ! Déclaration de variable locale / paramètre de calcul
     logical :: is_wall
     ! Déclaration de variable locale / paramètre de calcul
@@ -233,6 +233,12 @@ contains
           end do
         end do
 
+        ! Élimination du mode constant pour stabilité monolithique
+        if (.not. cfg%compressible) then
+          mean_rp = sum(rp_2d) / real(mesh%nx_local * mesh%ny_local, dp)
+          rp_2d = rp_2d - mean_rp
+        end if
+
         ! 2. Second membre pour vitesse u : rhs_u = zu - G_u * rp
         allocate(rhs_u(nu), ru(nu))
         rhs_u = 0.0_dp
@@ -245,7 +251,13 @@ contains
             if (is_wall) then
               rhs_u(dof) = src(dof)
             else
-              grad_p = (rp_2d(i, j) - rp_2d(i - 1, j)) * mesh%dy
+              if (i > 1) then
+                grad_p = (rp_2d(i, j) - rp_2d(i - 1, j)) * mesh%dy
+              else if (cfg%bc_left%btype == BC_PERIODIC) then
+                grad_p = (rp_2d(1, j) - rp_2d(mesh%nx_local, j)) * mesh%dy
+              else
+                grad_p = 0.0_dp
+              end if
               rhs_u(dof) = src(dof) - grad_p
             end if
           end do
@@ -266,8 +278,16 @@ contains
                 cycle
               end if
               val = rhs_u(dof)
-              if (i > 1) val = val + ns%u_aW(dof) * ru(dof - 1)
-              if (i < u_nx) val = val + ns%u_aE(dof) * ru(dof + 1)
+              if (i > 1) then
+                val = val + ns%u_aW(dof) * ru(dof - 1)
+              else if (cfg%bc_left%btype == BC_PERIODIC) then
+                val = val + ns%u_aW(dof) * ru((j - 1) * u_nx + u_nx)
+              end if
+              if (i < u_nx) then
+                val = val + ns%u_aE(dof) * ru(dof + 1)
+              else if (cfg%bc_right%btype == BC_PERIODIC) then
+                val = val + ns%u_aE(dof) * ru((j - 1) * u_nx + 1)
+              end if
               if (j > 1) val = val + ns%u_aS(dof) * ru(dof - u_nx)
               if (j < mesh%ny_local) val = val + ns%u_aN(dof) * ru(dof + u_nx)
               ru(dof) = val / ns%u_aP(dof)
@@ -285,8 +305,16 @@ contains
                 cycle
               end if
               val = rhs_u(dof)
-              if (i > 1) val = val + ns%u_aW(dof) * ru(dof - 1)
-              if (i < u_nx) val = val + ns%u_aE(dof) * ru(dof + 1)
+              if (i > 1) then
+                val = val + ns%u_aW(dof) * ru(dof - 1)
+              else if (cfg%bc_left%btype == BC_PERIODIC) then
+                val = val + ns%u_aW(dof) * ru((j - 1) * u_nx + u_nx)
+              end if
+              if (i < u_nx) then
+                val = val + ns%u_aE(dof) * ru(dof + 1)
+              else if (cfg%bc_right%btype == BC_PERIODIC) then
+                val = val + ns%u_aE(dof) * ru((j - 1) * u_nx + 1)
+              end if
               if (j > 1) val = val + ns%u_aS(dof) * ru(dof - u_nx)
               if (j < mesh%ny_local) val = val + ns%u_aN(dof) * ru(dof + u_nx)
               ru(dof) = val / ns%u_aP(dof)
@@ -310,7 +338,13 @@ contains
             if (is_wall) then
               rhs_v(dof) = src(nu + dof)
             else
-              grad_p = (rp_2d(i, j) - rp_2d(i, j - 1)) * mesh%dx
+              if (j > 1) then
+                grad_p = (rp_2d(i, j) - rp_2d(i, j - 1)) * mesh%dx
+              else if (cfg%bc_bottom%btype == BC_PERIODIC) then
+                grad_p = (rp_2d(i, 1) - rp_2d(i, mesh%ny_local)) * mesh%dx
+              else
+                grad_p = 0.0_dp
+              end if
               rhs_v(dof) = src(nu + dof) - grad_p
             end if
           end do
@@ -333,10 +367,26 @@ contains
                 cycle
               end if
               val = rhs_v(dof)
-              if (i > 1) val = val + ns%v_aW(dof) * rv(dof - 1)
-              if (i < mesh%nx_local) val = val + ns%v_aE(dof) * rv(dof + 1)
-              if (j > 1) val = val + ns%v_aS(dof) * rv(dof - mesh%nx_local)
-              if (j < v_ny) val = val + ns%v_aN(dof) * rv(dof + mesh%nx_local)
+              if (i > 1) then
+                val = val + ns%v_aW(dof) * rv(dof - 1)
+              else if (cfg%bc_left%btype == BC_PERIODIC) then
+                val = val + ns%v_aW(dof) * rv((j - 1) * mesh%nx_local + mesh%nx_local)
+              end if
+              if (i < mesh%nx_local) then
+                val = val + ns%v_aE(dof) * rv(dof + 1)
+              else if (cfg%bc_right%btype == BC_PERIODIC) then
+                val = val + ns%v_aE(dof) * rv((j - 1) * mesh%nx_local + 1)
+              end if
+              if (j > 1) then
+                val = val + ns%v_aS(dof) * rv(dof - mesh%nx_local)
+              else if (cfg%bc_bottom%btype == BC_PERIODIC) then
+                val = val + ns%v_aS(dof) * rv((v_ny - 1) * mesh%nx_local + i)
+              end if
+              if (j < v_ny) then
+                val = val + ns%v_aN(dof) * rv(dof + mesh%nx_local)
+              else if (cfg%bc_top%btype == BC_PERIODIC) then
+                val = val + ns%v_aN(dof) * rv(i)
+              end if
               rv(dof) = val / ns%v_aP(dof)
             end do
           end do
@@ -354,10 +404,26 @@ contains
                 cycle
               end if
               val = rhs_v(dof)
-              if (i > 1) val = val + ns%v_aW(dof) * rv(dof - 1)
-              if (i < mesh%nx_local) val = val + ns%v_aE(dof) * rv(dof + 1)
-              if (j > 1) val = val + ns%v_aS(dof) * rv(dof - mesh%nx_local)
-              if (j < v_ny) val = val + ns%v_aN(dof) * rv(dof + mesh%nx_local)
+              if (i > 1) then
+                val = val + ns%v_aW(dof) * rv(dof - 1)
+              else if (cfg%bc_left%btype == BC_PERIODIC) then
+                val = val + ns%v_aW(dof) * rv((j - 1) * mesh%nx_local + mesh%nx_local)
+              end if
+              if (i < mesh%nx_local) then
+                val = val + ns%v_aE(dof) * rv(dof + 1)
+              else if (cfg%bc_right%btype == BC_PERIODIC) then
+                val = val + ns%v_aE(dof) * rv((j - 1) * mesh%nx_local + 1)
+              end if
+              if (j > 1) then
+                val = val + ns%v_aS(dof) * rv(dof - mesh%nx_local)
+              else if (cfg%bc_bottom%btype == BC_PERIODIC) then
+                val = val + ns%v_aS(dof) * rv((v_ny - 1) * mesh%nx_local + i)
+              end if
+              if (j < v_ny) then
+                val = val + ns%v_aN(dof) * rv(dof + mesh%nx_local)
+              else if (cfg%bc_top%btype == BC_PERIODIC) then
+                val = val + ns%v_aN(dof) * rv(i)
+              end if
               rv(dof) = val / ns%v_aP(dof)
             end do
           end do
@@ -532,7 +598,7 @@ contains
 
       ! Demi-pas 1 (j = 0)
       rho_1 = global_dot_product(mesh, r_tilde, r0, n)
-      if (abs(rho_0) < 1.0e-25_dp) exit
+      if (abs(rho_0) < 1.0e-300_dp) exit
       ! Affectation et calcul numérique
       beta = alpha * (rho_1 / rho_0)
       ! Calcul de la masse volumique locale ou interpolée aux faces
@@ -545,7 +611,7 @@ contains
 
       ! Affectation et calcul numérique
       gamma = global_dot_product(mesh, r_tilde, u1, n)
-      if (abs(gamma) < 1.0e-25_dp) exit
+      if (abs(gamma) < 1.0e-300_dp) exit
       ! Affectation et calcul numérique
       alpha = rho_0 / gamma
 
@@ -558,7 +624,7 @@ contains
 
       ! Demi-pas 2 (j = 1)
       rho_1 = global_dot_product(mesh, r_tilde, r1, n)
-      if (abs(rho_0) < 1.0e-25_dp) exit
+      if (abs(rho_0) < 1.0e-300_dp) exit
       ! Affectation et calcul numérique
       beta = alpha * (rho_1 / rho_0)
       ! Calcul de la masse volumique locale ou interpolée aux faces
@@ -573,7 +639,7 @@ contains
 
       ! Affectation et calcul numérique
       gamma = global_dot_product(mesh, r_tilde, u2, n)
-      if (abs(gamma) < 1.0e-25_dp) exit
+      if (abs(gamma) < 1.0e-300_dp) exit
       ! Affectation et calcul numérique
       alpha = rho_0 / gamma
 
@@ -623,17 +689,23 @@ contains
       ! Affectation et calcul numérique
       u0(1:n) = u0(1:n) - (gamma1 * u1(1:n) + gamma2 * u2(1:n))
       ! Affectation et calcul numérique
-      omega = gamma2
+      if (gamma2 /= 0.0_dp) then
+        omega = gamma2
+      else if (abs(gamma1) > 1.0e-30_dp) then
+        omega = -gamma1
+      else
+        omega = 1.0_dp
+      end if
 
       ! Évaluation de la norme du résidu ou de l'erreur numérique
       r_norm = global_norm2(mesh, r0, n)
-      ! Évaluation de la condition logique
-      if (r_norm / r0_norm < tol .or. r_norm < 1.0e-13_dp) then
-        ! Affectation et calcul numérique
+      ! Protection contre NaN, Inf ou explosion numérique (Breakdown BiCGSTAB2)
+      if (r_norm /= r_norm .or. r_norm > 1.0e30_dp) exit
+
+      ! Test de convergence relative harmonisé avec le C++
+      if (r_norm / r0_norm < tol .or. r_norm < 1.0e-12_dp) then
         iters = iter
-        ! Libération de la mémoire allouée
         deallocate(b_hat, r_tilde, r0, r1, r2, u0, u1, u2)
-        ! Retour à la procédure appelante
         return
       end if
     end do
@@ -742,8 +814,9 @@ contains
       s(1:n) = r(1:n) - alpha * v(1:n)
       ! Évaluation de la norme du résidu ou de l'erreur numérique
       s_norm = global_norm2(mesh, s, n)
+      if (s_norm /= s_norm .or. s_norm > 1.0e30_dp) exit
       ! Évaluation de la condition logique
-      if (s_norm / r0_norm < tol .or. s_norm < 1.0e-13_dp) then
+      if (s_norm / r0_norm < tol .or. s_norm < 1.0e-12_dp) then
         ! Affectation et calcul numérique
         x(1:n) = x(1:n) + alpha * p(1:n)
         ! Affectation et calcul numérique
@@ -777,8 +850,9 @@ contains
       rho_old = rho
       ! Évaluation de la norme du résidu ou de l'erreur numérique
       r_norm = global_norm2(mesh, r, n)
+      if (r_norm /= r_norm .or. r_norm > 1.0e30_dp) exit
       ! Évaluation de la condition logique
-      if (r_norm / r0_norm < tol .or. r_norm < 1.0e-13_dp) then
+      if (r_norm / r0_norm < tol .or. r_norm < 1.0e-12_dp) then
         ! Affectation et calcul numérique
         iters = iter
         ! Libération de la mémoire allouée
@@ -1131,10 +1205,78 @@ contains
     case (LINEAR_GMRES)
       ! Appel de sous-programme modulaire
       call solve_gmres(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    case (LINEAR_DIRECT)
+      ! Appel du solveur direct exact par décomposition LU
+      call solve_direct(ns, mesh, cfg, fields_old, dt, b, x, iters)
     case default
       ! Appel de sous-programme modulaire
       call solve_bicgstab2(ns, mesh, cfg, fields_old, dt, b, x, iters)
     end select
   end subroutine solve_linear_system
+
+  !-----------------------------------------------------------------------------
+  ! Solveur Direct Exact par Décomposition LU (Équivalent MUMPS / LAPACK DGETRF + DGETRS)
+  !-----------------------------------------------------------------------------
+  subroutine solve_direct(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    type(navier_stokes_t), intent(in) :: ns
+    type(mesh_2d_t), intent(in)        :: mesh
+    type(config_t), intent(in)         :: cfg
+    type(flow_fields_t), intent(in)    :: fields_old
+    real(dp), intent(in)               :: dt
+    real(dp), intent(in)               :: b(:)
+    real(dp), intent(inout)            :: x(:)
+    integer, intent(out)               :: iters
+
+    integer :: n, j, info
+    real(dp), allocatable :: col(:), e(:)
+    real(dp), allocatable, save :: A_cached(:,:)
+    integer, allocatable, save :: ipiv_cached(:)
+    integer, save :: cached_n = 0
+    real(dp), save :: cached_dt = 0.0_dp
+    logical, save :: is_factored = .false.
+    logical :: can_use_cache
+
+    n = ns%n_owned_total
+    iters = 1
+    if (n <= 0) return
+
+    ! Le cache n'est autorisé QUE pour un système stationnaire/linéaire à matrice strictement constante
+    can_use_cache = (.not. cfg%enable_two_phase) .and. (.not. cfg%enable_convection) .and. &
+                    (.not. cfg%compressible) .and. (.not. cfg%enable_energy) .and. &
+                    (cfg%viscosity_model == VISC_CONSTANT)
+
+    if (.not. can_use_cache .or. .not. is_factored .or. cached_n /= n .or. abs(cached_dt - dt) > 1.0e-14_dp) then
+       if (allocated(A_cached)) deallocate(A_cached)
+       if (allocated(ipiv_cached)) deallocate(ipiv_cached)
+       allocate(A_cached(n, n), ipiv_cached(n), col(n), e(n))
+       e = 0.0_dp
+
+       ! 1. Assemblage complet de la matrice du système par colonnes
+       do j = 1, n
+          e(j) = 1.0_dp
+          call ns%apply_system_matrix(mesh, cfg, fields_old, dt, e, col)
+          e(j) = 0.0_dp
+          A_cached(:, j) = col(:)
+       end do
+
+       ! 2. Factorisation LU directe par LAPACK DGETRF
+       call dgetrf(n, n, A_cached, n, ipiv_cached, info)
+       if (info == 0) then
+          cached_n = n
+          cached_dt = dt
+          is_factored = can_use_cache
+       else
+          print *, "ERREUR DGETRF: info =", info
+       end if
+       deallocate(col, e)
+    end if
+
+    ! 3. Résolution directe par substitution avant-arrière LAPACK DGETRS
+    x = b
+    call dgetrs('N', n, 1, A_cached, n, ipiv_cached, x, n, info)
+    if (info /= 0) then
+       print *, "ERREUR DGETRS: info =", info
+    end if
+  end subroutine solve_direct
 
 end module module_linear_solvers

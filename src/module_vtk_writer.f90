@@ -77,7 +77,7 @@ contains
           ! Affectation et calcul numérique
           this%is_open = .true.
           write(this%csv_unit, '(A)') &
-            "step,time,dt,center_of_mass_y,rise_velocity,bubble_volume,kinetic_energy,max_u,max_div"
+            "step,time,dt,center_of_mass_y,rise_velocity,bubble_volume,kinetic_energy,max_u,max_div,avg_rho_gas,avg_p_gas"
           flush(this%csv_unit)
        end if
     end if
@@ -155,6 +155,18 @@ contains
           write(vtr_unit, *)
        end do
        write(vtr_unit, '(A)') '        </DataArray>'
+
+       ! PhaseIndicator_Smoothed C_s (si lissage SVOF activé)
+       if (allocated(fields%C_s)) then
+          write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="PhaseIndicator_Smoothed" format="ascii">'
+          do j = 1, mesh%ny_local
+             do i = 1, mesh%nx_local
+                write(vtr_unit, '(ES16.8," ")', advance="no") fields%C_s(i, j)
+             end do
+             write(vtr_unit, *)
+          end do
+          write(vtr_unit, '(A)') '        </DataArray>'
+       end if
 
        ! Pressure p
        write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="Pressure" format="ascii">'
@@ -310,6 +322,9 @@ contains
           write(pvtr_unit, '(A)') '    <PCellData Scalars="PhaseIndicator,Pressure,Density,Viscosity,Divergence" Vectors="Velocity">'
           ! Affectation et calcul numérique
           write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="PhaseIndicator"/>'
+          if (allocated(fields%C_s)) then
+             write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="PhaseIndicator_Smoothed"/>'
+          end if
           ! Affectation et calcul numérique
           write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Pressure"/>'
           ! Affectation et calcul numérique
@@ -382,7 +397,8 @@ contains
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: local_max_u, local_max_div, dvol, y_pos, c_val, ind_bubble
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: uc, vc, speed2, speed, div_val
+    real(dp) :: uc, vc, speed2, speed, div_val, u2p, v2p
+    real(dp) :: local_mass_gas, global_mass_gas, local_p_gas, global_p_gas, avg_rho_gas, avg_p_gas, local_gas_vol, global_gas_vol, rho_gas_c, ind_gas
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: global_vol, global_y_integral, global_v_integral, global_ke
     ! Déclaration de variable locale / paramètre de calcul
@@ -392,11 +408,11 @@ contains
 
     ! Affectation et calcul numérique
     local_vol        = 0.0_dp
-    ! Affectation et calcul numérique
+    local_gas_vol    = 0.0_dp
     local_y_integral = 0.0_dp
-    ! Affectation et calcul numérique
     local_v_integral = 0.0_dp
-    ! Affectation et calcul numérique
+    local_mass_gas   = 0.0_dp
+    local_p_gas      = 0.0_dp
     local_ke         = 0.0_dp
     ! Affectation et calcul numérique
     local_max_u      = 0.0_dp
@@ -421,6 +437,11 @@ contains
           local_vol        = local_vol + ind_bubble * dvol
           ! Affectation et calcul numérique
           local_y_integral = local_y_integral + y_pos * ind_bubble * dvol
+          ind_gas = 1.0_dp - c_val
+          rho_gas_c = fields%p(i, j) / (287.05_dp * max(1.0_dp, fields%T(i, j)))
+          local_mass_gas = local_mass_gas + ind_gas * rho_gas_c * dvol
+          local_p_gas    = local_p_gas    + ind_gas * fields%p(i, j) * dvol
+          local_gas_vol  = local_gas_vol  + ind_gas * dvol
 
           ! Affectation et calcul numérique
           uc = 0.5_dp * (fields%u(i, j) + fields%u(i + 1, j))
@@ -432,8 +453,10 @@ contains
 
           ! Affectation et calcul numérique
           speed2 = uc * uc + vc * vc
-          ! Affectation et calcul numérique
-          local_ke = local_ke + 0.5_dp * fields%rho(i, j) * speed2 * dvol
+          ! Énergie cinétique discrète aux nœuds de pression (Thèse Éqs. 4.44, 4.46-4.47)
+          u2p = 0.5_dp * (fields%u(i, j) * fields%u(i, j) + fields%u(i + 1, j) * fields%u(i + 1, j))
+          v2p = 0.5_dp * (fields%v(i, j) * fields%v(i, j) + fields%v(i, j + 1) * fields%v(i, j + 1))
+          local_ke = local_ke + 0.5_dp * fields%rho(i, j) * (u2p + v2p) * dvol
 
           ! Affectation et calcul numérique
           speed = sqrt(speed2)
@@ -454,6 +477,9 @@ contains
     global_y_integral = global_sum(mesh, local_y_integral)
     ! Affectation et calcul numérique
     global_v_integral = global_sum(mesh, local_v_integral)
+    global_gas_vol    = global_sum(mesh, local_gas_vol)
+    global_mass_gas   = global_sum(mesh, local_mass_gas)
+    global_p_gas      = global_sum(mesh, local_p_gas)
     ! Affectation et calcul numérique
     global_ke         = global_sum(mesh, local_ke)
     ! Affectation et calcul numérique
@@ -467,18 +493,23 @@ contains
        yc = global_y_integral / global_vol
        ! Affectation et calcul numérique
        vc_mean = global_v_integral / global_vol
-    ! Branche par défaut si condition non satisfaite
     else
-       ! Affectation et calcul numérique
        yc = 0.0_dp
-       ! Affectation et calcul numérique
        vc_mean = 0.0_dp
+    end if
+
+    if (global_gas_vol > 1.0e-12_dp) then
+       avg_rho_gas = global_mass_gas / global_gas_vol
+       avg_p_gas = global_p_gas / global_gas_vol
+    else
+       avg_rho_gas = 0.0_dp
+       avg_p_gas = 0.0_dp
     end if
 
     ! Évaluation de la condition logique
     if (mesh%rank == 0 .and. this%is_open) then
-       write(this%csv_unit, '(I0,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6)') &
-         step, time, dt, yc, vc_mean, global_vol, global_ke, global_max_u, global_max_div
+       write(this%csv_unit, '(I0,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6)') &
+         step, time, dt, yc, vc_mean, global_vol, global_ke, global_max_u, global_max_div, avg_rho_gas, avg_p_gas
        flush(this%csv_unit)
     end if
   end subroutine vtk_write_diagnostics

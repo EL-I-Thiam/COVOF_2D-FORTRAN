@@ -103,6 +103,8 @@ module module_constants
   integer, parameter, public :: IC_LIQUID_SHEET     = 9
   ! Jet liquide visqueux injecté / flambement (Cas 3.3 de l'article Fluids 2021)
   integer, parameter, public :: IC_VISCOUS_JET      = 10
+  ! Cylindre rigide/dense en chute libre avec intégration géométrique PLIC (Cas 3.1 Fluids 2021)
+  integer, parameter, public :: IC_CYLINDER         = 11
 
   ! --- 10. Formes Géométriques d'Obstacles Immergés (Brinkman) ---
   ! Aucun obstacle immergé dans le domaine fluide
@@ -117,5 +119,16 @@ module module_constants
   integer, parameter, public :: EOS_LINEAR         = 1
   integer, parameter, public :: EOS_IDEAL_GAS      = 2
   integer, parameter, public :: EOS_NASG           = 3
+
+  ! --- 12. Schémas d'Intégration Temporelle ---
+  integer, parameter, public :: TIME_SCHEME_EULER = 1
+  integer, parameter, public :: TIME_SCHEME_GEAR  = 2
+  integer, parameter, public :: TIME_SCHEME_BDF2  = 2
+
+  ! --- 13. Linéarisation Convective (Fluids 2021) ---
+  integer, parameter, public :: CONV_LIN_PICARD          = 1
+  integer, parameter, public :: CONV_LIN_ADAMS_BASHFORTH = 2
+  integer, parameter, public :: CONV_LIN_AB2             = 2
+  integer, parameter, public :: CONV_LIN_NEWTON          = 3
 
 end module module_constants

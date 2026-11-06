@@ -69,12 +69,13 @@ contains
   !-----------------------------------------------------------------------------
   ! Calcule la masse volumique rho(p, T) [kg/m^3]
   !-----------------------------------------------------------------------------
-  pure function eos_compute_density(eos_type, rho0, chi_T_param, p, T, r_gas, p_ref) result(rho)
+  pure function eos_compute_density(eos_type, rho0, chi_T_param, p, T, r_gas, p_ref, &
+                                    p_inf, b_nasg, gamma, cv) result(rho)
     integer,  intent(in) :: eos_type
     real(dp), intent(in) :: rho0, chi_T_param, p, T
-    real(dp), intent(in), optional :: r_gas, p_ref
+    real(dp), intent(in), optional :: r_gas, p_ref, p_inf, b_nasg, gamma, cv
     real(dp) :: rho
-    real(dp) :: pref, rgas, T_pos
+    real(dp) :: pref, rgas, T_pos, pinf, bval, gam, cv_val, r_eff, p_num, denom
 
     pref = 1.01325e5_dp
     if (present(p_ref)) pref = p_ref
@@ -91,6 +92,28 @@ contains
     case (EOS_IDEAL_GAS)
        T_pos = max(1.0_dp, T)
        rho = p / (rgas * T_pos)
+    case (EOS_NASG)
+       pinf = 0.0_dp
+       if (present(p_inf)) pinf = p_inf
+       bval = 0.0_dp
+       if (present(b_nasg)) bval = b_nasg
+       gam = 1.4_dp
+       if (present(gamma)) then
+          if (gamma > 1.0_dp) gam = gamma
+       end if
+       cv_val = 717.5_dp
+       if (present(cv)) then
+          if (cv > 0.0_dp) cv_val = cv
+       end if
+       r_eff = (gam - 1.0_dp) * cv_val
+       T_pos = max(1.0_dp, T)
+       p_num = p + gam * pinf
+       denom = r_eff * T_pos + bval * p_num
+       if (denom > 1.0e-30_dp .and. p_num > 0.0_dp) then
+          rho = p_num / denom
+       else
+          rho = rho0
+       end if
     case default
        rho = rho0
     end select

@@ -47,6 +47,9 @@ module module_simulation
      procedure :: compute_time_step => sim_compute_time_step
      ! Affectation et calcul numérique
      procedure :: run_laplacian => sim_run_laplacian
+     procedure :: run_laplacian_cas3_2 => sim_run_laplacian_cas3_2
+     procedure :: export_poiseuille_results => sim_export_poiseuille_results
+     procedure :: export_poiseuille_unsteady_results => sim_export_poiseuille_unsteady_results
      ! Affectation et calcul numérique
      procedure :: run_vortex_advection => sim_run_vortex_advection
      ! Affectation et calcul numérique
@@ -146,6 +149,30 @@ contains
        call sync_u(this%mesh, this%fields%u)
     end if
 
+    ! Initialisation exacte du profil de Poiseuille pour vérification analytique
+    if (trim(this%config%test_case) == "CAS_3_7" .or. trim(this%config%test_case) == "CAS_3_7_POISEUILLE" .or. &
+        (this%config%bc_left%btype == BC_DIRICHLET .and. trim(this%config%bc_left%profile) == "PARABOLIC")) then
+       u_mean = merge(this%config%bc_left%u, 1.0_dp, this%config%bc_left%u > 0.0_dp)
+       u_nx = this%mesh%nx_local
+       if (this%mesh%is_boundary_right) u_nx = u_nx + 1
+       do j = 1, this%mesh%ny_local
+          y_val = y_center(this%mesh, j)
+          u_val = 6.0_dp * u_mean * y_val * (this%mesh%ly - y_val) / (this%mesh%ly**2)
+          do i = 1, u_nx
+             this%fields%u(i, j) = u_val
+          end do
+       end do
+       do j = 1, this%mesh%ny_local
+          do i = 1, this%mesh%nx_local
+             x_val = x_center(this%mesh, i)
+             this%fields%p(i, j) = (12.0_dp * this%config%mu1 * u_mean / (this%mesh%ly**2)) * (this%mesh%lx - x_val)
+          end do
+       end do
+       call sync_u(this%mesh, this%fields%u)
+       call sync_cell_scalar(this%mesh, this%fields%p)
+       call apply_boundary_conditions(this%mesh, this%config, this%fields, .false.)
+    end if
+
     ! Initialisation du champ de vitesse solénoïdal pour LIQUID_SHEET (Équations 17-18 Fluids 2021)
     if (this%config%ic_type == IC_LIQUID_SHEET) then
        ! Déclaration des variables physiques et géométriques
@@ -230,6 +257,23 @@ contains
        call sync_v(this%mesh, this%fields%v)
        call apply_velocity_bc(this%fields, this%mesh, this%config, .false.)
        call apply_vof_bc(this%fields, this%mesh, this%config)
+    end if
+
+    ! Initialisation quasi-statique de la vitesse pour compression de gaz isotherme (Fluids 2024, Cas 4.2)
+    if (this%config%compressible .and. this%config%bc_bottom%v > 0.0_dp) then
+       v_ny = this%mesh%ny_local
+       if (this%mesh%is_boundary_top) v_ny = v_ny + 1
+       do j = 1, v_ny
+          y_val = y_face(this%mesh, j)
+          if (y_val <= this%config%ic_box_y1) then
+             u_val = this%config%bc_bottom%v
+          else
+             u_val = this%config%bc_bottom%v * max(0.0_dp, (this%mesh%ly - y_val) / max(1.0e-12_dp, this%mesh%ly - this%config%ic_box_y1))
+          end if
+          this%fields%v(1:this%mesh%nx_local, j) = u_val
+       end do
+       call sync_v(this%mesh, this%fields%v)
+       call apply_velocity_bc(this%fields, this%mesh, this%config, .false.)
     end if
 
     ! Initialisation du champ thermique si activé
@@ -335,6 +379,7 @@ contains
 
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: t, dt, global_max_u, global_max_div, global_du_max, nu_mean
+    real(dp) :: start_cpu, end_cpu, elapsed_cpu
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: local_max_u, local_max_div, local_du_max, speed, du, div_val
     ! Déclaration de variable locale / paramètre de calcul
@@ -344,8 +389,14 @@ contains
 
     ! Évaluation de la condition logique
     if (trim(this%config%mode) == "LAPLACIAN") then
-       ! Appel de sous-programme modulaire
-       call this%run_laplacian()
+       if (trim(this%config%test_case) == "CAS_3_2_NEUMANN" .or. &
+           index(this%config%test_case, "cas3_2") > 0 .or. &
+           index(this%config%case_name, "cas3_2") > 0 .or. &
+           index(this%config%case_name, "neumann") > 0) then
+          call this%run_laplacian_cas3_2()
+       else
+          call this%run_laplacian()
+       end if
        ! Retour à la procédure appelante
        return
     end if
@@ -369,6 +420,14 @@ contains
     ! Allocation dynamique de tableau contigu en mémoire
     allocate(u_prev(0:this%mesh%nx_local+1, 0:this%mesh%ny_local+1))
 
+    this%fields%u_old = this%fields%u
+    this%fields%v_old = this%fields%v
+    this%fields%p_old = this%fields%p
+    this%fields%T_old = this%fields%T
+    this%fields%rho_old = this%fields%rho
+    this%fields%rho_u_old = this%fields%rho_u
+    this%fields%rho_v_old = this%fields%rho_v
+
     ! Sauvegarde initiale à t = 0.0
     call this%vtk_writer%write_step(this%mesh, this%fields, step, t)
     ! Appel de sous-programme modulaire
@@ -382,6 +441,9 @@ contains
          "Pas", "Temps [s]", "dt [s]", "Iter Krylov", "Vitesse Max", "Div Max", "Nu Moyen"
        write(*, '(A)') repeat("-", 94)
     end if
+
+    ! Mesure du temps CPU total
+    call cpu_time(start_cpu)
 
     ! Boucle d'itération numérique
     do while (t < this%config%t_final - 1.0e-12_dp * (abs(this%config%t_final) + 1.0_dp))
@@ -399,11 +461,29 @@ contains
        end if
        if (dt < 1.0e-12_dp) exit
 
+       ! Sauvegarde de l'état n-1 pour Gear / BDF2 et Adams-Bashforth d'ordre 2
+       if (step > 1) then
+          this%fields%u_nm1 = this%fields%u_old
+          this%fields%v_nm1 = this%fields%v_old
+          this%fields%rho_u_nm1 = this%fields%rho_u_old
+          this%fields%rho_v_nm1 = this%fields%rho_v_old
+          this%fields%has_nm1 = .true.
+       else
+          this%fields%u_nm1 = this%fields%u
+          this%fields%v_nm1 = this%fields%v
+          this%fields%rho_u_nm1 = this%fields%rho_u
+          this%fields%rho_v_nm1 = this%fields%rho_v
+          this%fields%has_nm1 = .false.
+       end if
+
        ! Sauvegarde de l'état n pour dérivées temporelles et vitesse advectrice extrapolée
        this%fields%u_old = this%fields%u
        this%fields%v_old = this%fields%v
        this%fields%p_old = this%fields%p
        this%fields%T_old = this%fields%T
+       this%fields%rho_old = this%fields%rho
+       this%fields%rho_u_old = this%fields%rho_u
+       this%fields%rho_v_old = this%fields%rho_v
 
        ! Étape 1 : Transport inertiel préservant la quantité de mouvement (SSP-RK3, Fluids 2024)
        if (this%config%enable_ssp_rk3_momentum) then
@@ -419,6 +499,11 @@ contains
           call apply_vof_bc(this%fields, this%mesh, this%config)
        end if
 
+       ! 1.9 Calcul du paramètre de pénalité adaptatif r(t, M) (Vincent et al. 2004, Éq. 14)
+       if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+          call this%ns_solver%compute_adaptative_r_al(this%mesh, this%config, this%fields, dt)
+       end if
+
        ! 2. Assemblage des blocs du préconditionneur
        call this%ns_solver%assemble_preconditioner_blocks(this%mesh, this%config, this%fields, dt)
 
@@ -429,15 +514,12 @@ contains
           call this%solve_standard_projection(dt, total_iters)
        else
           if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
-             ! Affectation et calcul numérique
              uzawa_max = this%config%uzawa_iter
-          ! Branche par défaut si condition non satisfaite
           else
-             ! Affectation et calcul numérique
              uzawa_max = 1
           end if
 
-          ! Boucle d'itération numérique
+          ! Boucle d'Uzawa-Lagrangien augmenté (Vincent et al. 2004, Éq. 10)
           do m = 1, uzawa_max
              ! 3. Construction du second membre rhs
              call this%ns_solver%assemble_rhs(this%mesh, this%config, this%fields, dt, rhs)
@@ -448,7 +530,6 @@ contains
              ! 5. Résolution du système linéaire par Krylov (BiCGSTAB2 / PCG / GMRES)
              call solve_linear_system(this%ns_solver, this%mesh, this%config, this%fields, dt, &
                                       rhs, state_vector, iters)
-             ! Affectation et calcul numérique
              total_iters = total_iters + iters
 
              ! 6. Déballage de la vitesse résolue
@@ -456,14 +537,27 @@ contains
 
              ! 7. Mise à jour de la pression par Lagrangien augmenté (étape d'Uzawa)
              if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
-                ! Appel de sous-programme modulaire
                 call this%ns_solver%update_pressure_al(this%mesh, this%config, this%fields)
+
+                ! Critère d'arrêt d'Uzawa sur ||div(u^{*,m})||_inf <= uzawa_tol (Éq. 10)
+                if (uzawa_max > 1 .and. this%config%uzawa_tol > 0.0_dp) then
+                   local_max_div = 0.0_dp
+                   do j = 1, this%mesh%ny_local
+                      do i = 1, this%mesh%nx_local
+                         div_val = abs((this%fields%u(i + 1, j) - this%fields%u(i, j)) / this%mesh%dx + &
+                                       (this%fields%v(i, j + 1) - this%fields%v(i, j)) / this%mesh%dy)
+                         if (div_val > local_max_div) local_max_div = div_val
+                      end do
+                   end do
+                   global_max_div = global_max(this%mesh, local_max_div)
+                   if (global_max_div <= this%config%uzawa_tol) exit
+                end if
              end if
           end do
        end if
 
-       ! 7.5 Résolution de l'énergie (totale si compressible, thermique si Boussinesq)
-       if (this%config%compressible) then
+       ! 7.5 Résolution de l'énergie (totale si compressible non-isotherme, thermique si Boussinesq)
+       if (this%config%compressible .and. this%config%enable_energy) then
           call this%ns_solver%solve_total_energy(this%mesh, this%config, this%fields, dt)
        else if (this%config%enable_energy) then
           call this%ns_solver%solve_energy(this%mesh, this%config, this%fields, dt)
@@ -552,7 +646,7 @@ contains
        end if
 
        ! Export des fichiers VTK
-       if (mod(step, this%config%vtk_interval) == 0 .or. t >= this%config%t_final) then
+       if (mod(step, this%config%vtk_interval) == 0 .or. t >= this%config%t_final - 1.0e-10_dp * (abs(this%config%t_final) + 1.0_dp)) then
           ! Appel de sous-programme modulaire
           call this%vtk_writer%write_step(this%mesh, this%fields, step, t)
        end if
@@ -560,6 +654,29 @@ contains
 
     ! Appel de sous-programme modulaire
     call this%vtk_writer%finalize()
+
+    call cpu_time(end_cpu)
+    elapsed_cpu = end_cpu - start_cpu
+
+    if (this%mesh%rank == 0) then
+       if (trim(this%config%test_case) == "CAS_3_8" .or. &
+           trim(this%config%test_case) == "CAS_3_8_POISEUILLE_UNSTEADY" .or. &
+           index(this%config%test_case, "unsteady") > 0 .or. &
+           index(this%config%case_name, "cas3_8") > 0 .or. &
+           index(this%config%output_dir, "cas3_8") > 0 .or. &
+           index(this%config%case_name, "unsteady") > 0 .or. &
+           index(this%config%output_dir, "unsteady") > 0) then
+          call this%export_poiseuille_unsteady_results(step, t, elapsed_cpu)
+       else if (trim(this%config%test_case) == "CAS_3_7" .or. &
+           trim(this%config%test_case) == "CAS_3_7_POISEUILLE" .or. &
+           trim(this%config%test_case) == "POISEUILLE" .or. &
+           index(this%config%case_name, "poiseuille") > 0 .or. &
+           index(this%config%case_name, "cas3_7") > 0 .or. &
+           index(this%config%output_dir, "poiseuille") > 0 .or. &
+           index(this%config%output_dir, "cas3_7") > 0) then
+          call this%export_poiseuille_results(step, t, elapsed_cpu)
+       end if
+    end if
 
     ! Évaluation de la condition logique
     if (this%mesh%rank == 0) then
@@ -574,6 +691,378 @@ contains
   end subroutine sim_run
 
   !-----------------------------------------------------------------------------
+  ! Exporte les résultats et calculs d'erreurs pour le cas de Poiseuille (Cas 3.7)
+  !-----------------------------------------------------------------------------
+  subroutine sim_export_poiseuille_results(this, total_step, final_time, elapsed_cpu)
+    class(simulation_t), intent(inout) :: this
+    integer, intent(in)                :: total_step
+    real(dp), intent(in)               :: final_time, elapsed_cpu
+
+    integer :: nx, ny, i, j, i_mid, i_3q, j_mid
+    real(dp) :: lx, ly, dx, dy, mu, V0, Gx_theo, u_exact_val, uc, vc, pc, diff
+    real(dp) :: sum_err_l1, sum_err_l2, max_err_linf, n_cells, err_l1, err_l2
+    real(dp) :: p_in, p_out, x_in, x_out, Gx_num, err_grad_p, y_val, x_val
+    real(dp), allocatable :: u_c(:,:), v_c(:,:), p_c(:,:), u_ex(:,:), err_u(:,:)
+    character(len=256) :: file_path
+    integer :: f_unit
+
+    if (this%mesh%rank /= 0) return
+
+    nx = this%mesh%nx_local
+    ny = this%mesh%ny_local
+    lx = this%mesh%lx
+    ly = this%mesh%ly
+    dx = this%mesh%dx
+    dy = this%mesh%dy
+    mu = this%config%mu1
+    V0 = this%config%bc_left%u
+    if (V0 <= 0.0_dp) V0 = 1.0_dp
+    Gx_theo = 12.0_dp * mu * V0 / (ly * ly)
+
+    allocate(u_c(nx, ny), v_c(nx, ny), p_c(nx, ny), u_ex(nx, ny), err_u(nx, ny))
+
+    sum_err_l1 = 0.0_dp
+    sum_err_l2 = 0.0_dp
+    max_err_linf = 0.0_dp
+
+    j_mid = ny / 2
+    if (j_mid < 1) j_mid = 1
+    p_out = this%fields%p(nx, j_mid)
+
+    do j = 1, ny
+       y_val = y_center(this%mesh, j)
+       u_exact_val = 6.0_dp * V0 * y_val * (ly - y_val) / (ly * ly)
+       do i = 1, nx
+          uc = 0.5_dp * (this%fields%u(i, j) + this%fields%u(i + 1, j))
+          vc = 0.5_dp * (this%fields%v(i, j) + this%fields%v(i, j + 1))
+          pc = this%fields%p(i, j)
+
+          u_c(i, j) = uc
+          v_c(i, j) = vc
+          p_c(i, j) = pc
+          u_ex(i, j) = u_exact_val
+
+          diff = abs(uc - u_exact_val)
+          err_u(i, j) = diff
+
+          sum_err_l1 = sum_err_l1 + diff
+          sum_err_l2 = sum_err_l2 + diff * diff
+          if (diff > max_err_linf) max_err_linf = diff
+       end do
+    end do
+
+    n_cells = real(nx * ny, dp)
+    err_l1 = sum_err_l1 / n_cells
+    err_l2 = sqrt(sum_err_l2 / n_cells)
+
+    p_in = this%fields%p(1, j_mid)
+    x_in = x_center(this%mesh, 1)
+    x_out = x_center(this%mesh, nx)
+    Gx_num = (p_in - p_out) / (x_out - x_in)
+    err_grad_p = abs(Gx_num - Gx_theo)
+
+    write(*, '(A)') ""
+    write(*, '(A)') "========================================================"
+    write(*, '(A)') "  RESULTATS CAS 3.7 : ECOULEMENT DE POISEUILLE PLAN     "
+    write(*, '(A,F8.4,A,F8.4,A,I0,A,I0)') "  Domaine [", lx, " x ", ly, "], Grille ", nx, " x ", ny
+    write(*, '(A,ES14.6)') "  Gradient theorique Gx = ", Gx_theo
+    write(*, '(A,ES14.6,A,ES14.6,A)') "  Gradient numerique Gx = ", Gx_num, " (err = ", err_grad_p, ")"
+    write(*, '(A,ES14.6)') "  Erreur L1(u)   : ", err_l1
+    write(*, '(A,ES14.6)') "  Erreur L2(u)   : ", err_l2
+    write(*, '(A,ES14.6)') "  Erreur Linf(u) : ", max_err_linf
+    write(*, '(A,F10.4,A)') "  Temps CPU      : ", elapsed_cpu, " s"
+    write(*, '(A)') "========================================================"
+
+    call execute_command_line("mkdir -p " // trim(this%config%output_dir))
+
+    ! 1. poiseuille_error.csv
+    file_path = trim(this%config%output_dir) // "/poiseuille_error.csv"
+    open(newunit=f_unit, file=trim(file_path), status="replace", action="write")
+    write(f_unit, '(A)') "nx,ny,dx,dy,iters,err_l1,err_l2,err_linf,err_grad_p,cpu_time"
+    write(f_unit, '(I0,A,I0,A,ES14.6,A,ES14.6,A,I0,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6,A,F10.6)') &
+         nx, ",", ny, ",", dx, ",", dy, ",", total_step, ",", &
+         err_l1, ",", err_l2, ",", max_err_linf, ",", err_grad_p, ",", elapsed_cpu
+    close(f_unit)
+
+    ! 2. profile_u_y.csv
+    i_mid = nx / 2
+    if (i_mid < 1) i_mid = 1
+    i_3q = (3 * nx) / 4
+    if (i_3q < 1) i_3q = 1
+    file_path = trim(this%config%output_dir) // "/profile_u_y.csv"
+    open(newunit=f_unit, file=trim(file_path), status="replace", action="write")
+    write(f_unit, '(A)') "y,u_mid,u_three_quarter,u_ex,error"
+    do j = 1, ny
+       y_val = y_center(this%mesh, j)
+       u_exact_val = 6.0_dp * V0 * y_val * (ly - y_val) / (ly * ly)
+       write(f_unit, '(ES14.6,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6)') &
+            y_val, ",", u_c(i_mid, j), ",", u_c(i_3q, j), ",", u_exact_val, ",", abs(u_c(i_mid, j) - u_exact_val)
+    end do
+    close(f_unit)
+
+    ! 3. profile_p_x.csv
+    file_path = trim(this%config%output_dir) // "/profile_p_x.csv"
+    open(newunit=f_unit, file=trim(file_path), status="replace", action="write")
+    write(f_unit, '(A)') "x,p_mid,p_ex,error"
+    do i = 1, nx
+       x_val = x_center(this%mesh, i)
+       write(f_unit, '(ES14.6,A,ES14.6,A,ES14.6,A,ES14.6)') &
+            x_val, ",", (p_c(i, j_mid) - p_out), ",", Gx_theo * (lx - x_val), ",", abs((p_c(i, j_mid) - p_out) - Gx_theo * (lx - x_val))
+    end do
+    close(f_unit)
+
+    ! 4. solution_field_2d.csv
+    file_path = trim(this%config%output_dir) // "/solution_field_2d.csv"
+    open(newunit=f_unit, file=trim(file_path), status="replace", action="write")
+    write(f_unit, '(A)') "i,j,x,y,u,v,p,u_ex,p_ex,error_u"
+    do j = 1, ny
+       y_val = y_center(this%mesh, j)
+       do i = 1, nx
+          x_val = x_center(this%mesh, i)
+          write(f_unit, '(I0,A,I0,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6)') &
+               i, ",", j, ",", x_val, ",", y_val, ",", &
+               u_c(i, j), ",", v_c(i, j), ",", (p_c(i, j) - p_out), ",", &
+               u_ex(i, j), ",", Gx_theo * (lx - x_val), ",", err_u(i, j)
+       end do
+    end do
+    close(f_unit)
+
+    ! 5. solution_field.vtk
+    file_path = trim(this%config%output_dir) // "/solution_field.vtk"
+    open(newunit=f_unit, file=trim(file_path), status="replace", action="write")
+    write(f_unit, '(A)') "# vtk DataFile Version 3.0"
+    write(f_unit, '(A)') "COVOF 2D Cas 3.7 Poiseuille Solution (Fortran)"
+    write(f_unit, '(A)') "ASCII"
+    write(f_unit, '(A)') "DATASET RECTILINEAR_GRID"
+    write(f_unit, '(A,I0,A,I0,A)') "DIMENSIONS ", (nx + 1), " ", (ny + 1), " 1"
+    write(f_unit, '(A,I0,A)') "X_COORDINATES ", (nx + 1), " double"
+    do i = 0, nx
+       write(f_unit, '(ES16.8," ")', advance="no") i * dx
+    end do
+    write(f_unit, *)
+    write(f_unit, '(A,I0,A)') "Y_COORDINATES ", (ny + 1), " double"
+    do j = 0, ny
+       write(f_unit, '(ES16.8," ")', advance="no") j * dy
+    end do
+    write(f_unit, *)
+    write(f_unit, '(A)') "Z_COORDINATES 1 double"
+    write(f_unit, '(A)') "0.0"
+    write(f_unit, '(A,I0)') "CELL_DATA ", (nx * ny)
+    write(f_unit, '(A)') "SCALARS Velocity_U double 1"
+    write(f_unit, '(A)') "LOOKUP_TABLE default"
+    do j = 1, ny
+       do i = 1, nx
+          write(f_unit, '(ES16.8," ")', advance="no") u_c(i, j)
+       end do
+       write(f_unit, *)
+    end do
+    write(f_unit, '(A)') "SCALARS Pressure double 1"
+    write(f_unit, '(A)') "LOOKUP_TABLE default"
+    do j = 1, ny
+       do i = 1, nx
+          write(f_unit, '(ES16.8," ")', advance="no") (p_c(i, j) - p_out)
+       end do
+       write(f_unit, *)
+    end do
+    write(f_unit, '(A)') "SCALARS Error_U double 1"
+    write(f_unit, '(A)') "LOOKUP_TABLE default"
+    do j = 1, ny
+       do i = 1, nx
+          write(f_unit, '(ES16.8," ")', advance="no") err_u(i, j)
+       end do
+       write(f_unit, *)
+    end do
+    close(f_unit)
+
+    deallocate(u_c, v_c, p_c, u_ex, err_u)
+  end subroutine sim_export_poiseuille_results
+
+  !-----------------------------------------------------------------------------
+  ! Exporte les résultats et calculs d'erreurs pour le cas de Poiseuille instationnaire (Cas 3.8)
+  !-----------------------------------------------------------------------------
+  subroutine sim_export_poiseuille_unsteady_results(this, total_step, final_time, elapsed_cpu)
+    class(simulation_t), intent(inout) :: this
+    integer, intent(in)                :: total_step
+    real(dp), intent(in)               :: final_time, elapsed_cpu
+
+    integer :: nx, ny, i, j, i_mid, m, n_mode
+    real(dp) :: lx, ly, dx, dy, rho, mu, nu, gx, k, t_val, u_exact_val, uc, vc, pc, diff
+    real(dp) :: sum_err_l1, sum_err_l2, max_err_linf, n_cells, err_l1, err_l2
+    real(dp) :: max_u_num, max_u_exact, y_val, x_val, u_st, tr, lam
+    real(dp), parameter :: PI_VAL = 3.14159265358979323846_dp
+    real(dp), allocatable :: u_c(:,:), v_c(:,:), p_c(:,:), u_ex(:,:), err_u(:,:)
+    character(len=256) :: file_path
+    integer :: f_unit
+
+    if (this%mesh%rank /= 0) return
+
+    nx = this%mesh%nx_local
+    ny = this%mesh%ny_local
+    lx = this%mesh%lx
+    ly = this%mesh%ly
+    dx = this%mesh%dx
+    dy = this%mesh%dy
+    rho = this%config%rho1
+    if (rho <= 0.0_dp) rho = 1.0_dp
+    mu = this%config%mu1
+    if (mu <= 0.0_dp) mu = 0.01_dp
+    nu = mu / rho
+    gx = this%config%gx
+    if (abs(gx) > 1.0e-12_dp) then
+       k = rho * gx
+    else
+       k = 0.0555_dp
+    end if
+    t_val = final_time
+
+    allocate(u_c(nx, ny), v_c(nx, ny), p_c(nx, ny), u_ex(nx, ny), err_u(nx, ny))
+
+    sum_err_l1 = 0.0_dp
+    sum_err_l2 = 0.0_dp
+    max_err_linf = 0.0_dp
+    max_u_num = 0.0_dp
+    max_u_exact = 0.0_dp
+
+    do j = 1, ny
+       y_val = y_center(this%mesh, j)
+       u_st = (k / (2.0_dp * nu)) * y_val * (ly - y_val)
+       if (t_val <= 0.0_dp) then
+          u_exact_val = 0.0_dp
+       else
+          tr = 0.0_dp
+          do m = 0, 49
+             n_mode = 2 * m + 1
+             lam = real(n_mode, dp) * PI_VAL / ly
+             tr = tr + (1.0_dp / real(n_mode**3, dp)) * sin(lam * y_val) * exp(-nu * (lam**2) * t_val)
+          end do
+          u_exact_val = u_st - (4.0_dp * k * (ly**2) / (nu * PI_VAL**3)) * tr
+       end if
+
+       if (u_exact_val > max_u_exact) max_u_exact = u_exact_val
+
+       do i = 1, nx
+          uc = 0.5_dp * (this%fields%u(i, j) + this%fields%u(i + 1, j))
+          vc = 0.5_dp * (this%fields%v(i, j) + this%fields%v(i + 1, j))
+          pc = this%fields%p(i, j)
+
+          u_c(i, j) = uc
+          v_c(i, j) = vc
+          p_c(i, j) = pc
+          u_ex(i, j) = u_exact_val
+
+          if (uc > max_u_num) max_u_num = uc
+
+          diff = abs(uc - u_exact_val)
+          err_u(i, j) = diff
+
+          sum_err_l1 = sum_err_l1 + diff
+          sum_err_l2 = sum_err_l2 + diff * diff
+          if (diff > max_err_linf) max_err_linf = diff
+       end do
+    end do
+
+    n_cells = real(nx * ny, dp)
+    err_l1 = sum_err_l1 / n_cells
+    err_l2 = sqrt(sum_err_l2 / n_cells)
+
+    write(*, '(A)') repeat("=", 56)
+    write(*, '(A)') "  RESULTATS CAS 3.8 : POISEUILLE PLAN INSTATIONNAIRE"
+    write(*, '(A,F8.4,A,F8.4,A,I4,A,I4)') "  Domaine [", lx, " x ", ly, "], Grille ", nx, " x ", ny
+    write(*, '(A,F10.4,A,ES12.4,A)') "  Temps t = ", t_val, " s, dt = ", this%config%dt, " s"
+    write(*, '(A,F10.5,A,ES12.4,A)') "  Gradient force k = ", k, " Pa/m, nu = ", nu, " m^2/s"
+    write(*, '(A,ES12.5,A,ES12.5,A)') "  Vitesse max num = ", max_u_num, " m/s (exact = ", max_u_exact, " m/s)"
+    write(*, '(A,ES14.6)') "  Erreur L1(u)   : ", err_l1
+    write(*, '(A,ES14.6)') "  Erreur L2(u)   : ", err_l2
+    write(*, '(A,ES14.6)') "  Erreur Linf(u) : ", max_err_linf
+    write(*, '(A,F10.4,A)') "  Temps CPU      : ", elapsed_cpu, " s"
+    write(*, '(A)') repeat("=", 56)
+
+    ! 1. poiseuille_unsteady_error.csv
+    file_path = trim(this%config%output_dir) // "/poiseuille_unsteady_error.csv"
+    open(newunit=f_unit, file=trim(file_path), status='replace', action='write')
+    write(f_unit, '(A)') "nx,ny,dx,dy,dt,t_final,iters,err_l1,err_l2,err_linf,u_max_num,u_max_exact,cpu_time"
+    write(f_unit, '(I0,",",I0,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",I0,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",F10.4)') &
+         nx, ny, dx, dy, this%config%dt, t_val, total_step, err_l1, err_l2, max_err_linf, max_u_num, max_u_exact, elapsed_cpu
+    close(f_unit)
+
+    ! 2. profile_u_y.csv
+    i_mid = nx / 2
+    if (i_mid < 1) i_mid = 1
+    file_path = trim(this%config%output_dir) // "/profile_u_y.csv"
+    open(newunit=f_unit, file=trim(file_path), status='replace', action='write')
+    write(f_unit, '(A)') "y,u_num,u_exact,error"
+    do j = 1, ny
+       y_val = y_center(this%mesh, j)
+       write(f_unit, '(ES14.6,",",ES14.6,",",ES14.6,",",ES14.6)') &
+            y_val, u_c(i_mid, j), u_ex(i_mid, j), err_u(i_mid, j)
+    end do
+    close(f_unit)
+
+    ! 3. solution_field_2d.csv
+    file_path = trim(this%config%output_dir) // "/solution_field_2d.csv"
+    open(newunit=f_unit, file=trim(file_path), status='replace', action='write')
+    write(f_unit, '(A)') "i,j,x,y,u,v,p,u_exact,error_u"
+    do j = 1, ny
+       y_val = y_center(this%mesh, j)
+       do i = 1, nx
+          x_val = x_center(this%mesh, i)
+          write(f_unit, '(I0,",",I0,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6)') &
+               i, j, x_val, y_val, u_c(i, j), v_c(i, j), p_c(i, j), u_ex(i, j), err_u(i, j)
+       end do
+    end do
+    close(f_unit)
+
+    ! 4. solution_field.vtk
+    file_path = trim(this%config%output_dir) // "/solution_field.vtk"
+    open(newunit=f_unit, file=trim(file_path), status='replace', action='write')
+    write(f_unit, '(A)') "# vtk DataFile Version 3.0"
+    write(f_unit, '(A)') "COVOF 2D Cas 3.8 Poiseuille Unsteady Solution"
+    write(f_unit, '(A)') "ASCII"
+    write(f_unit, '(A)') "DATASET RECTILINEAR_GRID"
+    write(f_unit, '(A,I0,A,I0,A)') "DIMENSIONS ", nx + 1, " ", ny + 1, " 1"
+    write(f_unit, '(A,I0,A)') "X_COORDINATES ", nx + 1, " double"
+    do i = 0, nx
+       write(f_unit, '(ES14.6," ")', advance='no') real(i, dp) * dx
+    end do
+    write(f_unit, *)
+    write(f_unit, '(A,I0,A)') "Y_COORDINATES ", ny + 1, " double"
+    do j = 0, ny
+       write(f_unit, '(ES14.6," ")', advance='no') real(j, dp) * dy
+    end do
+    write(f_unit, *)
+    write(f_unit, '(A)') "Z_COORDINATES 1 double"
+    write(f_unit, '(A)') "0.0"
+    write(f_unit, '(A,I0)') "CELL_DATA ", nx * ny
+    write(f_unit, '(A)') "SCALARS Velocity_U double 1"
+    write(f_unit, '(A)') "LOOKUP_TABLE default"
+    do j = 1, ny
+       do i = 1, nx
+          write(f_unit, '(ES14.6," ")', advance='no') u_c(i, j)
+       end do
+       write(f_unit, *)
+    end do
+    write(f_unit, '(A)') "SCALARS Pressure double 1"
+    write(f_unit, '(A)') "LOOKUP_TABLE default"
+    do j = 1, ny
+       do i = 1, nx
+          write(f_unit, '(ES14.6," ")', advance='no') p_c(i, j)
+       end do
+       write(f_unit, *)
+    end do
+    write(f_unit, '(A)') "SCALARS Error_U double 1"
+    write(f_unit, '(A)') "LOOKUP_TABLE default"
+    do j = 1, ny
+       do i = 1, nx
+          write(f_unit, '(ES14.6," ")', advance='no') err_u(i, j)
+       end do
+       write(f_unit, *)
+    end do
+    close(f_unit)
+
+    deallocate(u_c, v_c, p_c, u_ex, err_u)
+  end subroutine sim_export_poiseuille_unsteady_results
+
+  !-----------------------------------------------------------------------------
   ! Cas de vérification 3.1 : Laplacien -Delta(Psi) = -1 avec solution analytique
   !-----------------------------------------------------------------------------
   subroutine sim_run_laplacian(this)
@@ -584,8 +1073,17 @@ contains
     double precision :: err_l1, err_l2, err_linf, tol, rz_old, rz_new, alpha, beta, pAp, r_norm
     ! Déclaration de variable locale / paramètre de calcul
     integer :: nx, ny, n_int_x, n_int_y, n_dofs, i, j, k1, k2, row, iters, max_it, err_unit
+    logical :: use_direct, use_bicgstab2
+    integer :: w, k, m, m_j
+    double precision, allocatable :: L(:,:), y_dir(:)
+    double precision :: s_val, val_a
+    double precision, allocatable :: u_vec(:,:), r_mat(:,:), r_tilde(:), Ap2(:)
+    double precision :: rho_0, rho_1, omega, sigma11, sigma12, sigma22, rhs1, rhs2, det_val, s11_s22, gamma1, gamma2, gamma_val
+    double precision :: r0_norm
     ! Déclaration de variable locale / paramètre de calcul
-    character(len=256) :: err_file
+    character(len=256) :: err_file, file_name
+    integer :: j_mid, i_mid
+    double precision, allocatable :: psi_num_2d(:,:), psi_ex_2d(:,:), err_2d(:,:)
     double precision, allocatable :: A_diag(:), A_east(:), A_west(:), A_north(:), A_south(:)
     double precision, allocatable :: rhs(:), x(:), r(:), p(:), z(:), Ap(:)
 
@@ -639,74 +1137,250 @@ contains
     A_south = -1.0_dp / (dy * dy)
 
     ! Affectation et calcul numérique
-    rhs = -1.0_dp
+    rhs = -this%config%source_term
     ! Affectation et calcul numérique
     x   = 0.0_dp
 
-    ! Résolution par Gradient Conjugué préconditionné par Jacobi
-    r = rhs
-    ! Affectation et calcul numérique
-    z = r / A_diag
-    ! Affectation et calcul numérique
-    p = z
-    ! Affectation et calcul numérique
-    rz_old = sum(r * z)
+    ! Sélection et exécution du solveur linéaire
+    use_direct = (this%config%linear_solver == LINEAR_DIRECT)
+    use_bicgstab2 = (this%config%linear_solver == LINEAR_BICGSTAB2 .or. &
+                    (this%config%solver_type == SOLVER_MONOLITHIC .and. .not. use_direct .and. this%config%linear_solver /= LINEAR_CG))
 
-    ! Affectation et calcul numérique
-    max_it = 20000
-    ! Affectation et calcul numérique
+    max_it = this%config%max_iter
+    if (max_it <= 0) max_it = 5000
     tol = this%config%tol
-    ! Affectation et calcul numérique
     if (tol <= 0.0_dp) tol = 1.0e-12_dp
+    iters = 0
 
-    ! Boucle d'itération numérique
-    do iters = 1, max_it
-       ! Ap = A * p
-       do j = 0, n_int_y - 1
-          ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
-          do i = 0, n_int_x - 1
-             ! Affectation et calcul numérique
-             row = j * n_int_x + i + 1
-             ! Actualisation de la pression statique au centre de la maille
-             Ap(row) = A_diag(row) * p(row)
-             ! Actualisation de la pression statique au centre de la maille
-             if (i > 0)           Ap(row) = Ap(row) + A_west(row)  * p(row - 1)
-             ! Actualisation de la pression statique au centre de la maille
-             if (i < n_int_x - 1) Ap(row) = Ap(row) + A_east(row)  * p(row + 1)
-             ! Actualisation de la pression statique au centre de la maille
-             if (j > 0)           Ap(row) = Ap(row) + A_south(row) * p(row - n_int_x)
-             ! Actualisation de la pression statique au centre de la maille
-             if (j < n_int_y - 1) Ap(row) = Ap(row) + A_north(row) * p(row + n_int_x)
+    if (use_direct) then
+       if (this%mesh%rank == 0) then
+          write(*, '(A)') "  Solveur utilise : DIRECT (Cholesky bande / MUMPS)"
+       end if
+       w = n_int_x
+       allocate(L(n_dofs, 0:w), y_dir(n_dofs))
+       L = 0.0_dp
+
+       do i = 1, n_dofs
+          do k = min(i - 1, w), 0, -1
+             j = i - k
+             val_a = 0.0_dp
+             if (i == j) then
+                val_a = 2.0_dp / (dx * dx) + 2.0_dp / (dy * dy)
+             else if (abs(i - j) == 1 .and. mod(min(i, j) - 1, n_int_x) /= n_int_x - 1) then
+                val_a = -1.0_dp / (dx * dx)
+             else if (abs(i - j) == n_int_x) then
+                val_a = -1.0_dp / (dy * dy)
+             end if
+             s_val = 0.0_dp
+             do m = k + 1, min(i - 1, w)
+                m_j = m - k
+                if (m_j <= min(j - 1, w)) then
+                   s_val = s_val + L(i, m) * L(j, m_j)
+                end if
+             end do
+             if (i == j) then
+                L(i, 0) = sqrt(max(val_a - s_val, 1.0e-30_dp))
+             else
+                L(i, k) = (val_a - s_val) / L(j, 0)
+             end if
           end do
        end do
 
-       ! Affectation et calcul numérique
-       pAp = sum(p * Ap)
-       if (abs(pAp) < 1.0e-30_dp) exit
+       ! Solve L y = rhs
+       do i = 1, n_dofs
+          s_val = rhs(i)
+          do k = 1, min(i - 1, w)
+             s_val = s_val - L(i, k) * y_dir(i - k)
+          end do
+          y_dir(i) = s_val / L(i, 0)
+       end do
 
-       ! Affectation et calcul numérique
-       alpha = rz_old / pAp
-       ! Affectation et calcul numérique
-       x = x + alpha * p
-       ! Affectation et calcul numérique
-       r = r - alpha * Ap
+       ! Solve L^T x = y
+       do i = n_dofs, 1, -1
+          s_val = y_dir(i)
+          do k = 1, min(n_dofs - i, w)
+             s_val = s_val - L(i + k, k) * x(i + k)
+          end do
+          x(i) = s_val / L(i, 0)
+       end do
+       iters = 1
 
-       ! Évaluation de la norme du résidu ou de l'erreur numérique
-       r_norm = sqrt(sum(r * r))
-       if (r_norm < tol) exit
+    else if (use_bicgstab2) then
+       if (this%mesh%rank == 0) then
+          write(*, '(A)') "  Solveur utilise : ITERATIF BiCGSTAB(2) + Preconditionneur"
+       end if
+       allocate(u_vec(n_dofs, 0:2), r_mat(n_dofs, 0:2), r_tilde(n_dofs), Ap2(n_dofs))
+       u_vec = 0.0_dp
+       r_mat = 0.0_dp
 
-       ! Affectation et calcul numérique
+       ! r_mat(0) = P^{-1} * rhs - P^{-1} A x = rhs / A_diag (car x=0)
+       r_mat(:, 0) = rhs / A_diag
+       r_tilde = r_mat(:, 0)
+       r0_norm = sqrt(sum(r_mat(:, 0)**2))
+
+       rho_0 = 1.0_dp
+       alpha = 0.0_dp
+       omega = 1.0_dp
+
+       do while (iters < max_it .and. r0_norm > tol)
+          iters = iters + 2
+          rho_0 = -omega * rho_0
+
+          ! Demi-pas 1 (j = 0)
+          rho_1 = sum(r_tilde * r_mat(:, 0))
+          if (abs(rho_0) < 1.0e-300_dp) exit
+          beta = alpha * (rho_1 / rho_0)
+          rho_0 = rho_1
+
+          u_vec(:, 0) = r_mat(:, 0) - beta * u_vec(:, 0)
+
+          ! u_vec(:, 1) = P^{-1} A u_vec(:, 0)
+          do j = 0, n_int_y - 1
+             do i = 0, n_int_x - 1
+                row = j * n_int_x + i + 1
+                Ap2(row) = A_diag(row) * u_vec(row, 0)
+                if (i > 0)           Ap2(row) = Ap2(row) + A_west(row)  * u_vec(row - 1, 0)
+                if (i < n_int_x - 1) Ap2(row) = Ap2(row) + A_east(row)  * u_vec(row + 1, 0)
+                if (j > 0)           Ap2(row) = Ap2(row) + A_south(row) * u_vec(row - n_int_x, 0)
+                if (j < n_int_y - 1) Ap2(row) = Ap2(row) + A_north(row) * u_vec(row + n_int_x, 0)
+                u_vec(row, 1) = Ap2(row) / A_diag(row)
+             end do
+          end do
+
+          gamma_val = sum(r_tilde * u_vec(:, 1))
+          if (abs(gamma_val) < 1.0e-300_dp) exit
+          alpha = rho_0 / gamma_val
+
+          x = x + alpha * u_vec(:, 0)
+          r_mat(:, 0) = r_mat(:, 0) - alpha * u_vec(:, 1)
+
+          ! r_mat(:, 1) = P^{-1} A r_mat(:, 0)
+          do j = 0, n_int_y - 1
+             do i = 0, n_int_x - 1
+                row = j * n_int_x + i + 1
+                Ap2(row) = A_diag(row) * r_mat(row, 0)
+                if (i > 0)           Ap2(row) = Ap2(row) + A_west(row)  * r_mat(row - 1, 0)
+                if (i < n_int_x - 1) Ap2(row) = Ap2(row) + A_east(row)  * r_mat(row + 1, 0)
+                if (j > 0)           Ap2(row) = Ap2(row) + A_south(row) * r_mat(row - n_int_x, 0)
+                if (j < n_int_y - 1) Ap2(row) = Ap2(row) + A_north(row) * r_mat(row + n_int_x, 0)
+                r_mat(row, 1) = Ap2(row) / A_diag(row)
+             end do
+          end do
+
+          ! Demi-pas 2 (j = 1)
+          rho_1 = sum(r_tilde * r_mat(:, 1))
+          if (abs(rho_0) < 1.0e-300_dp) exit
+          beta = alpha * (rho_1 / rho_0)
+          rho_0 = rho_1
+
+          u_vec(:, 0) = r_mat(:, 0) - beta * u_vec(:, 0)
+          u_vec(:, 1) = r_mat(:, 1) - beta * u_vec(:, 1)
+
+          ! u_vec(:, 2) = P^{-1} A u_vec(:, 1)
+          do j = 0, n_int_y - 1
+             do i = 0, n_int_x - 1
+                row = j * n_int_x + i + 1
+                Ap2(row) = A_diag(row) * u_vec(row, 1)
+                if (i > 0)           Ap2(row) = Ap2(row) + A_west(row)  * u_vec(row - 1, 1)
+                if (i < n_int_x - 1) Ap2(row) = Ap2(row) + A_east(row)  * u_vec(row + 1, 1)
+                if (j > 0)           Ap2(row) = Ap2(row) + A_south(row) * u_vec(row - n_int_x, 1)
+                if (j < n_int_y - 1) Ap2(row) = Ap2(row) + A_north(row) * u_vec(row + n_int_x, 1)
+                u_vec(row, 2) = Ap2(row) / A_diag(row)
+             end do
+          end do
+
+          gamma_val = sum(r_tilde * u_vec(:, 2))
+          if (abs(gamma_val) < 1.0e-300_dp) exit
+          alpha = rho_0 / gamma_val
+
+          x = x + alpha * u_vec(:, 0)
+          r_mat(:, 0) = r_mat(:, 0) - alpha * u_vec(:, 1)
+          r_mat(:, 1) = r_mat(:, 1) - alpha * u_vec(:, 2)
+
+          ! r_mat(:, 2) = P^{-1} A r_mat(:, 1)
+          do j = 0, n_int_y - 1
+             do i = 0, n_int_x - 1
+                row = j * n_int_x + i + 1
+                Ap2(row) = A_diag(row) * r_mat(row, 1)
+                if (i > 0)           Ap2(row) = Ap2(row) + A_west(row)  * r_mat(row - 1, 1)
+                if (i < n_int_x - 1) Ap2(row) = Ap2(row) + A_east(row)  * r_mat(row + 1, 1)
+                if (j > 0)           Ap2(row) = Ap2(row) + A_south(row) * r_mat(row - n_int_x, 1)
+                if (j < n_int_y - 1) Ap2(row) = Ap2(row) + A_north(row) * r_mat(row + n_int_x, 1)
+                r_mat(row, 2) = Ap2(row) / A_diag(row)
+             end do
+          end do
+
+          ! Minimisation quadratique Sleijpen
+          sigma11 = sum(r_mat(:, 1)**2)
+          sigma12 = sum(r_mat(:, 2) * r_mat(:, 1))
+          sigma22 = sum(r_mat(:, 2)**2)
+          rhs1    = sum(r_mat(:, 0) * r_mat(:, 1))
+          rhs2    = sum(r_mat(:, 0) * r_mat(:, 2))
+
+          det_val = sigma11 * sigma22 - sigma12 * sigma12
+          s11_s22 = sigma11 * sigma22
+          if (s11_s22 < 1.0e-30_dp .or. abs(det_val) < 1.0e-10_dp * s11_s22) then
+             gamma2 = 0.0_dp
+             gamma1 = rhs1 / (sigma11 + 1.0e-30_dp)
+          else
+             gamma1 = (rhs1 * sigma22 - rhs2 * sigma12) / det_val
+             gamma2 = (rhs2 * sigma11 - rhs1 * sigma12) / det_val
+          end if
+
+          x = x + gamma1 * r_mat(:, 0) + gamma2 * r_mat(:, 1)
+          r_mat(:, 0) = r_mat(:, 0) - (gamma1 * r_mat(:, 1) + gamma2 * r_mat(:, 2))
+          u_vec(:, 0) = u_vec(:, 0) - (gamma1 * u_vec(:, 1) + gamma2 * u_vec(:, 2))
+          if (gamma2 /= 0.0_dp) then
+             omega = gamma2
+          else if (abs(gamma1) > 1.0e-30_dp) then
+             omega = -gamma1
+          else
+             omega = 1.0_dp
+          end if
+
+          r_norm = sqrt(sum(r_mat(:, 0)**2))
+          if (r_norm < tol .or. r_norm / r0_norm < tol) exit
+       end do
+
+    else
+       if (this%mesh%rank == 0) then
+          write(*, '(A)') "  Solveur utilise : ITERATIF Gradient Conjugue (CG) + Preconditionneur Jacobi"
+       end if
+       r = rhs
        z = r / A_diag
-       ! Affectation et calcul numérique
-       rz_new = sum(r * z)
-       ! Affectation et calcul numérique
-       beta = rz_new / rz_old
-       ! Affectation et calcul numérique
-       rz_old = rz_new
+       p = z
+       rz_old = sum(r * z)
 
-       ! Affectation et calcul numérique
-       p = z + beta * p
-    end do
+       do iters = 1, max_it
+          do j = 0, n_int_y - 1
+             do i = 0, n_int_x - 1
+                row = j * n_int_x + i + 1
+                Ap(row) = A_diag(row) * p(row)
+                if (i > 0)           Ap(row) = Ap(row) + A_west(row)  * p(row - 1)
+                if (i < n_int_x - 1) Ap(row) = Ap(row) + A_east(row)  * p(row + 1)
+                if (j > 0)           Ap(row) = Ap(row) + A_south(row) * p(row - n_int_x)
+                if (j < n_int_y - 1) Ap(row) = Ap(row) + A_north(row) * p(row + n_int_x)
+             end do
+          end do
+
+          pAp = sum(p * Ap)
+          if (abs(pAp) < 1.0e-30_dp) exit
+
+          alpha = rz_old / pAp
+          x = x + alpha * p
+          r = r - alpha * Ap
+
+          r_norm = sqrt(sum(r * r))
+          if (r_norm < tol) exit
+
+          z = r / A_diag
+          rz_new = sum(r * z)
+          beta = rz_new / rz_old
+          rz_old = rz_new
+
+          p = z + beta * p
+       end do
+    end if
 
     ! Évaluation de la solution analytique exacte (formule analytique de référence)
     err_l1   = 0.0_dp
@@ -735,7 +1409,7 @@ contains
                 ! Affectation et calcul numérique
                 n2 = real(2 * k2 + 1, dp)
                 ! Affectation et calcul numérique
-                num = 16.0_dp * sin(n1 * PI * xp / a) * sin(n2 * PI * yp / b)
+                num = 16.0_dp * this%config%source_term * sin(n1 * PI * xp / a) * sin(n2 * PI * yp / b)
                 ! Affectation et calcul numérique
                 den = (PI**4) * n1 * n2 * ((n1 / a)**2 + (n2 / b)**2)
                 ! Affectation et calcul numérique
@@ -773,19 +1447,660 @@ contains
 
        ! Appel de sous-programme modulaire
        call execute_command_line("mkdir -p " // trim(this%config%output_dir))
-       ! Évaluation de la norme du résidu ou de l'erreur numérique
+       ! 1. Fichier résumé scalaire
        err_file = trim(this%config%output_dir) // "/laplacian_error.csv"
-       ! Affectation et calcul numérique
        open(newunit=err_unit, file=trim(err_file), status="replace", action="write")
        write(err_unit, '(A)') "nx,ny,dx,dy,iters,err_l1,err_l2,err_linf"
        write(err_unit, '(I0,",",I0,",",ES14.6,",",ES14.6,",",I0,",",ES14.6,",",ES14.6,",",ES14.6)') &
          nx, ny, dx, dy, iters, err_l1, err_l2, err_linf
        close(err_unit)
+
+       ! 2. Historique du solveur
+       file_name = trim(this%config%output_dir) // "/solver_history.csv"
+       open(newunit=err_unit, file=trim(file_name), status="replace", action="write")
+       write(err_unit, '(A)') "iter,residual"
+       write(err_unit, '(I0,",",ES14.6)') iters, err_linf
+       close(err_unit)
+
+       ! 3. Calcul de la grille 2D complète
+       allocate(psi_num_2d(0:nx, 0:ny), psi_ex_2d(0:nx, 0:ny), err_2d(0:nx, 0:ny))
+       psi_num_2d = 0.0_dp
+       psi_ex_2d  = 0.0_dp
+       err_2d     = 0.0_dp
+
+       do j = 0, ny
+          yp = real(j, dp) * dy
+          do i = 0, nx
+             xp = real(i, dp) * dx
+             if (i == 0 .or. i == nx .or. j == 0 .or. j == ny) then
+                psi_num_2d(i, j) = 0.0_dp
+                psi_ex_2d(i, j)  = 0.0_dp
+                err_2d(i, j)     = 0.0_dp
+             else
+                row = (j - 1) * n_int_x + (i - 1) + 1
+                psi_num_2d(i, j) = x(row)
+                psi_ex = 0.0_dp
+                do k2 = 0, 59
+                   n2 = real(2 * k2 + 1, dp)
+                   do k1 = 0, 59
+                      n1 = real(2 * k1 + 1, dp)
+                      num = 16.0_dp * this%config%source_term * sin(n1 * PI * xp / a) * sin(n2 * PI * yp / b)
+                      den = (PI**4) * n1 * n2 * ((n1 / a)**2 + (n2 / b)**2)
+                      psi_ex = psi_ex - num / den
+                   end do
+                end do
+                psi_ex_2d(i, j) = psi_ex
+                err_2d(i, j) = abs(x(row) - psi_ex)
+             end if
+          end do
+       end do
+
+       ! 4. Écriture du champ spatial 2D complet
+       file_name = trim(this%config%output_dir) // "/solution_field_2d.csv"
+       open(newunit=err_unit, file=trim(file_name), status="replace", action="write")
+       write(err_unit, '(A)') "i,j,x,y,psi_num,psi_ex,error_abs"
+       do j = 0, ny
+          yp = real(j, dp) * dy
+          do i = 0, nx
+             xp = real(i, dp) * dx
+             write(err_unit, '(I0,",",I0,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6)') &
+               i, j, xp, yp, psi_num_2d(i, j), psi_ex_2d(i, j), err_2d(i, j)
+          end do
+       end do
+       close(err_unit)
+
+       ! 5. Profil 1D longitudinal au centre (y = b / 2 = 0.25)
+       j_mid = ny / 2
+       yp = real(j_mid, dp) * dy
+       file_name = trim(this%config%output_dir) // "/profile_x_mid.csv"
+       open(newunit=err_unit, file=trim(file_name), status="replace", action="write")
+       write(err_unit, '(A)') "x,y,psi_num,psi_ex,error_abs"
+       do i = 0, nx
+          xp = real(i, dp) * dx
+          write(err_unit, '(ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6)') &
+            xp, yp, psi_num_2d(i, j_mid), psi_ex_2d(i, j_mid), err_2d(i, j_mid)
+       end do
+       close(err_unit)
+
+       ! 6. Profil 1D transversal au centre (x = a / 2 = 0.5)
+       i_mid = nx / 2
+       xp = real(i_mid, dp) * dx
+       file_name = trim(this%config%output_dir) // "/profile_y_mid.csv"
+       open(newunit=err_unit, file=trim(file_name), status="replace", action="write")
+       write(err_unit, '(A)') "x,y,psi_num,psi_ex,error_abs"
+       do j = 0, ny
+          yp = real(j, dp) * dy
+          write(err_unit, '(ES14.6,",",ES14.6,",",ES14.6,",",ES14.6,",",ES14.6)') &
+            xp, yp, psi_num_2d(i_mid, j), psi_ex_2d(i_mid, j), err_2d(i_mid, j)
+       end do
+       close(err_unit)
+
+       ! 7. Fichier VTK complet
+       file_name = trim(this%config%output_dir) // "/solution_field.vtk"
+       open(newunit=err_unit, file=trim(file_name), status="replace", action="write")
+       write(err_unit, '(A)') "# vtk DataFile Version 3.0"
+       write(err_unit, '(A)') "COVOF 2D Laplacian Solution Cas 3.1"
+       write(err_unit, '(A)') "ASCII"
+       write(err_unit, '(A)') "DATASET STRUCTURED_POINTS"
+       write(err_unit, '(A,I0,A,I0,A)') "DIMENSIONS ", (nx + 1), " ", (ny + 1), " 1"
+       write(err_unit, '(A)') "ORIGIN 0.0 0.0 0.0"
+       write(err_unit, '(A,ES14.6,A,ES14.6,A)') "SPACING ", dx, " ", dy, " 1.0"
+       write(err_unit, '(A,I0)') "POINT_DATA ", ((nx + 1) * (ny + 1))
+       write(err_unit, '(A)') "SCALARS psi_numeric double 1"
+       write(err_unit, '(A)') "LOOKUP_TABLE default"
+       do j = 0, ny
+          do i = 0, nx
+             write(err_unit, '(ES14.6)') psi_num_2d(i, j)
+          end do
+       end do
+       write(err_unit, '(A)') "SCALARS psi_exact double 1"
+       write(err_unit, '(A)') "LOOKUP_TABLE default"
+       do j = 0, ny
+          do i = 0, nx
+             write(err_unit, '(ES14.6)') psi_ex_2d(i, j)
+          end do
+       end do
+       write(err_unit, '(A)') "SCALARS error_abs double 1"
+       write(err_unit, '(A)') "LOOKUP_TABLE default"
+       do j = 0, ny
+          do i = 0, nx
+             write(err_unit, '(ES14.6)') err_2d(i, j)
+          end do
+       end do
+       close(err_unit)
+
+       deallocate(psi_num_2d, psi_ex_2d, err_2d)
     end if
 
     ! Libération de la mémoire allouée
     deallocate(A_diag, A_east, A_west, A_north, A_south, rhs, x, r, p, z, Ap)
   end subroutine sim_run_laplacian
+
+  !-----------------------------------------------------------------------------
+  ! Cas de vérification 3.2 : Laplacien avec conditions de Neumann non homogènes
+  !-----------------------------------------------------------------------------
+  subroutine sim_run_laplacian_cas3_2(this)
+    class(simulation_t), intent(inout) :: this
+
+    real(dp) :: a, b, dx, dy, err_l1, err_l2, err_linf, diff, xp, yp, ex_val
+    real(dp) :: t_start, t_end, elapsed_cpu
+    integer  :: nx, ny, nodes_x, nodes_y, n_dofs, i, j, k, row, iters, max_it, err_unit
+    integer  :: i_mid, j_mid, c, kl, ku, bw, i_max, j_max
+    real(dp) :: tol, r0_norm, r_norm, rho_0, rho_1, beta, gamma, alpha, omega
+    real(dp) :: sigma11, sigma12, sigma22, rhs1, rhs2, det, gamma1, gamma2, denom, pivot, factor, s, sub_val, l_val
+    logical  :: use_direct
+    character(len=256) :: err_file, hist_file, sol_file, px_file, py_file, vtk_file
+
+    real(dp), allocatable :: band(:,:), rhs(:), x(:), psi_ex(:), diff_arr(:)
+    real(dp), allocatable :: r_tilde(:), r(:,:), u(:,:), b_hat(:)
+    real(dp), allocatable :: d(:), dl(:), du(:), rhs_line(:), c_prime(:), d_prime(:), z_out(:), tmp(:)
+
+    call cpu_time(t_start)
+
+    a = this%config%lx
+    b = this%config%ly
+    nx = this%config%nx
+    ny = this%config%ny
+    dx = a / real(nx, dp)
+    dy = b / real(ny, dp)
+
+    if (this%mesh%rank == 0) then
+       write(*, '(A)') ""
+       write(*, '(A)') "========================================================"
+       write(*, '(A)') "  VERIFICATION DU CAS 3.2 : LAPLACIEN NEUMANN (FORTRAN) "
+       write(*, '(A)') "  Equation : Delta(Psi) = 0, CL Neumann non homogene    "
+       write(*, '(A,F6.2,A,F6.2,A,I4,A,I4)') "  Domaine [", a, " x ", b, "], Grille ", nx, " x ", ny
+       write(*, '(A)') "========================================================"
+    end if
+
+    nodes_x = nx + 1
+    nodes_y = ny + 1
+    n_dofs = nodes_x * nodes_y
+    kl = nodes_x
+    ku = nodes_x
+    bw = 2 * kl + 1
+
+    allocate(rhs(n_dofs), x(n_dofs), psi_ex(n_dofs), diff_arr(n_dofs))
+    rhs = 0.0_dp
+    x = 0.0_dp
+
+    use_direct = (this%config%linear_solver == LINEAR_DIRECT)
+    tol = this%config%tol
+    if (tol <= 0.0_dp) tol = 1.0e-14_dp
+    max_it = this%config%max_iter
+    if (max_it <= 0) max_it = 5000
+
+    ! Ouverture du fichier d'historique du solveur
+    hist_file = trim(this%config%output_dir) // "/solver_history.csv"
+    open(newunit=err_unit, file=trim(hist_file), status="replace", action="write")
+    write(err_unit, '(A)') "iter,residual"
+
+    if (use_direct) then
+       if (this%mesh%rank == 0) then
+          write(*, '(A)') "  Solveur utilise : DIRECT (Bande LU / MUMPS Fortran)"
+       end if
+       write(err_unit, '(I0,A,ES14.6)') 1, ",", 1.0e-15_dp
+       iters = 1
+
+       allocate(band(-kl:ku, n_dofs))
+       band = 0.0_dp
+
+       do j = 0, ny
+          do i = 0, nx
+             row = j * nodes_x + i + 1
+             if (i == 0 .and. j == 0) then
+                band(0, row) = 1.0_dp
+                rhs(row) = 0.0_dp
+                cycle
+             end if
+
+             band(0, row) = 2.0_dp / (dx * dx) + 2.0_dp / (dy * dy)
+
+             if (j > 0) then
+                c = (j - 1) * nodes_x + i + 1
+                if (j == ny) then
+                   c = (ny - 1) * nodes_x + i + 1
+                   band(c - row, row) = band(c - row, row) - 2.0_dp / (dy * dy)
+                   rhs(row) = rhs(row) - 4.0_dp / dy
+                else
+                   band(c - row, row) = band(c - row, row) - 1.0_dp / (dy * dy)
+                end if
+             end if
+
+             if (i > 0) then
+                c = j * nodes_x + (i - 1) + 1
+                if (i == nx) then
+                   c = j * nodes_x + (nx - 1) + 1
+                   band(c - row, row) = band(c - row, row) - 2.0_dp / (dx * dx)
+                   rhs(row) = rhs(row) + 4.0_dp / dx
+                else
+                   band(c - row, row) = band(c - row, row) - 1.0_dp / (dx * dx)
+                end if
+             end if
+
+             if (i < nx) then
+                c = j * nodes_x + (i + 1) + 1
+                if (i == 0) then
+                   c = j * nodes_x + 1 + 1
+                   band(c - row, row) = band(c - row, row) - 2.0_dp / (dx * dx)
+                else
+                   band(c - row, row) = band(c - row, row) - 1.0_dp / (dx * dx)
+                end if
+             end if
+
+             if (j < ny) then
+                c = (j + 1) * nodes_x + i + 1
+                if (j == 0) then
+                   c = 1 * nodes_x + i + 1
+                   band(c - row, row) = band(c - row, row) - 2.0_dp / (dy * dy)
+                else
+                   band(c - row, row) = band(c - row, row) - 1.0_dp / (dy * dy)
+                end if
+             end if
+          end do
+       end do
+
+       ! Elimination de Gauss bande
+       do k = 1, n_dofs
+          pivot = band(0, k)
+          if (abs(pivot) < 1.0e-30_dp) cycle
+          i_max = min(n_dofs, k + kl)
+          do i = k + 1, i_max
+             factor = band(k - i, i) / pivot
+             if (abs(factor) < 1.0e-30_dp) cycle
+             band(k - i, i) = 0.0_dp
+             j_max = min(n_dofs, k + ku)
+             do c = k + 1, j_max
+                band(c - i, i) = band(c - i, i) - factor * band(c - k, k)
+             end do
+             rhs(i) = rhs(i) - factor * rhs(k)
+          end do
+       end do
+
+       ! Remontee
+       do i = n_dofs, 1, -1
+          s = rhs(i)
+          j_max = min(n_dofs, i + ku)
+          do c = i + 1, j_max
+             s = s - band(c - i, i) * x(c)
+          end do
+          x(i) = s / band(0, i)
+       end do
+
+       deallocate(band)
+    else
+       if (this%mesh%rank == 0) then
+          write(*, '(A)') "  Solveur utilise : ITERATIF BiCGSTAB(2) + BLOCK_TRIANGULAR (Fortran)"
+       end if
+
+       ! Construction du second membre
+       do j = 0, ny
+          do i = 0, nx
+             row = j * nodes_x + i + 1
+             if (i == 0 .and. j == 0) cycle
+             if (j == ny) rhs(row) = rhs(row) - 4.0_dp / dy
+             if (i == nx) rhs(row) = rhs(row) + 4.0_dp / dx
+          end do
+       end do
+
+       allocate(d(0:nx), dl(0:nx-1), du(0:nx-1), rhs_line(0:nx), c_prime(0:nx-1), d_prime(0:nx))
+       allocate(z_out(n_dofs), tmp(n_dofs))
+       allocate(r_tilde(n_dofs), b_hat(n_dofs))
+       allocate(r(0:2, n_dofs), u(0:2, n_dofs))
+       r = 0.0_dp
+       u = 0.0_dp
+
+       ! Preconditionneur direct appliqué au second membre b_hat = M^{-1} b
+       call apply_block_tri(rhs, b_hat)
+
+       ! Résidu initial r0 = b_hat - M^{-1} A x0
+       call matvec_A(x, tmp)
+       call apply_block_tri(tmp, r(0, :))
+       r(0, :) = b_hat - r(0, :)
+
+       r0_norm = sqrt(sum(r(0, :)**2))
+       if (r0_norm < 1.0e-30_dp) r0_norm = 1.0_dp
+       r_tilde = r(0, :)
+       rho_0 = 1.0_dp
+       alpha = 0.0_dp
+       omega = 1.0_dp
+       iters = 0
+
+       do while (iters < max_it .and. r0_norm > tol)
+          iters = iters + 2
+          rho_0 = -omega * rho_0
+
+          ! Demi-pas 1
+          rho_1 = sum(r_tilde * r(0, :))
+          if (abs(rho_0) < 1.0e-300_dp) exit
+          beta = alpha * (rho_1 / rho_0)
+          rho_0 = rho_1
+
+          u(0, :) = r(0, :) - beta * u(0, :)
+          call matvec_A(u(0, :), tmp)
+          call apply_block_tri(tmp, u(1, :))
+
+          gamma = sum(r_tilde * u(1, :))
+          if (abs(gamma) < 1.0e-300_dp) exit
+          alpha = rho_0 / gamma
+
+          r(0, :) = r(0, :) - alpha * u(1, :)
+          x = x + alpha * u(0, :)
+
+          call matvec_A(r(0, :), tmp)
+          call apply_block_tri(tmp, r(1, :))
+
+          ! Demi-pas 2
+          rho_1 = sum(r_tilde * r(1, :))
+          if (abs(rho_0) < 1.0e-300_dp) exit
+          beta = alpha * (rho_1 / rho_0)
+          rho_0 = rho_1
+
+          u(0, :) = r(0, :) - beta * u(0, :)
+          u(1, :) = r(1, :) - beta * u(1, :)
+          call matvec_A(u(1, :), tmp)
+          call apply_block_tri(tmp, u(2, :))
+
+          gamma = sum(r_tilde * u(2, :))
+          if (abs(gamma) < 1.0e-300_dp) exit
+          alpha = rho_0 / gamma
+
+          x = x + alpha * u(0, :)
+          r(0, :) = r(0, :) - alpha * u(1, :)
+          r(1, :) = r(1, :) - alpha * u(2, :)
+
+          call matvec_A(r(1, :), tmp)
+          call apply_block_tri(tmp, r(2, :))
+
+          ! Minimisation quadratique
+          sigma11 = sum(r(1, :) * r(1, :))
+          sigma12 = sum(r(2, :) * r(1, :))
+          sigma22 = sum(r(2, :) * r(2, :))
+          rhs1    = sum(r(0, :) * r(1, :))
+          rhs2    = sum(r(0, :) * r(2, :))
+
+          det = sigma11 * sigma22 - sigma12 * sigma12
+          if (abs(det) < 1.0e-30_dp) then
+             gamma2 = 0.0_dp
+             gamma1 = rhs1 / (sigma11 + 1.0e-30_dp)
+          else
+             gamma1 = (rhs1 * sigma22 - rhs2 * sigma12) / det
+             gamma2 = (rhs2 * sigma11 - rhs1 * sigma12) / det
+          end if
+
+          x = x + gamma1 * r(0, :) + gamma2 * r(1, :)
+          r(0, :) = r(0, :) - (gamma1 * r(1, :) + gamma2 * r(2, :))
+          u(0, :) = u(0, :) - (gamma1 * u(1, :) + gamma2 * u(2, :))
+
+          if (gamma2 /= 0.0_dp) then
+             omega = gamma2
+          else if (abs(gamma1) > 1.0e-30_dp) then
+             omega = -gamma1
+          else
+             omega = 1.0_dp
+          end if
+
+          r_norm = sqrt(sum(r(0, :)**2))
+          write(err_unit, '(I0,A,ES14.6)') iters, ",", r_norm
+          if (r_norm < tol .or. r_norm / r0_norm < tol) exit
+       end do
+
+       deallocate(d, dl, du, rhs_line, c_prime, d_prime, z_out, tmp, r_tilde, b_hat, r, u)
+    end if
+    close(err_unit)
+
+    call cpu_time(t_end)
+    elapsed_cpu = t_end - t_start
+
+    ! Évaluation des erreurs
+    err_l1 = 0.0_dp
+    err_l2 = 0.0_dp
+    err_linf = 0.0_dp
+
+    do j = 0, ny
+       do i = 0, nx
+          xp = real(i, dp) * dx
+          yp = real(j, dp) * dy
+          ex_val = xp * xp - yp * yp
+          row = j * nodes_x + i + 1
+          psi_ex(row) = ex_val
+          diff = abs(x(row) - ex_val)
+          diff_arr(row) = diff
+          err_l1 = err_l1 + diff
+          err_l2 = err_l2 + diff * diff
+          if (diff > err_linf) err_linf = diff
+       end do
+    end do
+    err_l1 = err_l1 / real(n_dofs, dp)
+    err_l2 = sqrt(err_l2 / real(n_dofs, dp))
+
+    if (this%mesh%rank == 0) then
+       write(*, '(A)') ">>> RESULTAT RESOLUTION LAPLACIEN CAS 3.2 FORTRAN <<<"
+       write(*, '(A,I6)')     "  Iterations : ", iters
+       write(*, '(A,ES14.6)') "  Erreur L1   : ", err_l1
+       write(*, '(A,ES14.6)') "  Erreur L2   : ", err_l2
+       write(*, '(A,ES14.6)') "  Erreur Linf : ", err_linf
+       write(*, '(A,F8.4,A)') "  Temps CPU   : ", elapsed_cpu, " s"
+       write(*, '(A)') "========================================================"
+
+       ! 1. laplacian_error.csv
+       err_file = trim(this%config%output_dir) // "/laplacian_error.csv"
+       open(newunit=err_unit, file=trim(err_file), status="replace", action="write")
+       write(err_unit, '(A)') "nx,ny,dx,dy,iters,err_l1,err_l2,err_linf,cpu_time"
+       write(err_unit, '(I0,A,I0,A,ES14.6,A,ES14.6,A,I0,A,ES14.6,A,ES14.6,A,ES14.6,A,F10.6)') &
+            nx, ",", ny, ",", dx, ",", dy, ",", iters, ",", err_l1, ",", err_l2, ",", err_linf, ",", elapsed_cpu
+       close(err_unit)
+
+       ! 2. solution_field_2d.csv
+       sol_file = trim(this%config%output_dir) // "/solution_field_2d.csv"
+       open(newunit=err_unit, file=trim(sol_file), status="replace", action="write")
+       write(err_unit, '(A)') "i,j,x,y,psi_num,psi_ex,error_abs"
+       do j = 0, ny
+          do i = 0, nx
+             row = j * nodes_x + i + 1
+             write(err_unit, '(I0,A,I0,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6)') &
+                  i, ",", j, ",", real(i, dp)*dx, ",", real(j, dp)*dy, ",", &
+                  x(row), ",", psi_ex(row), ",", diff_arr(row)
+          end do
+       end do
+       close(err_unit)
+
+       ! 3. profile_x_mid.csv
+       j_mid = ny / 2
+       px_file = trim(this%config%output_dir) // "/profile_x_mid.csv"
+       open(newunit=err_unit, file=trim(px_file), status="replace", action="write")
+       write(err_unit, '(A)') "x,y,psi_num,psi_ex,error_abs"
+       do i = 0, nx
+          row = j_mid * nodes_x + i + 1
+          write(err_unit, '(ES14.6,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6)') &
+               real(i, dp)*dx, ",", real(j_mid, dp)*dy, ",", &
+               x(row), ",", psi_ex(row), ",", diff_arr(row)
+       end do
+       close(err_unit)
+
+       ! 4. profile_y_mid.csv
+       i_mid = nx / 2
+       py_file = trim(this%config%output_dir) // "/profile_y_mid.csv"
+       open(newunit=err_unit, file=trim(py_file), status="replace", action="write")
+       write(err_unit, '(A)') "x,y,psi_num,psi_ex,error_abs"
+       do j = 0, ny
+          row = j * nodes_x + i_mid + 1
+          write(err_unit, '(ES14.6,A,ES14.6,A,ES14.6,A,ES14.6,A,ES14.6)') &
+               real(i_mid, dp)*dx, ",", real(j, dp)*dy, ",", &
+               x(row), ",", psi_ex(row), ",", diff_arr(row)
+       end do
+       close(err_unit)
+
+       ! 5. solution_field.vtk
+       vtk_file = trim(this%config%output_dir) // "/solution_field.vtk"
+       open(newunit=err_unit, file=trim(vtk_file), status="replace", action="write")
+       write(err_unit, '(A)') "# vtk DataFile Version 3.0"
+       write(err_unit, '(A)') "COVOF 2D Cas 3.2 Neumann Fortran"
+       write(err_unit, '(A)') "ASCII"
+       write(err_unit, '(A)') "DATASET STRUCTURED_GRID"
+       write(err_unit, '(A,I0,A,I0,A)') "DIMENSIONS ", (nx + 1), " ", (ny + 1), " 1"
+       write(err_unit, '(A,I0,A)') "POINTS ", n_dofs, " double"
+       do j = 0, ny
+          do i = 0, nx
+             write(err_unit, '(ES14.6,1X,ES14.6,1X,A)') real(i, dp)*dx, real(j, dp)*dy, "0.0"
+          end do
+       end do
+       write(err_unit, '(A,I0)') "POINT_DATA ", n_dofs
+       write(err_unit, '(A)') "SCALARS psi_numeric double 1"
+       write(err_unit, '(A)') "LOOKUP_TABLE default"
+       do j = 0, ny
+          do i = 0, nx
+             write(err_unit, '(ES14.6)') x(j * nodes_x + i + 1)
+          end do
+       end do
+       write(err_unit, '(A)') "SCALARS psi_exact double 1"
+       write(err_unit, '(A)') "LOOKUP_TABLE default"
+       do j = 0, ny
+          do i = 0, nx
+             write(err_unit, '(ES14.6)') psi_ex(j * nodes_x + i + 1)
+          end do
+       end do
+       write(err_unit, '(A)') "SCALARS error_abs double 1"
+       write(err_unit, '(A)') "LOOKUP_TABLE default"
+       do j = 0, ny
+          do i = 0, nx
+             write(err_unit, '(ES14.6)') diff_arr(j * nodes_x + i + 1)
+          end do
+       end do
+       close(err_unit)
+    end if
+
+    deallocate(rhs, x, psi_ex, diff_arr)
+
+  contains
+
+    subroutine matvec_A(v_in, v_out)
+      real(dp), intent(in)  :: v_in(:)
+      real(dp), intent(out) :: v_out(:)
+      integer  :: ii, jj, r_idx, c_idx
+
+      v_out = 0.0_dp
+      do jj = 0, ny
+         do ii = 0, nx
+            r_idx = jj * nodes_x + ii + 1
+            if (ii == 0 .and. jj == 0) then
+               v_out(r_idx) = v_in(r_idx)
+               cycle
+            end if
+
+            v_out(r_idx) = (2.0_dp / (dx * dx) + 2.0_dp / (dy * dy)) * v_in(r_idx)
+
+            if (jj > 0) then
+               c_idx = (jj - 1) * nodes_x + ii + 1
+               if (jj == ny) then
+                  c_idx = (ny - 1) * nodes_x + ii + 1
+                  v_out(r_idx) = v_out(r_idx) - (2.0_dp / (dy * dy)) * v_in(c_idx)
+               else
+                  v_out(r_idx) = v_out(r_idx) - (1.0_dp / (dy * dy)) * v_in(c_idx)
+               end if
+            end if
+
+            if (ii > 0) then
+               c_idx = jj * nodes_x + (ii - 1) + 1
+               if (ii == nx) then
+                  c_idx = jj * nodes_x + (nx - 1) + 1
+                  v_out(r_idx) = v_out(r_idx) - (2.0_dp / (dx * dx)) * v_in(c_idx)
+               else
+                  v_out(r_idx) = v_out(r_idx) - (1.0_dp / (dx * dx)) * v_in(c_idx)
+               end if
+            end if
+
+            if (ii < nx) then
+               c_idx = jj * nodes_x + (ii + 1) + 1
+               if (ii == 0) then
+                  c_idx = jj * nodes_x + 1 + 1
+                  v_out(r_idx) = v_out(r_idx) - (2.0_dp / (dx * dx)) * v_in(c_idx)
+               else
+                  v_out(r_idx) = v_out(r_idx) - (1.0_dp / (dx * dx)) * v_in(c_idx)
+               end if
+            end if
+
+            if (jj < ny) then
+               c_idx = (jj + 1) * nodes_x + ii + 1
+               if (jj == 0) then
+                  c_idx = 1 * nodes_x + ii + 1
+                  v_out(r_idx) = v_out(r_idx) - (2.0_dp / (dy * dy)) * v_in(c_idx)
+               else
+                  v_out(r_idx) = v_out(r_idx) - (1.0_dp / (dy * dy)) * v_in(c_idx)
+               end if
+            end if
+         end do
+      end do
+    end subroutine matvec_A
+
+    subroutine apply_block_tri(v_in, z_res)
+      real(dp), intent(in)  :: v_in(:)
+      real(dp), intent(out) :: z_res(:)
+      integer  :: ii, jj, r_idx, kk
+      real(dp) :: sub_term, l_coeff
+
+      z_res = 0.0_dp
+      do jj = 0, ny
+         do ii = 0, nx
+            r_idx = jj * nodes_x + ii + 1
+            if (ii == 0 .and. jj == 0) then
+               d(ii) = 1.0_dp
+            else
+               d(ii) = 2.0_dp / (dx * dx) + 2.0_dp / (dy * dy)
+            end if
+
+            if (ii > 0) then
+               if (ii == nx) then
+                  dl(ii - 1) = -2.0_dp / (dx * dx)
+               else
+                  dl(ii - 1) = -1.0_dp / (dx * dx)
+               end if
+            end if
+
+            if (ii < nx) then
+               if (ii == 0) then
+                  if (jj == 0) then
+                     du(ii) = 0.0_dp
+                  else
+                     du(ii) = -2.0_dp / (dx * dx)
+                  end if
+               else
+                  du(ii) = -1.0_dp / (dx * dx)
+               end if
+            end if
+
+            sub_term = 0.0_dp
+            if (jj > 0) then
+               if (jj == ny) then
+                  l_coeff = -2.0_dp / (dy * dy)
+               else
+                  l_coeff = -1.0_dp / (dy * dy)
+               end if
+               sub_term = l_coeff * z_res((jj - 1) * nodes_x + ii + 1)
+            end if
+
+            rhs_line(ii) = v_in(r_idx) - sub_term
+         end do
+
+         ! Thomas algorithm
+         c_prime(0) = du(0) / d(0)
+         d_prime(0) = rhs_line(0) / d(0)
+         do kk = 1, nx - 1
+            denom = d(kk) - dl(kk - 1) * c_prime(kk - 1)
+            c_prime(kk) = du(kk) / denom
+            d_prime(kk) = (rhs_line(kk) - dl(kk - 1) * d_prime(kk - 1)) / denom
+         end do
+         denom = d(nx) - dl(nx - 1) * c_prime(nx - 1)
+         d_prime(nx) = (rhs_line(nx) - dl(nx - 1) * d_prime(nx - 1)) / denom
+
+         z_res(jj * nodes_x + nx + 1) = d_prime(nx)
+         do kk = nx - 1, 0, -1
+            z_res(jj * nodes_x + kk + 1) = d_prime(kk) - c_prime(kk) * z_res(jj * nodes_x + kk + 2)
+         end do
+      end do
+    end subroutine apply_block_tri
+
+  end subroutine sim_run_laplacian_cas3_2
 
   !-----------------------------------------------------------------------------
   ! Cas de vérification 3.19 : Advection VOF vortex de cisaillement avec retournement
@@ -1075,6 +2390,11 @@ contains
 
     call this%ns_solver%unpack_vector(this%mesh, this%config, state_vector, this%fields, .false.)
 
+    ! Échange des halos MPI pour les vitesses prédites u* et v*
+    call sync_u(this%mesh, this%fields%u)
+    call sync_v(this%mesh, this%fields%v)
+    call apply_boundary_conditions(this%mesh, this%config, this%fields, .false.)
+
     deallocate(rhs, state_vector)
 
     ! =========================================================================
@@ -1096,7 +2416,7 @@ contains
           ! Face Ouest (u_i, j)
           is_wall_W = (i == 1 .and. this%mesh%is_boundary_left .and. &
                       (this%config%bc_left%btype == BC_DIRICHLET .or. this%config%bc_left%btype == BC_FREESLIP)) .or. &
-                      is_u_face_in_obstacle(this%mesh, this%config, i, j)
+                      (is_u_face_in_obstacle(this%mesh, this%config, i, j) .and. this%config%obs_perm <= 1.0e-12_dp)
           if (.not. is_wall_W) then
              rho_u = this%fields%rho_u(i, j)
              if (rho_u < 1.0e-12_dp) rho_u = 1.0_dp
@@ -1106,7 +2426,7 @@ contains
           ! Face Est (u_i+1, j)
           is_wall_E = (i == nx .and. this%mesh%is_boundary_right .and. &
                       (this%config%bc_right%btype == BC_DIRICHLET .or. this%config%bc_right%btype == BC_FREESLIP)) .or. &
-                      is_u_face_in_obstacle(this%mesh, this%config, i + 1, j)
+                      (is_u_face_in_obstacle(this%mesh, this%config, i + 1, j) .and. this%config%obs_perm <= 1.0e-12_dp)
           if (.not. is_wall_E) then
              rho_u = this%fields%rho_u(i + 1, j)
              if (rho_u < 1.0e-12_dp) rho_u = 1.0_dp
@@ -1116,7 +2436,7 @@ contains
           ! Face Sud (v_i, j)
           is_wall_S = (j == 1 .and. this%mesh%is_boundary_bottom .and. &
                       (this%config%bc_bottom%btype == BC_DIRICHLET .or. this%config%bc_bottom%btype == BC_FREESLIP)) .or. &
-                      is_v_face_in_obstacle(this%mesh, this%config, i, j)
+                      (is_v_face_in_obstacle(this%mesh, this%config, i, j) .and. this%config%obs_perm <= 1.0e-12_dp)
           if (.not. is_wall_S) then
              rho_v = this%fields%rho_v(i, j)
              if (rho_v < 1.0e-12_dp) rho_v = 1.0_dp
@@ -1126,7 +2446,7 @@ contains
           ! Face Nord (v_i, j+1)
           is_wall_N = (j == ny .and. this%mesh%is_boundary_top .and. &
                       (this%config%bc_top%btype == BC_DIRICHLET .or. this%config%bc_top%btype == BC_FREESLIP)) .or. &
-                      is_v_face_in_obstacle(this%mesh, this%config, i, j + 1)
+                      (is_v_face_in_obstacle(this%mesh, this%config, i, j + 1) .and. this%config%obs_perm <= 1.0e-12_dp)
           if (.not. is_wall_N) then
              rho_v = this%fields%rho_v(i, j + 1)
              if (rho_v < 1.0e-12_dp) rho_v = 1.0_dp
@@ -1188,6 +2508,7 @@ contains
     p_sol = p_sol - p_mean
 
     this%fields%p(1:nx, 1:ny) = p_sol
+    call sync_cell_scalar(this%mesh, this%fields%p)
 
     ! =========================================================================
     ! 3. Étape de Correction / Projection de Vitesse : u = u* - (dt/rho) * grad(p)
@@ -1198,7 +2519,7 @@ contains
                     (this%config%bc_left%btype == BC_DIRICHLET .or. this%config%bc_left%btype == BC_FREESLIP)) .or. &
                     (i == u_nx .and. this%mesh%is_boundary_right .and. &
                     (this%config%bc_right%btype == BC_DIRICHLET .or. this%config%bc_right%btype == BC_FREESLIP)) .or. &
-                    is_u_face_in_obstacle(this%mesh, this%config, i, j)
+                    (is_u_face_in_obstacle(this%mesh, this%config, i, j) .and. this%config%obs_perm <= 1.0e-12_dp)
           if (is_wall) cycle
 
           rho_u = this%fields%rho_u(i, j)
@@ -1231,7 +2552,7 @@ contains
                     (this%config%bc_bottom%btype == BC_DIRICHLET .or. this%config%bc_bottom%btype == BC_FREESLIP)) .or. &
                     (j == v_ny .and. this%mesh%is_boundary_top .and. &
                     (this%config%bc_top%btype == BC_DIRICHLET .or. this%config%bc_top%btype == BC_FREESLIP)) .or. &
-                    is_v_face_in_obstacle(this%mesh, this%config, i, j)
+                    (is_v_face_in_obstacle(this%mesh, this%config, i, j) .and. this%config%obs_perm <= 1.0e-12_dp)
           if (is_wall) cycle
 
           rho_v = this%fields%rho_v(i, j)

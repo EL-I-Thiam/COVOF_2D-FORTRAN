@@ -28,16 +28,12 @@ set(SOURCES
 
 # Executable target: covof2d_fortran
 add_executable(covof2d_fortran ${SOURCES})
-target_link_libraries(covof2d_fortran PRIVATE MPI::MPI_Fortran)
+if(APPLE)
+    target_link_libraries(covof2d_fortran PRIVATE MPI::MPI_Fortran "-framework Accelerate")
+else()
+    target_link_libraries(covof2d_fortran PRIVATE MPI::MPI_Fortran)
+endif()
 
 set_target_properties(covof2d_fortran PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
-)
-
-# Create compatibility symlink for fugu2d_fortran
-add_custom_command(TARGET covof2d_fortran POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-        ${CMAKE_CURRENT_SOURCE_DIR}/bin/covof2d_fortran
-        ${CMAKE_CURRENT_SOURCE_DIR}/bin/fugu2d_fortran
-    COMMENT "Creating compatibility symlink bin/fugu2d_fortran -> bin/covof2d_fortran"
 )

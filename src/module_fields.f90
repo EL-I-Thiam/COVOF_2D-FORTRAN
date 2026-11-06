@@ -34,6 +34,7 @@ module module_fields
      real(dp), allocatable :: v(:, :)        ! Vitesse transversale aux faces horizontales (i, j-1/2) [m/s]
      real(dp), allocatable :: p(:, :)        ! Pression statique scalaire au centre des mailles (i, j) [Pa]
      real(dp), allocatable :: div(:, :)      ! Divergence discrète locale de la vitesse (nabla . u) [1/s]
+     real(dp), allocatable :: r_aal(:, :)    ! Paramètre de pénalité adaptatif r(t, M) [Pa.s] (Vincent et al. 2004, Éq. 14)
 
      ! --- Propriétés Thermodynamiques et Équation d'Énergie ---
      real(dp), allocatable :: C(:, :)        ! Fraction volumique VOF du fluide 1 (C in [0, 1])
@@ -58,6 +59,15 @@ module module_fields
      real(dp), allocatable :: T_old(:, :)     ! Température au pas précédent T^n [K]
      real(dp), allocatable :: u_old(:, :)     ! Vitesse axiale au pas précédent
      real(dp), allocatable :: v_old(:, :)     ! Vitesse transversale au pas précédent
+     real(dp), allocatable :: u_nm1(:, :)     ! Vitesse axiale au pas n-1 (Gear / AB2)
+     real(dp), allocatable :: v_nm1(:, :)     ! Vitesse transversale au pas n-1
+     real(dp), allocatable :: rho_old(:, :)   ! Masse volumique au pas précédent
+     real(dp), allocatable :: rho_u_old(:, :) ! Masse volumique faces u au pas précédent
+     real(dp), allocatable :: rho_v_old(:, :) ! Masse volumique faces v au pas précédent
+     real(dp), allocatable :: rho_u_nm1(:, :) ! Masse volumique faces u au pas n-1
+     real(dp), allocatable :: rho_v_nm1(:, :) ! Masse volumique faces v au pas n-1
+     real(dp), allocatable :: C_s(:, :)       ! Fraction volumique lissée SVOF (Éq. 4-5 Fluids 2021)
+     logical               :: has_nm1 = .false. ! Indicateur de validité de l'état n-1
      real(dp), allocatable :: energy(:, :)    ! Énergie totale massique e [J/kg]
      real(dp), allocatable :: rho_e(:, :)     ! Énergie totale volumique rho*e [J/m^3]
      real(dp), allocatable :: rhou_star(:, :) ! Quantité de mouvement intermédiaire (rho*u)* aux faces u
@@ -113,6 +123,7 @@ contains
     allocate(fields%v(0:nx+1, 0:ny+1))
     allocate(fields%p(0:nx+1, 0:ny+1))
     allocate(fields%div(0:nx+1, 0:ny+1))
+    allocate(fields%r_aal(0:nx+1, 0:ny+1))
     allocate(fields%C(0:nx+1, 0:ny+1))
     allocate(fields%T(0:nx+1, 0:ny+1))
     allocate(fields%rho(0:nx+1, 0:ny+1))
@@ -129,6 +140,15 @@ contains
     allocate(fields%T_old(0:nx+1, 0:ny+1))
     allocate(fields%u_old(0:nx+1, 0:ny+1))
     allocate(fields%v_old(0:nx+1, 0:ny+1))
+    allocate(fields%u_nm1(0:nx+1, 0:ny+1))
+    allocate(fields%v_nm1(0:nx+1, 0:ny+1))
+    allocate(fields%rho_old(0:nx+1, 0:ny+1))
+    allocate(fields%rho_u_old(0:nx+1, 0:ny+1))
+    allocate(fields%rho_v_old(0:nx+1, 0:ny+1))
+    allocate(fields%rho_u_nm1(0:nx+1, 0:ny+1))
+    allocate(fields%rho_v_nm1(0:nx+1, 0:ny+1))
+    allocate(fields%C_s(0:nx+1, 0:ny+1))
+    fields%has_nm1 = .false.
     allocate(fields%energy(0:nx+1, 0:ny+1))
     allocate(fields%rho_e(0:nx+1, 0:ny+1))
     allocate(fields%rhou_star(0:nx+1, 0:ny+1))
@@ -151,6 +171,7 @@ contains
     if (allocated(fields%v))          deallocate(fields%v)
     if (allocated(fields%p))          deallocate(fields%p)
     if (allocated(fields%div))        deallocate(fields%div)
+    if (allocated(fields%r_aal))      deallocate(fields%r_aal)
     if (allocated(fields%C))          deallocate(fields%C)
     if (allocated(fields%T))          deallocate(fields%T)
     if (allocated(fields%rho))        deallocate(fields%rho)
@@ -167,6 +188,15 @@ contains
     if (allocated(fields%T_old))      deallocate(fields%T_old)
     if (allocated(fields%u_old))      deallocate(fields%u_old)
     if (allocated(fields%v_old))      deallocate(fields%v_old)
+    if (allocated(fields%u_nm1))      deallocate(fields%u_nm1)
+    if (allocated(fields%v_nm1))      deallocate(fields%v_nm1)
+    if (allocated(fields%rho_old))    deallocate(fields%rho_old)
+    if (allocated(fields%rho_u_old))  deallocate(fields%rho_u_old)
+    if (allocated(fields%rho_v_old))  deallocate(fields%rho_v_old)
+    if (allocated(fields%rho_u_nm1))  deallocate(fields%rho_u_nm1)
+    if (allocated(fields%rho_v_nm1))  deallocate(fields%rho_v_nm1)
+    if (allocated(fields%C_s))        deallocate(fields%C_s)
+    fields%has_nm1 = .false.
     if (allocated(fields%energy))     deallocate(fields%energy)
     if (allocated(fields%rho_e))      deallocate(fields%rho_e)
     if (allocated(fields%rhou_star))  deallocate(fields%rhou_star)
@@ -189,8 +219,9 @@ contains
     fields%v            = 0.0_dp     ! Vitesse transversale initiale nulle
     fields%p            = 0.0_dp     ! Pression de référence nulle
     fields%div          = 0.0_dp     ! Divergence initiale nulle
+    if (allocated(fields%r_aal)) fields%r_aal = 500.0_dp
     fields%C            = 1.0_dp     ! Fluide 1 pur par défaut
-    fields%T            = 0.0_dp     ! Température de référence nulle
+    fields%T            = 300.0_dp   ! Température de référence isotherme standard (300 K)
     fields%rho          = 1.0_dp     ! Masse volumique unitaire par défaut
     fields%rho_u        = 1.0_dp
     fields%rho_v        = 1.0_dp
@@ -204,9 +235,18 @@ contains
 
     fields%chi_T        = 0.0_dp
     fields%p_old        = 0.0_dp
-    fields%T_old        = 0.0_dp
+    fields%T_old        = 300.0_dp
     fields%u_old        = 0.0_dp
     fields%v_old        = 0.0_dp
+    if (allocated(fields%u_nm1))     fields%u_nm1     = 0.0_dp
+    if (allocated(fields%v_nm1))     fields%v_nm1     = 0.0_dp
+    if (allocated(fields%rho_old))   fields%rho_old   = 1.0_dp
+    if (allocated(fields%rho_u_old)) fields%rho_u_old = 1.0_dp
+    if (allocated(fields%rho_v_old)) fields%rho_v_old = 1.0_dp
+    if (allocated(fields%rho_u_nm1)) fields%rho_u_nm1 = 1.0_dp
+    if (allocated(fields%rho_v_nm1)) fields%rho_v_nm1 = 1.0_dp
+    if (allocated(fields%C_s))       fields%C_s       = 1.0_dp
+    fields%has_nm1      = .false.
     fields%energy       = 0.0_dp
     fields%rho_e        = 0.0_dp
     fields%rhou_star    = 0.0_dp

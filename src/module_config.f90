@@ -31,6 +31,7 @@ module module_config
   type :: config_t
      ! Déclaration de variable locale / paramètre de calcul
      character(len=64) :: case_name = "covof2d_case"
+     character(len=64) :: test_case = "CAS_3_1"
      ! Déclaration de variable locale / paramètre de calcul
      character(len=32) :: mode = "NAVIER_STOKES"
 
@@ -47,6 +48,9 @@ module module_config
      logical  :: enable_convection = .true.
      ! Déclaration de variable locale / paramètre de calcul
      integer  :: convective_scheme = CONV_UPWIND
+     integer  :: convective_linearization = CONV_LIN_PICARD
+     logical  :: enable_svof_smoothing = .false.
+     real(dp) :: svof_filter_width = 1.0_dp
      ! Déclaration de variable locale / paramètre de calcul
      integer  :: viscosity_model = VISC_CONSTANT
      ! Déclaration de variable locale / paramètre de calcul
@@ -94,6 +98,7 @@ module module_config
      real(dp) :: Cp = 1.0_dp, k_thermal = 0.014_dp
 
      ! Time integration
+     integer  :: time_scheme = TIME_SCHEME_EULER
      real(dp) :: dt = 0.01_dp, t_final = 1.0_dp
      ! Déclaration de variable locale / paramètre de calcul
      logical  :: adaptive_dt = .false.
@@ -128,6 +133,7 @@ module module_config
      real(dp) :: ic_thickness = 0.0003_dp
      ! Déclaration de la largeur initiale de jet liquide (Cas 3.3 Fluids 2021)
      real(dp) :: ic_jet_width = 0.08_dp
+     real(dp) :: ic_p0 = 0.0_dp
 
      ! Solvers
      integer  :: solver_type = SOLVER_AUGMENTED_LAGRANGIAN
@@ -141,12 +147,21 @@ module module_config
      integer  :: max_iter = 300
      ! Déclaration de variable locale / paramètre de calcul
      real(dp) :: r_al = 100.0_dp
+     logical  :: adaptative_al = .false.     ! Activer le Lagrangien augmenté adaptatif r(t, M) (Éq. 14)
+     real(dp) :: k_aal         = 100.0_dp    ! Facteur d'amplification K in [10, 1000] (Éq. 14)
+     real(dp) :: uzawa_tol     = 1.0e-12_dp  ! Seuil d'arrêt d'Uzawa sur ||div(u^{*,m})||_inf (Éq. 10)
+     real(dp) :: l0_ref        = 0.0_dp      ! Échelle de longueur L0 [m] (0 = auto)
+     real(dp) :: t0_ref        = 0.0_dp      ! Échelle de temps t0 [s] (0 = auto = dt)
+     real(dp) :: u0_ref        = 0.0_dp      ! Échelle de vitesse u0 [m/s] (0 = auto)
+     real(dp) :: p0_ref        = 0.0_dp      ! Échelle de pression p0 [Pa] (0 = auto)
      ! Déclaration de variable locale / paramètre de calcul
      integer  :: uzawa_iter = 1
      ! Déclaration de variable locale / paramètre de calcul
      logical  :: use_precond = .true.
      ! Déclaration de variable locale / paramètre de calcul
-     real(dp) :: steady_state_tol = 1.0e-5_dp
+     real(dp) :: steady_state_tol = 0.0_dp
+     ! Terme source pour le mode LAPLACIAN
+     real(dp) :: source_term = 1.0_dp
 
      ! Outputs
      character(len=128) :: output_dir = "output"
@@ -254,9 +269,8 @@ contains
 
     ! Case name & mode
     call json_get_string(buf, "case_name", cfg%case_name, "covof_case")
-    ! Appel de sous-programme modulaire
     call json_get_string(buf, "output.case_name", cfg%case_name, cfg%case_name)
-    ! Appel de sous-programme modulaire
+    call json_get_string(buf, "test_case", cfg%test_case, "CAS_3_1")
     call json_get_string(buf, "mode", cfg%mode, "NAVIER_STOKES")
 
     ! Mesh
@@ -295,6 +309,27 @@ contains
     else
        ! Affectation et calcul numérique
        cfg%convective_scheme = CONV_UPWIND
+    end if
+
+    call json_get_string(buf, "physics.convective_linearization", str_val, "PICARD")
+    if (trim(str_val) == "PICARD") then
+       call json_get_string(buf, "convective_linearization", str_val, "PICARD")
+    end if
+    if (trim(str_val) == "ADAMS_BASHFORTH" .or. trim(str_val) == "AB2") then
+       cfg%convective_linearization = CONV_LIN_ADAMS_BASHFORTH
+    else if (trim(str_val) == "NEWTON") then
+       cfg%convective_linearization = CONV_LIN_NEWTON
+    else
+       cfg%convective_linearization = CONV_LIN_PICARD
+    end if
+
+    call json_get_bool(buf, "physics.enable_svof_smoothing", cfg%enable_svof_smoothing, .false.)
+    if (.not. cfg%enable_svof_smoothing) then
+       call json_get_bool(buf, "enable_svof_smoothing", cfg%enable_svof_smoothing, .false.)
+    end if
+    call json_get_real(buf, "physics.svof_filter_width", cfg%svof_filter_width, 1.0_dp)
+    if (cfg%svof_filter_width == 1.0_dp) then
+       call json_get_real(buf, "svof_filter_width", cfg%svof_filter_width, 1.0_dp)
     end if
 
     ! Appel de sous-programme modulaire
@@ -375,6 +410,15 @@ contains
     call json_get_real(buf, "physics.fluid1.k_thermal", cfg%k_thermal, 0.014_dp)
 
     ! Time
+    call json_get_string(buf, "time.time_scheme", str_val, "EULER")
+    if (trim(str_val) == "EULER") then
+       call json_get_string(buf, "time_scheme", str_val, "EULER")
+    end if
+    if (trim(str_val) == "GEAR" .or. trim(str_val) == "BDF2") then
+       cfg%time_scheme = TIME_SCHEME_GEAR
+    else
+       cfg%time_scheme = TIME_SCHEME_EULER
+    end if
     call json_get_real(buf, "time.dt", cfg%dt, 0.01_dp)
     ! Appel de sous-programme modulaire
     call json_get_real(buf, "time.t_final", cfg%t_final, 1.0_dp)
@@ -383,7 +427,15 @@ contains
     ! Appel de sous-programme modulaire
     call json_get_real(buf, "time.cfl_max", cfg%cfl_max, 0.5_dp)
     ! Appel de sous-programme modulaire
-    call json_get_real(buf, "steady_state_tol", cfg%steady_state_tol, 1.0e-5_dp)
+    call json_get_real(buf, "steady_state_tol", cfg%steady_state_tol, 0.0_dp)
+
+    ! Terme source pour le mode LAPLACIAN
+    call json_get_real(buf, "physics.source_term", cfg%source_term, 1.0_dp)
+    call json_get_real(buf, "physics.f", cfg%source_term, cfg%source_term)
+    call json_get_real(buf, "source_term", cfg%source_term, cfg%source_term)
+    call json_get_real(buf, "f", cfg%source_term, cfg%source_term)
+    call json_get_real(buf, "laplacian.source_term", cfg%source_term, cfg%source_term)
+    call json_get_real(buf, "laplacian.f", cfg%source_term, cfg%source_term)
 
     ! Boundary conditions
     call parse_bc(buf, "boundary_conditions.left", cfg%bc_left)
@@ -399,7 +451,10 @@ contains
                            cfg%obs_xc, cfg%obs_yc, cfg%obs_radius, cfg%obs_perm, cfg%obs_enabled)
 
     ! Initial condition
-    call json_get_string(buf, "initial_condition.type", str_val, "UNIFORM")
+    call json_get_string(buf, "initial_condition.type", str_val, "")
+    if (len_trim(str_val) == 0) then
+       call json_get_string(buf, "initial_conditions.type", str_val, "UNIFORM")
+    end if
     ! Évaluation de la condition logique
     if (trim(str_val) == "UNIFORM") then
        ! Affectation et calcul numérique
@@ -420,8 +475,12 @@ contains
     else if (trim(str_val) == "DROPLET") then
        ! Affectation et calcul numérique
        cfg%ic_type = IC_DROPLET
-    ! Branche conditionnelle alternative pour bulle ou cylindre immergé
-    else if (trim(str_val) == "BUBBLE" .or. trim(str_val) == "CYLINDER") then
+    ! Branche conditionnelle alternative pour cylindre immergé (Cas 3.1 Fluids 2021)
+    else if (trim(str_val) == "CYLINDER") then
+       ! Affectation et calcul numérique
+       cfg%ic_type = IC_CYLINDER
+    ! Branche conditionnelle alternative pour bulle
+    else if (trim(str_val) == "BUBBLE") then
        ! Affectation et calcul numérique
        cfg%ic_type = IC_BUBBLE
     ! Branche conditionnelle alternative
@@ -448,30 +507,35 @@ contains
 
     ! Appel de sous-programme modulaire
     call json_get_real(buf, "initial_condition.u", cfg%ic_u, 0.0_dp)
-    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_conditions.u", cfg%ic_u, cfg%ic_u)
     call json_get_real(buf, "initial_condition.v", cfg%ic_v, 0.0_dp)
-    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_conditions.v", cfg%ic_v, cfg%ic_v)
     call json_get_real(buf, "initial_condition.center_x", cfg%ic_center_x, 0.5_dp)
-    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_conditions.center_x", cfg%ic_center_x, cfg%ic_center_x)
     call json_get_real(buf, "initial_condition.center_y", cfg%ic_center_y, 0.5_dp)
-    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_conditions.center_y", cfg%ic_center_y, cfg%ic_center_y)
     call json_get_real(buf, "initial_condition.radius", cfg%ic_radius, 0.25_dp)
-    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_conditions.radius", cfg%ic_radius, cfg%ic_radius)
     call json_get_real(buf, "initial_condition.box_x0", cfg%ic_box_x0, 0.0_dp)
-    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_conditions.box_x0", cfg%ic_box_x0, cfg%ic_box_x0)
     call json_get_real(buf, "initial_condition.box_y0", cfg%ic_box_y0, 0.0_dp)
-    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_conditions.box_y0", cfg%ic_box_y0, cfg%ic_box_y0)
     call json_get_real(buf, "initial_condition.box_x1", cfg%ic_box_x1, 0.5_dp)
-    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_conditions.box_x1", cfg%ic_box_x1, cfg%ic_box_x1)
     call json_get_real(buf, "initial_condition.box_y1", cfg%ic_box_y1, 0.5_dp)
-    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_conditions.box_y1", cfg%ic_box_y1, cfg%ic_box_y1)
     call json_get_real(buf, "initial_condition.pert_amp", cfg%ic_pert_amp, 0.05_dp)
-    ! Appel de sous-programme modulaire
+    call json_get_real(buf, "initial_conditions.pert_amp", cfg%ic_pert_amp, cfg%ic_pert_amp)
     call json_get_real(buf, "initial_condition.pert_k", cfg%ic_pert_k, 1.0_dp)
-    ! Lecture de l'épaisseur de nappe liquide (Cas 3.2 Fluids 2021)
+    call json_get_real(buf, "initial_conditions.pert_k", cfg%ic_pert_k, cfg%ic_pert_k)
     call json_get_real(buf, "initial_condition.thickness", cfg%ic_thickness, 0.0003_dp)
-    ! Lecture de la largeur de jet liquide (Cas 3.3 Fluids 2021)
+    call json_get_real(buf, "initial_conditions.thickness", cfg%ic_thickness, cfg%ic_thickness)
     call json_get_real(buf, "initial_condition.jet_width", cfg%ic_jet_width, 0.08_dp)
+    call json_get_real(buf, "initial_conditions.jet_width", cfg%ic_jet_width, cfg%ic_jet_width)
+    call json_get_real(buf, "initial_condition.p_init", cfg%ic_p0, 0.0_dp)
+    call json_get_real(buf, "initial_condition.p0", cfg%ic_p0, cfg%ic_p0)
+    call json_get_real(buf, "initial_conditions.p_init", cfg%ic_p0, cfg%ic_p0)
+    call json_get_real(buf, "initial_conditions.p0", cfg%ic_p0, cfg%ic_p0)
 
     ! Solver
     call json_get_string(buf, "solver.type", str_val, "AUGMENTED_LAGRANGIAN")
@@ -490,6 +554,12 @@ contains
        ! Affectation et calcul numérique
        cfg%solver_type = SOLVER_STANDARD_PROJECTION
        ! Affectation et calcul numérique
+       cfg%linear_solver = LINEAR_BICGSTAB2
+    else if (trim(str_val) == "ADAPTATIVE_AUGMENTED_LAGRANGIAN" .or. &
+             trim(str_val) == "ADAPTIVE_AUGMENTED_LAGRANGIAN" .or. &
+             trim(str_val) == "AAL") then
+       cfg%solver_type = SOLVER_AUGMENTED_LAGRANGIAN
+       cfg%adaptative_al = .true.
        cfg%linear_solver = LINEAR_BICGSTAB2
     ! Branche par défaut si condition non satisfaite
     else
@@ -513,6 +583,10 @@ contains
     else if (trim(str_val) == "GMRES") then
        ! Affectation et calcul numérique
        cfg%linear_solver = LINEAR_GMRES
+    ! Branche conditionnelle alternative
+    else if (trim(str_val) == "DIRECT" .or. trim(str_val) == "MUMPS") then
+       ! Affectation et calcul numérique
+       cfg%linear_solver = LINEAR_DIRECT
     end if
 
     ! Appel de sous-programme modulaire
@@ -521,19 +595,32 @@ contains
     call json_get_int(buf, "solver.max_iter", cfg%max_iter, 300)
     ! Appel de sous-programme modulaire
     call json_get_real(buf, "solver.r_al", cfg%r_al, 100.0_dp)
+    call json_get_bool(buf, "solver.adaptative_al", cfg%adaptative_al, cfg%adaptative_al)
+    call json_get_bool(buf, "solver.adaptative_r", cfg%adaptative_al, cfg%adaptative_al)
+    call json_get_real(buf, "solver.k_aal", cfg%k_aal, cfg%k_aal)
+    call json_get_real(buf, "solver.r_factor", cfg%k_aal, cfg%k_aal)
+    call json_get_real(buf, "solver.uzawa_tol", cfg%uzawa_tol, cfg%uzawa_tol)
+    call json_get_real(buf, "solver.l0_ref", cfg%l0_ref, cfg%l0_ref)
+    call json_get_real(buf, "solver.t0_ref", cfg%t0_ref, cfg%t0_ref)
+    call json_get_real(buf, "solver.u0_ref", cfg%u0_ref, cfg%u0_ref)
+    call json_get_real(buf, "solver.p0_ref", cfg%p0_ref, cfg%p0_ref)
     ! Appel de sous-programme modulaire
     call json_get_int(buf, "solver.uzawa_iter", cfg%uzawa_iter, 1)
     ! Appel de sous-programme modulaire
     call json_get_bool(buf, "solver.use_precond", cfg%use_precond, .true.)
     ! Appel de sous-programme modulaire
-    call json_get_string(buf, "solver.precond_type", str_val, "JACOBI")
+    call json_get_string(buf, "solver.precond_type", str_val, "")
+    if (len_trim(str_val) == 0) then
+       call json_get_string(buf, "solver.preconditioner", str_val, "JACOBI")
+    end if
     if (trim(str_val) == "JACOBI" .or. trim(str_val) == "DIAGONAL") then
        cfg%precond_type = PRECOND_JACOBI
     else if (trim(str_val) == "SSOR" .or. trim(str_val) == "GAUSS_SEIDEL") then
        cfg%precond_type = PRECOND_SSOR
     else if (trim(str_val) == "ILU0" .or. trim(str_val) == "ILU") then
        cfg%precond_type = PRECOND_ILU0
-    else if (trim(str_val) == "BLOCK_TRIANGULAR" .or. trim(str_val) == "SCHUR") then
+    else if (trim(str_val) == "BLOCK_TRIANGULAR" .or. trim(str_val) == "SCHUR" .or. &
+             trim(str_val) == "BLOCK" .or. trim(str_val) == "BLOCK_PRECONDITIONER") then
        cfg%precond_type = PRECOND_BLOCK_TRIANGULAR
     else if (trim(str_val) == "NONE") then
        cfg%precond_type = PRECOND_NONE

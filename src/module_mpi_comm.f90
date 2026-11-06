@@ -360,7 +360,10 @@ contains
              ! Affectation et calcul numérique
              u_inlet = u_l
              ! Évaluation de la condition logique
-             if (.not. homogeneous .and. cfg%obs_enabled .and. cfg%obs_type == OBS_BOX) then
+             if (.not. homogeneous .and. trim(cfg%bc_left%profile) == "PARABOLIC") then
+                y = y_center(mesh, j)
+                u_inlet = 6.0_dp * cfg%bc_left%u * y * (mesh%ly - y) / (mesh%ly * mesh%ly)
+             else if (.not. homogeneous .and. cfg%obs_enabled .and. cfg%obs_type == OBS_BOX) then
                 ! Profil d'entrée marche descendante : parabole sur [y_step, ly]
                 y = y_center(mesh, j)
                 ! Évaluation de la condition logique
@@ -408,21 +411,17 @@ contains
              ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
              if (.not. homogeneous) fields%u(nx+1, j) = u_r
              ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             fields%u(nx+1, j) = u_r
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
              fields%v(nx+1, j) = 2.0_dp * v_r - fields%v(nx, j)
           ! Branche conditionnelle alternative
           else if (cfg%bc_right%btype == BC_FREESLIP) then
              ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
              if (.not. homogeneous) fields%u(nx+1, j) = 0.0_dp
              ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             fields%u(nx+1, j) = 0.0_dp
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
              fields%v(nx+1, j) = fields%v(nx, j)
           ! Branche conditionnelle alternative
           else if (cfg%bc_right%btype == BC_NEUMANN) then
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             fields%u(nx+1, j) = fields%u(nx, j)
+             ! Ne pas écraser u(nx+1, j) en mode homogène : c'est un DDL actif du système
+             if (.not. homogeneous) fields%u(nx+1, j) = fields%u(nx, j)
              ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
              fields%v(nx+1, j) = fields%v(nx, j)
           end if
@@ -439,8 +438,12 @@ contains
              if (.not. homogeneous) fields%v(i, 1) = v_b
              ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
              fields%v(i, 0) = v_b
-             ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
-             fields%u(i, 0) = 2.0_dp * u_b - fields%u(i, 1)
+             ! Extrapolation quadratique d'ordre 2 à la paroi (formule 3 points exacte pour profils paraboliques de Poiseuille)
+             if (ny >= 2) then
+                fields%u(i, 0) = (8.0_dp * u_b - 6.0_dp * fields%u(i, 1) + fields%u(i, 2)) / 3.0_dp
+             else
+                fields%u(i, 0) = 2.0_dp * u_b - fields%u(i, 1)
+             end if
           ! Branche conditionnelle alternative
           else if (cfg%bc_bottom%btype == BC_FREESLIP) then
              ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
@@ -493,7 +496,12 @@ contains
              if (cfg%bc_top%btype == BC_DIRICHLET) then
                 ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
                 if (.not. homogeneous) fields%v(i, ny+1) = v_t
-                fields%u(i, ny+1) = 2.0_dp * u_t - fields%u(i, ny)
+                ! Extrapolation quadratique d'ordre 2 à la paroi (formule 3 points exacte pour profils paraboliques de Poiseuille)
+                if (ny >= 2) then
+                   fields%u(i, ny+1) = (8.0_dp * u_t - 6.0_dp * fields%u(i, ny) + fields%u(i, ny-1)) / 3.0_dp
+                else
+                   fields%u(i, ny+1) = 2.0_dp * u_t - fields%u(i, ny)
+                end if
              ! Branche conditionnelle alternative
              else if (cfg%bc_top%btype == BC_FREESLIP) then
                 ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
@@ -503,7 +511,7 @@ contains
              else if (cfg%bc_top%btype == BC_NEUMANN) then
                 ! Mise à jour de la composante de vitesse discrète sur face décalée MAC
                 fields%u(i, ny+1) = fields%u(i, ny)
-                fields%v(i, ny+1) = fields%v(i, ny)
+                if (.not. homogeneous) fields%v(i, ny+1) = fields%v(i, ny)
              end if
           end do
        end if
@@ -623,12 +631,20 @@ contains
     ! Affectation et calcul numérique
     ny = mesh%ny_local
 
-    ! Affectation et calcul numérique
-    if (mesh%neighbor_west == MPI_PROC_NULL)  fields%C(0, 1:ny)    = fields%C(1, 1:ny)
-    ! Affectation et calcul numérique
-    if (mesh%neighbor_east == MPI_PROC_NULL)  fields%C(nx+1, 1:ny) = fields%C(nx, 1:ny)
-    ! Affectation et calcul numérique
-    if (mesh%neighbor_south == MPI_PROC_NULL) fields%C(1:nx, 0)    = fields%C(1:nx, 1)
+    ! Affectation et calcul numérique (périodique ou Neumann)
+    if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) then
+       fields%C(0, 1:ny)    = fields%C(nx, 1:ny)
+       fields%C(nx+1, 1:ny) = fields%C(1, 1:ny)
+    else
+       if (mesh%neighbor_west == MPI_PROC_NULL)  fields%C(0, 1:ny)    = fields%C(1, 1:ny)
+       if (mesh%neighbor_east == MPI_PROC_NULL)  fields%C(nx+1, 1:ny) = fields%C(nx, 1:ny)
+    end if
+    if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) then
+       fields%C(1:nx, 0)    = fields%C(1:nx, ny)
+       fields%C(1:nx, ny+1) = fields%C(1:nx, 1)
+    else
+       if (mesh%neighbor_south == MPI_PROC_NULL) fields%C(1:nx, 0)    = fields%C(1:nx, 1)
+    end if
     ! Affectation et calcul numérique pour bord Nord
     if (mesh%neighbor_north == MPI_PROC_NULL) then
        if (trim(cfg%bc_top%profile) == "JET_INLET") then
@@ -639,7 +655,7 @@ contains
              if (abs(x_c - xc_top) <= half_w_top) then
                 fields%C(i, ny+1) = 0.0_dp ! Injection continue de liquide (Fluide 2)
              else
-                fields%C(i, ny+1) = fields%C(i, ny) ! Évacuation libre du gaz
+                fields%C(i, ny+1) = 1.0_dp ! Gaz pur au bord superieur hors injecteur
              end if
           end do
        else
