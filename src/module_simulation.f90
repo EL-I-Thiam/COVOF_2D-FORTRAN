@@ -535,17 +535,22 @@ contains
              ! 6. Déballage de la vitesse résolue
              call this%ns_solver%unpack_vector(this%mesh, this%config, state_vector, this%fields, .false.)
 
-             ! 7. Mise à jour de la pression par Lagrangien augmenté (étape d'Uzawa)
+             ! 7. Mise à jour de la pression par Lagrangien augmenté (étape d'Uzawa C-AAL)
              if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
-                call this%ns_solver%update_pressure_al(this%mesh, this%config, this%fields)
+                call this%ns_solver%update_pressure_al(this%mesh, this%config, this%fields, dt)
 
-                ! Critère d'arrêt d'Uzawa sur ||div(u^{*,m})||_inf <= uzawa_tol (Éq. 10)
+                ! Critère d'arrêt d'Uzawa sur le résidu de continuité généralisé <= uzawa_tol (Éq. 10)
                 if (uzawa_max > 1 .and. this%config%uzawa_tol > 0.0_dp) then
                    local_max_div = 0.0_dp
                    do j = 1, this%mesh%ny_local
                       do i = 1, this%mesh%nx_local
-                         div_val = abs((this%fields%u(i + 1, j) - this%fields%u(i, j)) / this%mesh%dx + &
-                                       (this%fields%v(i, j + 1) - this%fields%v(i, j)) / this%mesh%dy)
+                         div_val = (this%fields%u(i + 1, j) - this%fields%u(i, j)) / this%mesh%dx + &
+                                   (this%fields%v(i, j + 1) - this%fields%v(i, j)) / this%mesh%dy
+                         if (this%config%compressible .and. dt > 1.0e-30_dp .and. allocated(this%fields%chi_T)) then
+                            div_val = div_val + (this%fields%chi_T(i, j) / dt) * &
+                                      (this%fields%p(i, j) - this%fields%p_old(i, j))
+                         end if
+                         div_val = abs(div_val)
                          if (div_val > local_max_div) local_max_div = div_val
                       end do
                    end do
@@ -554,6 +559,11 @@ contains
                 end if
              end if
           end do
+       end if
+
+       ! 7.2 Mise à jour barotrope des masses volumiques rho_m(p^{n+1}) en régime diphasique compressible
+       if (this%config%compressible .and. this%config%enable_two_phase) then
+          call update_physical_properties(this%fields, this%mesh, this%config)
        end if
 
        ! 7.5 Résolution de l'énergie (totale si compressible non-isotherme, thermique si Boussinesq)

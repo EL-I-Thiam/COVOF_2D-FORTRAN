@@ -18,10 +18,11 @@ COVOF 2D Fortran 2018 is developed in strict mathematical and algorithmic parity
   $$\nabla \cdot \mathbf{u} = 0$$
   $$\rho(C)\left(\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u}\cdot\nabla)\mathbf{u}\right) = -\nabla p + \rho(C)\mathbf{g} + \nabla \cdot \left[\mu(C)\left(\nabla \mathbf{u} + \nabla \mathbf{u}^T\right)\right] + \mathbf{f}_\sigma$$
 - **Velocity-Pressure Solvers**:
-  - `MONOLITHIC` (`FC`): All-coupled saddle-point velocity-pressure formulation solved simultaneously.
-  - `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (`AAL`): Spatially localized divergence penalization $r_{i,j}(t) = K_{\mathrm{aal}}\,\mu_2\,|\nabla C|$ with Uzawa projection for robust convergence under stiff viscosity contrasts ($\mu_2/\mu_1 > 10^5$).
+  - `MONOLITHIC` (`FC` / `FULLY_COUPLED`): All-coupled saddle-point velocity-pressure formulation solved simultaneously (incompressible and low-Mach weakly compressible $\chi_T(C)\,\mathrm{d}_t p + \nabla\cdot\mathbf{u} = 0$).
+  - `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (`AAL` / `C-AAL`): Spatially and temporally adaptive divergence & acoustic penalization $r_{\mathrm{eff},i,j}(t)$ combining inertial (Gear/BDF2), convective, viscous, capillary, Darcy–Brinkman porous drag ($\mu\Delta V/K$), and low-Mach compressibility scales with Uzawa pressure relaxation under extreme viscosity contrasts ($\mu_2/\mu_1 > 10^9$).
   - `STANDARD_PROJECTION` (`SP`): Incremental fractional-step projection method with variable-density Poisson solve.
-- **Temporal Discretization**: Second-order backward differentiation (Gear / BDF2) and first-order Euler, with Adams-Bashforth convective linearization.
+- **Temporal Discretization**: Second-order backward differentiation (`GEAR` / BDF2) and first-order `EULER`, with full implicit `NEWTON` convective Jacobian linearization, `PICARD`, and `ADAMS_BASHFORTH` schemes.
+- **Darcy–Brinkman Volume Penalization**: Implicit porous and solid immersed obstacle penalization $-\frac{\mu(C)}{K}\mathbf{u}$ ($K \in [10^{-14}, 10^{-3}]\;\mathrm{m}^2$).
 - **Convective Formulations**: Centered second-order, upwind, and TVD schemes.
 
 ### 2. High-Fidelity Interface Tracking (VOF)
@@ -41,7 +42,7 @@ COVOF 2D Fortran 2018 is developed in strict mathematical and algorithmic parity
 - **Sparse Matrix Representation**: Compressed Sparse Row (CSR) storage format.
 - **Iterative Solvers**: BiCGSTAB, BiCGSTAB(2), GMRES, and Conjugate Gradient (CG).
 - **Preconditioners**:
-  - `BLOCK_TRIANGULAR`: Block Schur-complement preconditioner for monolithic systems.
+  - `BLOCK_TRIANGULAR` (`BT_SBP` / `BT-SBP`): Block-Triangular Schur–Brinkman–Compressible preconditioner incorporating Augmented Lagrangian $(r_E+r_W)\Delta y/\Delta x$, Darcy–Brinkman resistance $(\mu/K)\Delta V$, Newton convective Jacobian diagonal, and low-Mach acoustic compressibility $-\frac{\chi_T}{\Delta t}\Delta V$.
   - `ILU0`: Incomplete LU factorization with zero fill-in.
   - `SSOR`: Symmetric Successive Over-Relaxation.
   - `JACOBI`: Diagonal preconditioner.

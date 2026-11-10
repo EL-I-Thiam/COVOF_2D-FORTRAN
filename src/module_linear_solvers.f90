@@ -247,7 +247,7 @@ contains
             dof = (j - 1) * u_nx + i
             is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
                       (i == u_nx .and. mesh%is_boundary_right) .or. &
-                      is_u_face_in_obstacle(mesh, cfg, i, j)
+                      (is_u_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
             if (is_wall) then
               rhs_u(dof) = src(dof)
             else
@@ -272,7 +272,7 @@ contains
               dof = (j - 1) * u_nx + i
               is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
                         (i == u_nx .and. mesh%is_boundary_right) .or. &
-                        is_u_face_in_obstacle(mesh, cfg, i, j)
+                        (is_u_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
               if (is_wall) then
                 ru(dof) = rhs_u(dof) / ns%u_aP(dof)
                 cycle
@@ -299,7 +299,7 @@ contains
               dof = (j - 1) * u_nx + i
               is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
                         (i == u_nx .and. mesh%is_boundary_right) .or. &
-                        is_u_face_in_obstacle(mesh, cfg, i, j)
+                        (is_u_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
               if (is_wall) then
                 ru(dof) = rhs_u(dof) / ns%u_aP(dof)
                 cycle
@@ -334,7 +334,7 @@ contains
                        (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
                       (j == v_ny .and. mesh%is_boundary_top .and. &
                        (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
-                      is_v_face_in_obstacle(mesh, cfg, i, j)
+                      (is_v_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
             if (is_wall) then
               rhs_v(dof) = src(nu + dof)
             else
@@ -361,7 +361,7 @@ contains
                          (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
                         (j == v_ny .and. mesh%is_boundary_top .and. &
                          (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
-                        is_v_face_in_obstacle(mesh, cfg, i, j)
+                        (is_v_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
               if (is_wall) then
                 rv(dof) = rhs_v(dof) / ns%v_aP(dof)
                 cycle
@@ -398,7 +398,7 @@ contains
                          (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
                         (j == v_ny .and. mesh%is_boundary_top .and. &
                          (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
-                        is_v_face_in_obstacle(mesh, cfg, i, j)
+                        (is_v_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
               if (is_wall) then
                 rv(dof) = rhs_v(dof) / ns%v_aP(dof)
                 cycle

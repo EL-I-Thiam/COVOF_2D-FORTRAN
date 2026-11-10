@@ -1110,7 +1110,7 @@ contains
   end subroutine ns_assemble_rhs
 
   !-----------------------------------------------------------------------------
-  ! Calcul du champ de pénalité adaptatif r(t, M) (Vincent et al. 2004, Éq. 14)
+  ! Calcul du champ de pénalité adaptatif r(t, M) (Vincent et al. 2004, Éq. 14 + C-AAL)
   !-----------------------------------------------------------------------------
   subroutine ns_compute_adaptative_r_al(this, mesh, cfg, fields, dt)
     class(navier_stokes_t), intent(in) :: this
@@ -1122,14 +1122,26 @@ contains
     integer  :: i, j
     real(dp) :: L0, t0, u0, p0, g_norm, sigma_val, mu_max, u_grav, u_cap
     real(dp) :: loc_u_max, loc_p_max, u_max, p_max, uc, vc, spd, p_abs
-    real(dp) :: rho_M, mu_M, t_unsteady, t_inert, t_grav, t_press, t_visc, t_cap, r_loc
+    real(dp) :: rho_M, mu_M, t_unsteady, t_inert, t_grav, t_press, t_visc, t_cap, t_brinkman, r_loc
+    real(dp) :: alpha_time, dvol, xc, yc
+    logical  :: in_cell_obs
 
     if (.not. allocated(fields%r_aal)) then
       allocate(fields%r_aal(0:mesh%nx_local+1, 0:mesh%ny_local+1))
     end if
 
     if (.not. cfg%adaptative_al) then
-      fields%r_aal = cfg%r_al
+      do j = 0, mesh%ny_local + 1
+        do i = 0, mesh%nx_local + 1
+          r_loc = cfg%r_al
+          if (cfg%compressible .and. dt > 1.0e-30_dp .and. allocated(fields%chi_T)) then
+            if (fields%chi_T(i, j) > 1.0e-15_dp) then
+              r_loc = r_loc / (1.0_dp + r_loc * (fields%chi_T(i, j) / dt))
+            end if
+          end if
+          fields%r_aal(i, j) = r_loc
+        end do
+      end do
       return
     end if
 
@@ -1144,6 +1156,8 @@ contains
     t0 = merge(cfg%t0_ref, dt, cfg%t0_ref > 0.0_dp)
     g_norm = sqrt(cfg%gx**2 + cfg%gy**2)
     sigma_val = merge(cfg%sigma, 0.0_dp, cfg%enable_two_phase)
+    alpha_time = merge(1.5_dp, 1.0_dp, cfg%time_scheme == TIME_SCHEME_GEAR .and. fields%has_nm1)
+    dvol = mesh%dx * mesh%dy
 
     loc_u_max = 0.0_dp
     loc_p_max = 0.0_dp
@@ -1169,21 +1183,41 @@ contains
     end if
     p0 = merge(cfg%p0_ref, p_max, cfg%p0_ref > 0.0_dp)
 
-    ! Équation (14) de Vincent et al. (2004)
+    ! Équation C-AAL (Vincent et al. 2004 + Brinkman & Compressibilité Bas-Mach)
     do j = 1, mesh%ny_local
       do i = 1, mesh%nx_local
         rho_M = fields%rho(i, j)
         mu_M  = fields%mu(i, j)
 
-        t_unsteady = rho_M * (L0 * L0) / max(t0, 1.0e-30_dp)
+        t_unsteady = alpha_time * rho_M * (L0 * L0) / max(t0, 1.0e-30_dp)
         t_inert    = rho_M * u0 * L0
         t_grav     = rho_M * (L0 * L0 / u0) * g_norm
         t_press    = (p0 * L0) / u0
         t_visc     = mu_M
         t_cap      = sigma_val / u0
+        t_brinkman = 0.0_dp
+        if (cfg%obs_enabled .and. cfg%obs_perm > 1.0e-12_dp) then
+          xc = x_center(mesh, i)
+          yc = y_center(mesh, j)
+          if (cfg%obs_type == OBS_CYLINDER) then
+            in_cell_obs = ((xc - cfg%obs_xc)**2 + (yc - cfg%obs_yc)**2 <= cfg%obs_radius**2)
+          else
+            in_cell_obs = (xc >= cfg%obs_x0 - 1.0e-9_dp .and. xc <= cfg%obs_x1 + 1.0e-9_dp .and. &
+                           yc >= cfg%obs_y0 - 1.0e-9_dp .and. yc <= cfg%obs_y1 + 1.0e-9_dp)
+          end if
+          if (in_cell_obs) then
+            t_brinkman = mu_M * (dvol / cfg%obs_perm)
+          end if
+        end if
 
-        r_loc = cfg%k_aal * max(t_unsteady, t_inert, t_grav, t_press, t_visc, t_cap)
-        fields%r_aal(i, j) = merge(r_loc, cfg%r_al, r_loc > 1.0e-15_dp)
+        r_loc = cfg%k_aal * max(t_unsteady, t_inert, t_grav, t_press, t_visc, t_brinkman, t_cap)
+        if (r_loc <= 1.0e-15_dp) r_loc = cfg%r_al
+        if (cfg%compressible .and. dt > 1.0e-30_dp .and. allocated(fields%chi_T)) then
+          if (fields%chi_T(i, j) > 1.0e-15_dp) then
+            r_loc = r_loc / (1.0_dp + r_loc * (fields%chi_T(i, j) / dt))
+          end if
+        end if
+        fields%r_aal(i, j) = r_loc
       end do
     end do
 
@@ -1191,20 +1225,22 @@ contains
   end subroutine ns_compute_adaptative_r_al
 
   !-----------------------------------------------------------------------------
-  ! Mise à jour de la pression par l'étape d'Uzawa du Lagrangien augmenté :
-  !   p^{m+1} = p^m - r_loc * div(u^{m+1})
+  ! Mise à jour de la pression par l'étape d'Uzawa du Lagrangien augmenté (C-AAL)
   !-----------------------------------------------------------------------------
-  subroutine ns_update_pressure_al(this, mesh, cfg, fields)
+  subroutine ns_update_pressure_al(this, mesh, cfg, fields, dt)
     class(navier_stokes_t), intent(in) :: this
     type(mesh_2d_t), intent(in)        :: mesh
     type(config_t), intent(in)         :: cfg
     type(flow_fields_t), intent(inout) :: fields
+    real(dp), intent(in), optional     :: dt
 
     integer  :: i, j
-    real(dp) :: dx, dy, div_val, r_loc
+    real(dp) :: dx, dy, div_val, r_loc, dt_val, chi_dt, resid_comp
 
     dx = mesh%dx
     dy = mesh%dy
+    dt_val = 0.0_dp
+    if (present(dt)) dt_val = dt
 
     do j = 1, mesh%ny_local
       do i = 1, mesh%nx_local
@@ -1215,7 +1251,17 @@ contains
         else
           r_loc = cfg%r_al
         end if
-        fields%p(i, j) = fields%p(i, j) - r_loc * div_val
+        if (cfg%compressible .and. dt_val > 1.0e-30_dp .and. allocated(fields%chi_T)) then
+          if (fields%chi_T(i, j) > 1.0e-15_dp) then
+            chi_dt = fields%chi_T(i, j) / dt_val
+            resid_comp = div_val + chi_dt * (fields%p(i, j) - fields%p_old(i, j))
+            fields%p(i, j) = fields%p(i, j) - r_loc * resid_comp
+          else
+            fields%p(i, j) = fields%p(i, j) - r_loc * div_val
+          end if
+        else
+          fields%p(i, j) = fields%p(i, j) - r_loc * div_val
+        end if
       end do
     end do
 
@@ -1239,7 +1285,7 @@ contains
 
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: dx, dy, dvol, rho_u, rho_v, mu_c, d_val, al_u, al_v
-    real(dp) :: Du, Dv, mu_e, mu_w, mu_n, mu_s, mu_avg, alpha_time
+    real(dp) :: Du, Dv, mu_e, mu_w, mu_n, mu_s, mu_avg, alpha_time, du_dx, dv_dy
     ! Déclaration de variable locale / paramètre de calcul
     integer :: i, j, dof, u_nx, v_ny, dof_u, dof_v
     ! Déclaration de variable locale / paramètre de calcul
@@ -1313,6 +1359,10 @@ contains
             d_val = d_val + (0.5_dp * (fields%mu(i - 1, j) + fields%mu(i, j)) / cfg%obs_perm) * dvol
           end if
         end if
+        if (cfg%enable_convection .and. cfg%convective_linearization == CONV_LIN_NEWTON) then
+          du_dx = (fields%u(i + 1, j) - fields%u(i - 1, j)) / (2.0_dp * dx)
+          d_val = d_val + rho_u * max(0.0_dp, du_dx) * dvol
+        end if
         this%diag_u(dof) = merge(d_val, 1.0_dp, d_val > 1.0e-15_dp)
 
         if (allocated(this%u_aP)) then
@@ -1323,11 +1373,15 @@ contains
           this%u_aW(dof) = 2.0_dp * mu_w * (dy / dx)
           this%u_aN(dof) = mu_avg * (dx / dy)
           this%u_aS(dof) = mu_avg * (dx / dy)
-          this%u_aP(dof) = Du + this%u_aE(dof) + this%u_aW(dof) + this%u_aN(dof) + this%u_aS(dof)
+          this%u_aP(dof) = Du + this%u_aE(dof) + this%u_aW(dof) + this%u_aN(dof) + this%u_aS(dof) + al_u
           if (is_u_face_in_obstacle(mesh, cfg, i, j)) then
             if (cfg%obs_perm > 1.0e-12_dp) then
-              this%u_aP(dof) = this%u_aP(dof) + (0.5_dp * (fields%mu(i - 1, j) + fields%mu(i, j)) / cfg%obs_perm) * dvol
+              this%u_aP(dof) = this%u_aP(dof) + (mu_avg / cfg%obs_perm) * dvol
             end if
+          end if
+          if (cfg%enable_convection .and. cfg%convective_linearization == CONV_LIN_NEWTON) then
+            du_dx = (fields%u(i + 1, j) - fields%u(i - 1, j)) / (2.0_dp * dx)
+            this%u_aP(dof) = this%u_aP(dof) + rho_u * max(0.0_dp, du_dx) * dvol
           end if
         end if
       end do
@@ -1382,6 +1436,10 @@ contains
             d_val = d_val + (0.5_dp * (fields%mu(i, j - 1) + fields%mu(i, j)) / cfg%obs_perm) * dvol
           end if
         end if
+        if (cfg%enable_convection .and. cfg%convective_linearization == CONV_LIN_NEWTON) then
+          dv_dy = (fields%v(i, j + 1) - fields%v(i, j - 1)) / (2.0_dp * dy)
+          d_val = d_val + rho_v * max(0.0_dp, dv_dy) * dvol
+        end if
         this%diag_v(dof) = merge(d_val, 1.0_dp, d_val > 1.0e-15_dp)
 
         if (allocated(this%v_aP)) then
@@ -1392,11 +1450,15 @@ contains
           this%v_aS(dof) = 2.0_dp * mu_s * (dx / dy)
           this%v_aE(dof) = mu_avg * (dy / dx)
           this%v_aW(dof) = mu_avg * (dy / dx)
-          this%v_aP(dof) = Dv + this%v_aN(dof) + this%v_aS(dof) + this%v_aE(dof) + this%v_aW(dof)
+          this%v_aP(dof) = Dv + this%v_aN(dof) + this%v_aS(dof) + this%v_aE(dof) + this%v_aW(dof) + al_v
           if (is_v_face_in_obstacle(mesh, cfg, i, j)) then
             if (cfg%obs_perm > 1.0e-12_dp) then
-              this%v_aP(dof) = this%v_aP(dof) + (0.5_dp * (fields%mu(i, j - 1) + fields%mu(i, j)) / cfg%obs_perm) * dvol
+              this%v_aP(dof) = this%v_aP(dof) + (mu_avg / cfg%obs_perm) * dvol
             end if
+          end if
+          if (cfg%enable_convection .and. cfg%convective_linearization == CONV_LIN_NEWTON) then
+            dv_dy = (fields%v(i, j + 1) - fields%v(i, j - 1)) / (2.0_dp * dy)
+            this%v_aP(dof) = this%v_aP(dof) + rho_v * max(0.0_dp, dv_dy) * dvol
           end if
         end if
       end do

@@ -620,6 +620,7 @@ contains
     else if (trim(str_val) == "ILU0" .or. trim(str_val) == "ILU") then
        cfg%precond_type = PRECOND_ILU0
     else if (trim(str_val) == "BLOCK_TRIANGULAR" .or. trim(str_val) == "SCHUR" .or. &
+             trim(str_val) == "BT_SBP" .or. trim(str_val) == "BT-SBP" .or. &
              trim(str_val) == "BLOCK" .or. trim(str_val) == "BLOCK_PRECONDITIONER") then
        cfg%precond_type = PRECOND_BLOCK_TRIANGULAR
     else if (trim(str_val) == "NONE") then
