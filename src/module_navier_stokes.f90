@@ -162,6 +162,8 @@ contains
 
     ! Évaluation de la condition logique
     if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+        cfg%solver_type == SOLVER_AAL .or. &
+        cfg%solver_type == SOLVER_CAAL .or. &
         cfg%solver_type == SOLVER_STANDARD_PROJECTION) then
       ! Affectation et calcul numérique
       this%n_owned_total = this%n_owned_u + this%n_owned_v
@@ -593,7 +595,9 @@ contains
         val = val - (shear_N - shear_S)
 
         ! Lagrangien augmenté (adaptatif Éq. 15 : -d(r*div)/dx * dvol)
-        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+            cfg%solver_type == SOLVER_AAL .or. &
+            cfg%solver_type == SOLVER_CAAL) then
           if (cfg%adaptative_al .and. allocated(fields_old%r_aal)) then
             r_E = fields_old%r_aal(i, j)
             r_W = fields_old%r_aal(i - 1, j)
@@ -737,7 +741,9 @@ contains
         val = val - (shear_E - shear_W)
 
         ! Lagrangien augmenté (adaptatif Éq. 15 : -d(r*div)/dy * dvol)
-        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+            cfg%solver_type == SOLVER_AAL .or. &
+            cfg%solver_type == SOLVER_CAAL) then
           if (cfg%adaptative_al .and. allocated(fields_old%r_aal)) then
             r_N = fields_old%r_aal(i, j)
             r_S = fields_old%r_aal(i, j - 1)
@@ -933,7 +939,9 @@ contains
         end if
 
         ! Évaluation de la condition logique
-        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+            cfg%solver_type == SOLVER_AAL .or. &
+            cfg%solver_type == SOLVER_CAAL) then
           ! Affectation et calcul numérique
           grad_p = (fields%p(i, j) - fields%p(i - 1, j)) * dy
           ! Affectation et calcul numérique
@@ -1060,7 +1068,9 @@ contains
         end if
 
         ! Évaluation de la condition logique
-        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+            cfg%solver_type == SOLVER_AAL .or. &
+            cfg%solver_type == SOLVER_CAAL) then
           ! Affectation et calcul numérique
           grad_p = (fields%p(i, j) - fields%p(i, j - 1)) * dx
           ! Affectation et calcul numérique
@@ -1134,7 +1144,8 @@ contains
       do j = 0, mesh%ny_local + 1
         do i = 0, mesh%nx_local + 1
           r_loc = cfg%r_al
-          if (cfg%compressible .and. dt > 1.0e-30_dp .and. allocated(fields%chi_T)) then
+          if ((cfg%solver_type == SOLVER_CAAL .or. (cfg%compressible .and. cfg%solver_type /= SOLVER_AAL)) .and. &
+              dt > 1.0e-30_dp .and. allocated(fields%chi_T)) then
             if (fields%chi_T(i, j) > 1.0e-15_dp) then
               r_loc = r_loc / (1.0_dp + r_loc * (fields%chi_T(i, j) / dt))
             end if
@@ -1212,7 +1223,8 @@ contains
 
         r_loc = cfg%k_aal * max(t_unsteady, t_inert, t_grav, t_press, t_visc, t_brinkman, t_cap)
         if (r_loc <= 1.0e-15_dp) r_loc = cfg%r_al
-        if (cfg%compressible .and. dt > 1.0e-30_dp .and. allocated(fields%chi_T)) then
+        if ((cfg%solver_type == SOLVER_CAAL .or. (cfg%compressible .and. cfg%solver_type /= SOLVER_AAL)) .and. &
+            dt > 1.0e-30_dp .and. allocated(fields%chi_T)) then
           if (fields%chi_T(i, j) > 1.0e-15_dp) then
             r_loc = r_loc / (1.0_dp + r_loc * (fields%chi_T(i, j) / dt))
           end if
@@ -1225,7 +1237,7 @@ contains
   end subroutine ns_compute_adaptative_r_al
 
   !-----------------------------------------------------------------------------
-  ! Mise à jour de la pression par l'étape d'Uzawa du Lagrangien augmenté (C-AAL)
+  ! Mise à jour de la pression par l'étape d'Uzawa du Lagrangien augmenté (C-AAL / AAL)
   !-----------------------------------------------------------------------------
   subroutine ns_update_pressure_al(this, mesh, cfg, fields, dt)
     class(navier_stokes_t), intent(in) :: this
@@ -1251,7 +1263,8 @@ contains
         else
           r_loc = cfg%r_al
         end if
-        if (cfg%compressible .and. dt_val > 1.0e-30_dp .and. allocated(fields%chi_T)) then
+        if ((cfg%solver_type == SOLVER_CAAL .or. (cfg%compressible .and. cfg%solver_type /= SOLVER_AAL)) .and. &
+            dt_val > 1.0e-30_dp .and. allocated(fields%chi_T)) then
           if (fields%chi_T(i, j) > 1.0e-15_dp) then
             chi_dt = fields%chi_T(i, j) / dt_val
             resid_comp = div_val + chi_dt * (fields%p(i, j) - fields%p_old(i, j))
@@ -1346,7 +1359,9 @@ contains
         ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
         mu_c = fields%mu(i, j)
         al_u = 0.0_dp
-        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+            cfg%solver_type == SOLVER_AAL .or. &
+            cfg%solver_type == SOLVER_CAAL) then
           if (cfg%adaptative_al .and. allocated(fields%r_aal)) then
             al_u = (fields%r_aal(i, j) + fields%r_aal(i - 1, j)) * (dy / dx)
           else
@@ -1373,7 +1388,18 @@ contains
           this%u_aW(dof) = 2.0_dp * mu_w * (dy / dx)
           this%u_aN(dof) = mu_avg * (dx / dy)
           this%u_aS(dof) = mu_avg * (dx / dy)
-          this%u_aP(dof) = Du + this%u_aE(dof) + this%u_aW(dof) + this%u_aN(dof) + this%u_aS(dof) + al_u
+          if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+              cfg%solver_type == SOLVER_AAL .or. &
+              cfg%solver_type == SOLVER_CAAL) then
+            if (cfg%adaptative_al .and. allocated(fields%r_aal)) then
+              this%u_aE(dof) = this%u_aE(dof) + fields%r_aal(i, j) * (dy / dx)
+              this%u_aW(dof) = this%u_aW(dof) + fields%r_aal(i - 1, j) * (dy / dx)
+            else
+              this%u_aE(dof) = this%u_aE(dof) + cfg%r_al * (dy / dx)
+              this%u_aW(dof) = this%u_aW(dof) + cfg%r_al * (dy / dx)
+            end if
+          end if
+          this%u_aP(dof) = Du + this%u_aE(dof) + this%u_aW(dof) + this%u_aN(dof) + this%u_aS(dof)
           if (is_u_face_in_obstacle(mesh, cfg, i, j)) then
             if (cfg%obs_perm > 1.0e-12_dp) then
               this%u_aP(dof) = this%u_aP(dof) + (mu_avg / cfg%obs_perm) * dvol
@@ -1423,7 +1449,9 @@ contains
         ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
         mu_c = fields%mu(i, j)
         al_v = 0.0_dp
-        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+        if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+            cfg%solver_type == SOLVER_AAL .or. &
+            cfg%solver_type == SOLVER_CAAL) then
           if (cfg%adaptative_al .and. allocated(fields%r_aal)) then
             al_v = (fields%r_aal(i, j) + fields%r_aal(i, j - 1)) * (dx / dy)
           else
@@ -1450,7 +1478,18 @@ contains
           this%v_aS(dof) = 2.0_dp * mu_s * (dx / dy)
           this%v_aE(dof) = mu_avg * (dy / dx)
           this%v_aW(dof) = mu_avg * (dy / dx)
-          this%v_aP(dof) = Dv + this%v_aN(dof) + this%v_aS(dof) + this%v_aE(dof) + this%v_aW(dof) + al_v
+          if (cfg%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+              cfg%solver_type == SOLVER_AAL .or. &
+              cfg%solver_type == SOLVER_CAAL) then
+            if (cfg%adaptative_al .and. allocated(fields%r_aal)) then
+              this%v_aN(dof) = this%v_aN(dof) + fields%r_aal(i, j) * (dx / dy)
+              this%v_aS(dof) = this%v_aS(dof) + fields%r_aal(i, j - 1) * (dx / dy)
+            else
+              this%v_aN(dof) = this%v_aN(dof) + cfg%r_al * (dx / dy)
+              this%v_aS(dof) = this%v_aS(dof) + cfg%r_al * (dx / dy)
+            end if
+          end if
+          this%v_aP(dof) = Dv + this%v_aN(dof) + this%v_aS(dof) + this%v_aE(dof) + this%v_aW(dof)
           if (is_v_face_in_obstacle(mesh, cfg, i, j)) then
             if (cfg%obs_perm > 1.0e-12_dp) then
               this%v_aP(dof) = this%v_aP(dof) + (mu_avg / cfg%obs_perm) * dvol

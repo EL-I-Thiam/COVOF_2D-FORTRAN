@@ -545,7 +545,7 @@ contains
        cfg%solver_type = SOLVER_AUGMENTED_LAGRANGIAN
        ! Affectation et calcul numérique
        cfg%linear_solver = LINEAR_CG
-    else if (trim(str_val) == "MONOLITHIC") then
+    else if (trim(str_val) == "MONOLITHIC" .or. trim(str_val) == "FULLY_COUPLED" .or. trim(str_val) == "FC") then
        ! Affectation et calcul numérique
        cfg%solver_type = SOLVER_MONOLITHIC
        ! Affectation et calcul numérique
@@ -555,10 +555,18 @@ contains
        cfg%solver_type = SOLVER_STANDARD_PROJECTION
        ! Affectation et calcul numérique
        cfg%linear_solver = LINEAR_BICGSTAB2
+    else if (trim(str_val) == "C-AAL" .or. trim(str_val) == "CAAL" .or. &
+             trim(str_val) == "COMPRESSIBLE_AAL") then
+       ! Formulation C-AAL Compressible Bas-Mach (Fluids 2024, El Ouafa et al.)
+       cfg%solver_type = SOLVER_CAAL
+       cfg%adaptative_al = .true.
+       cfg%compressible = .true.
+       cfg%linear_solver = LINEAR_BICGSTAB2
     else if (trim(str_val) == "ADAPTATIVE_AUGMENTED_LAGRANGIAN" .or. &
              trim(str_val) == "ADAPTIVE_AUGMENTED_LAGRANGIAN" .or. &
              trim(str_val) == "AAL") then
-       cfg%solver_type = SOLVER_AUGMENTED_LAGRANGIAN
+       ! Formulation AAL Incompressible pure (Vincent et al. 2004)
+       cfg%solver_type = SOLVER_AAL
        cfg%adaptative_al = .true.
        cfg%linear_solver = LINEAR_BICGSTAB2
     ! Branche par défaut si condition non satisfaite
@@ -583,6 +591,9 @@ contains
     else if (trim(str_val) == "GMRES") then
        ! Affectation et calcul numérique
        cfg%linear_solver = LINEAR_GMRES
+    else if (trim(str_val) == "MINRES") then
+       ! Solveur MINRES (Paige & Saunders 1975)
+       cfg%linear_solver = LINEAR_MINRES
     ! Branche conditionnelle alternative
     else if (trim(str_val) == "DIRECT" .or. trim(str_val) == "MUMPS") then
        ! Affectation et calcul numérique
@@ -597,6 +608,7 @@ contains
     call json_get_real(buf, "solver.r_al", cfg%r_al, 100.0_dp)
     call json_get_bool(buf, "solver.adaptative_al", cfg%adaptative_al, cfg%adaptative_al)
     call json_get_bool(buf, "solver.adaptative_r", cfg%adaptative_al, cfg%adaptative_al)
+    call json_get_bool(buf, "solver.adaptative_r_al", cfg%adaptative_al, cfg%adaptative_al)
     call json_get_real(buf, "solver.k_aal", cfg%k_aal, cfg%k_aal)
     call json_get_real(buf, "solver.r_factor", cfg%k_aal, cfg%k_aal)
     call json_get_real(buf, "solver.uzawa_tol", cfg%uzawa_tol, cfg%uzawa_tol)
@@ -623,6 +635,8 @@ contains
              trim(str_val) == "BT_SBP" .or. trim(str_val) == "BT-SBP" .or. &
              trim(str_val) == "BLOCK" .or. trim(str_val) == "BLOCK_PRECONDITIONER") then
        cfg%precond_type = PRECOND_BLOCK_TRIANGULAR
+    else if (trim(str_val) == "CUSTOM") then
+       cfg%precond_type = PRECOND_CUSTOM
     else if (trim(str_val) == "NONE") then
        cfg%precond_type = PRECOND_NONE
     end if

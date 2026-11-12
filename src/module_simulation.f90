@@ -499,8 +499,10 @@ contains
           call apply_vof_bc(this%fields, this%mesh, this%config)
        end if
 
-       ! 1.9 Calcul du paramètre de pénalité adaptatif r(t, M) (Vincent et al. 2004, Éq. 14)
-       if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+       ! 1.9 Calcul du paramètre de pénalité adaptatif r(t, M) (Vincent et al. 2004, Éq. 14 / C-AAL)
+       if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+           this%config%solver_type == SOLVER_AAL .or. &
+           this%config%solver_type == SOLVER_CAAL) then
           call this%ns_solver%compute_adaptative_r_al(this%mesh, this%config, this%fields, dt)
        end if
 
@@ -513,7 +515,9 @@ contains
        if (this%config%solver_type == SOLVER_STANDARD_PROJECTION) then
           call this%solve_standard_projection(dt, total_iters)
        else
-          if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+          if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+              this%config%solver_type == SOLVER_AAL .or. &
+              this%config%solver_type == SOLVER_CAAL) then
              uzawa_max = this%config%uzawa_iter
           else
              uzawa_max = 1
@@ -535,8 +539,10 @@ contains
              ! 6. Déballage de la vitesse résolue
              call this%ns_solver%unpack_vector(this%mesh, this%config, state_vector, this%fields, .false.)
 
-             ! 7. Mise à jour de la pression par Lagrangien augmenté (étape d'Uzawa C-AAL)
-             if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN) then
+             ! 7. Mise à jour de la pression par Lagrangien augmenté (étape d'Uzawa C-AAL / AAL)
+             if (this%config%solver_type == SOLVER_AUGMENTED_LAGRANGIAN .or. &
+                 this%config%solver_type == SOLVER_AAL .or. &
+                 this%config%solver_type == SOLVER_CAAL) then
                 call this%ns_solver%update_pressure_al(this%mesh, this%config, this%fields, dt)
 
                 ! Critère d'arrêt d'Uzawa sur le résidu de continuité généralisé <= uzawa_tol (Éq. 10)
@@ -546,7 +552,9 @@ contains
                       do i = 1, this%mesh%nx_local
                          div_val = (this%fields%u(i + 1, j) - this%fields%u(i, j)) / this%mesh%dx + &
                                    (this%fields%v(i, j + 1) - this%fields%v(i, j)) / this%mesh%dy
-                         if (this%config%compressible .and. dt > 1.0e-30_dp .and. allocated(this%fields%chi_T)) then
+                         if ((this%config%solver_type == SOLVER_CAAL .or. &
+                              (this%config%compressible .and. this%config%solver_type /= SOLVER_AAL)) .and. &
+                             dt > 1.0e-30_dp .and. allocated(this%fields%chi_T)) then
                             div_val = div_val + (this%fields%chi_T(i, j) / dt) * &
                                       (this%fields%p(i, j) - this%fields%p_old(i, j))
                          end if

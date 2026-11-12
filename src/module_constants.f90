@@ -43,6 +43,10 @@ module module_constants
   integer, parameter, public :: SOLVER_MONOLITHIC           = 2
   ! Méthode de projection standard de Chorin-Temam (fractional step)
   integer, parameter, public :: SOLVER_STANDARD_PROJECTION  = 3
+  ! Lagrangien Augmenté Adaptatif Incompressible pur (Vincent et al., Comp. & Fluids 2004)
+  integer, parameter, public :: SOLVER_AAL                  = 4
+  ! Lagrangien Augmenté Compressible Bas-Mach (El Ouafa et al., Fluids 2024)
+  integer, parameter, public :: SOLVER_CAAL                 = 5
 
   ! --- 5. Algorithmes de Résolution Linéaire de Krylov (Matrix-Free) ---
   ! Biconjugué Gradient Stabilisé d'ordre 2 (Sleijpen & van der Vorst) pour systèmes asymétriques
@@ -55,18 +59,22 @@ module module_constants
   integer, parameter, public :: LINEAR_GMRES     = 4
   ! Solveur direct bande ou factorisation LU locale
   integer, parameter, public :: LINEAR_DIRECT    = 5
+  ! Minimum Residual (MINRES - Paige & Saunders 1975) pour opérateurs symétriques indéfinis
+  integer, parameter, public :: LINEAR_MINRES    = 6
 
   ! --- 6. Préconditionneurs Linéaires Parallèles ---
   ! Aucun préconditionnement (résolution brute de l'opérateur non préconditionné)
-  integer, parameter, public :: PRECOND_NONE   = 0
+  integer, parameter, public :: PRECOND_NONE             = 0
   ! Préconditionneur diagonal par blocs de Jacobi (inversion de la diagonale locale)
-  integer, parameter, public :: PRECOND_JACOBI = 1
+  integer, parameter, public :: PRECOND_JACOBI           = 1
   ! Symmetric Successive Over-Relaxation (SSOR) pour lissage spectral rapide
-  integer, parameter, public :: PRECOND_SSOR   = 2
+  integer, parameter, public :: PRECOND_SSOR             = 2
   ! Factorisation incomplète Incomplete LU sans remplissage (ILU(0))
   integer, parameter, public :: PRECOND_ILU0             = 3
   ! Préconditionneur par blocs triangulaires avec complément de Schur (El Ouafa et al. 2023)
   integer, parameter, public :: PRECOND_BLOCK_TRIANGULAR = 4
+  ! Préconditionneur personnalisé utilisateur (pointeur de procédure custom_precond_hook)
+  integer, parameter, public :: PRECOND_CUSTOM           = 5
 
   ! --- 7. Schémas de Discrétisation Spatiale des Termes Convectifs ---
   ! Schéma décentré amont d'ordre 1 (Upwind) inconditionnellement stable mais diffusif

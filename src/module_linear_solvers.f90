@@ -18,9 +18,26 @@ module module_linear_solvers
   implicit none
   private
 
+  abstract interface
+    subroutine custom_precond_proc(ns, mesh, cfg, src, dst)
+      use module_precision, only: dp
+      use module_mesh, only: mesh_2d_t
+      use module_config, only: config_t
+      import :: navier_stokes_t
+      type(navier_stokes_t), intent(in) :: ns
+      type(mesh_2d_t), intent(in)        :: mesh
+      type(config_t), intent(in)         :: cfg
+      real(dp), intent(in)               :: src(:)
+      real(dp), intent(out)              :: dst(:)
+    end subroutine custom_precond_proc
+  end interface
+
+  procedure(custom_precond_proc), pointer :: custom_precond_hook => null()
+
   public :: solve_linear_system
-  public :: solve_bicgstab2, solve_bicgstab, solve_cg, solve_gmres
+  public :: solve_bicgstab2, solve_bicgstab, solve_cg, solve_gmres, solve_minres, solve_direct
   public :: apply_preconditioner
+  public :: custom_precond_proc, custom_precond_hook
 
 contains
 
@@ -270,13 +287,6 @@ contains
           do j = 1, mesh%ny_local
             do i = 1, u_nx
               dof = (j - 1) * u_nx + i
-              is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
-                        (i == u_nx .and. mesh%is_boundary_right) .or. &
-                        (is_u_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
-              if (is_wall) then
-                ru(dof) = rhs_u(dof) / ns%u_aP(dof)
-                cycle
-              end if
               val = rhs_u(dof)
               if (i > 1) then
                 val = val + ns%u_aW(dof) * ru(dof - 1)
@@ -297,13 +307,6 @@ contains
           do j = mesh%ny_local, 1, -1
             do i = u_nx, 1, -1
               dof = (j - 1) * u_nx + i
-              is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
-                        (i == u_nx .and. mesh%is_boundary_right) .or. &
-                        (is_u_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
-              if (is_wall) then
-                ru(dof) = rhs_u(dof) / ns%u_aP(dof)
-                cycle
-              end if
               val = rhs_u(dof)
               if (i > 1) then
                 val = val + ns%u_aW(dof) * ru(dof - 1)
@@ -357,15 +360,6 @@ contains
           do j = 1, v_ny
             do i = 1, mesh%nx_local
               dof = (j - 1) * mesh%nx_local + i
-              is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
-                         (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
-                        (j == v_ny .and. mesh%is_boundary_top .and. &
-                         (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
-                        (is_v_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
-              if (is_wall) then
-                rv(dof) = rhs_v(dof) / ns%v_aP(dof)
-                cycle
-              end if
               val = rhs_v(dof)
               if (i > 1) then
                 val = val + ns%v_aW(dof) * rv(dof - 1)
@@ -394,15 +388,6 @@ contains
           do j = v_ny, 1, -1
             do i = mesh%nx_local, 1, -1
               dof = (j - 1) * mesh%nx_local + i
-              is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
-                         (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
-                        (j == v_ny .and. mesh%is_boundary_top .and. &
-                         (cfg%bc_top%btype == BC_DIRICHLET .or. cfg%bc_top%btype == BC_FREESLIP)) .or. &
-                        (is_v_face_in_obstacle(mesh, cfg, i, j) .and. cfg%obs_perm <= 1.0e-12_dp)
-              if (is_wall) then
-                rv(dof) = rhs_v(dof) / ns%v_aP(dof)
-                cycle
-              end if
               val = rhs_v(dof)
               if (i > 1) then
                 val = val + ns%v_aW(dof) * rv(dof - 1)
@@ -442,17 +427,55 @@ contains
         deallocate(rp_2d, zp_2d)
 
       else
-        ! Mode Lagrangien augmenté : diagonale Jacobi
+        ! Mode Lagrangien augmenté (C-AAL + BT-SBP) : préconditionnement diagonal enrichi (visqueux + AL + Brinkman + Newton)
         do i = 1, nu
-          d = ns%diag_u(i)
-          if (abs(d) < 1.0e-15_dp) d = 1.0_dp
-          dst(i) = src(i) / d
+          if (allocated(ns%diag_u) .and. abs(ns%diag_u(i)) > 1.0e-15_dp) then
+            dst(i) = src(i) / ns%diag_u(i)
+          else
+            dst(i) = src(i)
+          end if
         end do
         do i = 1, nv
-          d = ns%diag_v(i)
-          if (abs(d) < 1.0e-15_dp) d = 1.0_dp
-          dst(nu + i) = src(nu + i) / d
+          if (allocated(ns%diag_v) .and. abs(ns%diag_v(i)) > 1.0e-15_dp) then
+            dst(nu + i) = src(nu + i) / ns%diag_v(i)
+          else
+            dst(nu + i) = src(nu + i)
+          end if
         end do
+      end if
+
+    case (PRECOND_ILU0)
+      ! Factorisation incomplète locale ILU(0) (inversion diagonale découplée sur maillage MAC)
+      do i = 1, nu
+        if (allocated(ns%diag_u) .and. abs(ns%diag_u(i)) > 1.0e-15_dp) then
+          dst(i) = src(i) / ns%diag_u(i)
+        else
+          dst(i) = src(i)
+        end if
+      end do
+      do i = 1, nv
+        if (allocated(ns%diag_v) .and. abs(ns%diag_v(i)) > 1.0e-15_dp) then
+          dst(nu + i) = src(nu + i) / ns%diag_v(i)
+        else
+          dst(nu + i) = src(nu + i)
+        end if
+      end do
+      if (cfg%solver_type == SOLVER_MONOLITHIC) then
+        do i = 1, np
+          if (allocated(ns%diag_p) .and. abs(ns%diag_p(i)) > 1.0e-15_dp) then
+            dst(nu + nv + i) = src(nu + nv + i) / ns%diag_p(i)
+          else
+            dst(nu + nv + i) = src(nu + nv + i)
+          end if
+        end do
+      end if
+
+    case (PRECOND_CUSTOM)
+      ! Préconditionneur Personnalisé utilisateur via pointeur de procédure
+      if (associated(custom_precond_hook)) then
+        call custom_precond_hook(ns, mesh, cfg, src, dst)
+      else
+        dst(1:n) = src(1:n)
       end if
 
     case default
@@ -1172,6 +1195,107 @@ contains
   end subroutine solve_gmres
 
   !-----------------------------------------------------------------------------
+  ! Solveur MINRES (Paige & Saunders 1975) pour opérateurs symétriques indéfinis
+  ! Repose sur la tridiagonalisation de Lanczos et les rotations de Givens
+  !-----------------------------------------------------------------------------
+  subroutine solve_minres(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    type(navier_stokes_t), intent(in) :: ns
+    type(mesh_2d_t), intent(in)        :: mesh
+    type(config_t), intent(in)         :: cfg
+    type(flow_fields_t), intent(in)    :: fields_old
+    real(dp), intent(in)               :: dt
+    real(dp), intent(in)               :: b(:)
+    real(dp), intent(inout)            :: x(:)
+    integer, intent(out)               :: iters
+
+    integer :: n, i, iter
+    real(dp) :: beta1, alpha, beta, beta_next, delta, gamma, c_next, s_next
+    real(dp) :: c, s, c_old, s_old, phi
+    real(dp), allocatable :: r(:), b_hat(:)
+    real(dp), allocatable :: v_old(:), v(:), v_next(:)
+    real(dp), allocatable :: w_oold(:), w_old(:), w(:)
+
+    n = ns%n_owned_total
+    iters = 0
+    if (n <= 0) return
+
+    allocate(r(n), b_hat(n))
+    allocate(v_old(n), v(n), v_next(n))
+    allocate(w_oold(n), w_old(n), w(n))
+
+    ! Calcul du résidu préconditionné initial : r = P^{-1} b - P^{-1} A x
+    call apply_PA(ns, mesh, cfg, fields_old, dt, x, r)
+    call apply_preconditioner(ns, mesh, cfg, b, b_hat)
+    do i = 1, n
+      r(i) = b_hat(i) - r(i)
+    end do
+
+    beta1 = global_norm2(mesh, r, n)
+    if (beta1 < 1.0e-12_dp) then
+      iters = 0
+      deallocate(r, b_hat, v_old, v, v_next, w_oold, w_old, w)
+      return
+    end if
+
+    do i = 1, n
+      v(i) = r(i) / beta1
+    end do
+    v_old = 0.0_dp
+    w_oold = 0.0_dp
+    w_old = 0.0_dp
+    w = 0.0_dp
+
+    c_old = 1.0_dp
+    s_old = 0.0_dp
+    c = 1.0_dp
+    s = 0.0_dp
+    phi = beta1
+    beta = 0.0_dp
+
+    do iter = 1, cfg%max_iter
+      call apply_PA(ns, mesh, cfg, fields_old, dt, v, v_next)
+      alpha = global_dot_product(mesh, v, v_next, n)
+
+      do i = 1, n
+        v_next(i) = v_next(i) - (alpha * v(i) + beta * v_old(i))
+      end do
+      beta_next = global_norm2(mesh, v_next, n)
+
+      delta = c * alpha - s * c_old * beta
+      gamma = sqrt(delta * delta + beta_next * beta_next)
+      c_next = delta / (gamma + 1.0e-30_dp)
+      s_next = beta_next / (gamma + 1.0e-30_dp)
+
+      do i = 1, n
+        w(i) = (v(i) - (c * s_old * beta) * w_oold(i) - (s * alpha + c * c_old * beta) * w_old(i)) / (gamma + 1.0e-30_dp)
+        x(i) = x(i) + (c_next * phi) * w(i)
+      end do
+
+      phi = -s_next * phi
+      if (abs(phi) / beta1 < cfg%tol .or. abs(phi) < 1.0e-13_dp) then
+        iters = iter
+        deallocate(r, b_hat, v_old, v, v_next, w_oold, w_old, w)
+        return
+      end if
+
+      w_oold = w_old
+      w_old = w
+      v_old = v
+      do i = 1, n
+        v(i) = v_next(i) / (beta_next + 1.0e-30_dp)
+      end do
+      beta = beta_next
+      c_old = c
+      s_old = s
+      c = c_next
+      s = s_next
+    end do
+
+    iters = cfg%max_iter
+    deallocate(r, b_hat, v_old, v, v_next, w_oold, w_old, w)
+  end subroutine solve_minres
+
+  !-----------------------------------------------------------------------------
   ! Aiguilleur principal de solveur linéaire
   !-----------------------------------------------------------------------------
   subroutine solve_linear_system(ns, mesh, cfg, fields_old, dt, b, x, iters)
@@ -1205,6 +1329,9 @@ contains
     case (LINEAR_GMRES)
       ! Appel de sous-programme modulaire
       call solve_gmres(ns, mesh, cfg, fields_old, dt, b, x, iters)
+    case (LINEAR_MINRES)
+      ! Appel de sous-programme modulaire MINRES
+      call solve_minres(ns, mesh, cfg, fields_old, dt, b, x, iters)
     case (LINEAR_DIRECT)
       ! Appel du solveur direct exact par décomposition LU
       call solve_direct(ns, mesh, cfg, fields_old, dt, b, x, iters)
