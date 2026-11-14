@@ -1,0 +1,40 @@
+---
+title: "COVOF 2D — Guide de Développement et Architecture Logicielle"
+subtitle: "SUBCOVOF 2D — Guide de Développement et Architecture Logicielle"
+author:
+  - "Équipe de Développement & Recherche COVOF 2D"
+  - "Direction Scientifique & Numérique"
+date: "\\today"
+lang: fr-FR
+documentclass: report
+classoption: [a4paper, 11pt, oneside]
+geometry: "top=2.0cm, bottom=2.0cm, left=2.0cm, right=2.0cm"
+toc: true
+toc-depth: 3
+lof: false
+lot: false
+numbersections: true
+colorlinks: true
+linkcolor: blue
+urlcolor: blue
+toccolor: black
+highlight-style: tango
+header-includes:
+  - \usepackage{amsmath, amssymb, amsfonts, mathtools}
+  - \usepackage{booktabs, longtable, array, multirow, tabularx}
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhead[L]{\leftmark}
+  - \fancyhead[R]{COVOF 2D — Guide de Développement}
+  - \fancyfoot[C]{\thepage}
+  - \usepackage{fvextra}
+  - \fvset{breaklines=true, breakanywhere=true, fontsize=\footnotesize}
+  - \RecustomVerbatimEnvironment{verbatim}{Verbatim}{breaklines=true, breakanywhere=true}
+  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+  - \usepackage[htt]{hyphenat}
+  - \usepackage{microtype}
+  - \setlength{\emergencystretch}{3em}
+  - \setlength{\tabcolsep}{4pt}
+  - \sloppy
+  - \raggedbottom
+---

@@ -6,8 +6,8 @@
 *.dylib
 
 # Build directories and executables
-build/
-bin/
+/build/
+/bin/
 CMakeCache.txt
 CMakeFiles/
 
@@ -18,3 +18,6 @@ CMakeFiles/
 output*/
 
 __pycache__/
+
+# Allow compiled PDFs in Guides_Tutos/build/
+!Guides_Tutos/build/*.pdf
