@@ -29,8 +29,9 @@ Avec le couplage **FC + SVOF + WY + CVI + Marqueurs** :
 | Paramètre | Spécification |
 | :--- | :--- |
 | Géométrie et Maillages | $\Omega = [0, 0.05] \times [0, 0.15]\,\mathrm{m}^2$, $R_0 = 0.01\,\mathrm{m}$, $(x_0, y_0) = (0.025, 0.12)\,\mathrm{m}$ ; Grilles $32\times 96$, $64\times 192$, $128\times 384$ |
-| Rapports rhéologiques | $r_\rho = \rho_2/\rho_1 \in \{10, 1000\}$, $r_\mu = \mu_2/\mu_1 \in \{10, 1000\}$ |
+| Rapports rhéologiques | $r_\rho = \rho_2/\rho_1 \in \{10, 1000, 10^6\}$, $r_\mu = \mu_2/\mu_1 \in \{10, 1000\}$ |
 | Solveurs comparés | `MONOLITHIC` (FC) vs `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (AAL) vs `STANDARD_PROJECTION` |
+| **Étude du Lissage SVOF de Helmholtz** | Comparaison systématique à $r_\rho = 1000$ : (1) Sans lissage (`enable_svof_smoothing: false`), (2) Lissage diffusif (`enable_diffusion_smoothing: true, diffusion_smoothing_steps: 3`), (3) **Lissage elliptique SVOF de Helmholtz (`enable_svof_smoothing: true`, `svof_filter_width` $k \in \{0.25, 0.5, 1.0\}$)** pour quantifier son effet sur les itérations BiCGStab(2) et la préservation du cercle |
 | Options Marqueurs | `use_markers: true`, `marker_advection_scheme: "CVI_RK2"`, `marker_normals_plic: true` vs `use_markers: false` |
 
 ### Prototype `case/cpp/cas_03_fc_wy_cvi_markers_64x192.json`

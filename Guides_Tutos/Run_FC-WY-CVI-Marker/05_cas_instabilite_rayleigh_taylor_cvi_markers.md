@@ -27,6 +27,7 @@ En phase non linéaire avancée, le panache descendant forme un champignon dont 
 | :--- | :---: | :---: | :--- |
 | **Axe A : Croissance linéaire et volutes non linéaires ($\sigma = 0$)** | $64\times 192$, $128\times 384$ | $\sigma = 0.0\,\mathrm{N/m}$ | `WY + PLIC` seul vs `WY + PLIC + CVI_RK2 (marker_normals_plic: true)` |
 | **Axe B : Stabilisation capillaire ($\sigma > 0$)** | $64\times 192$, $128\times 384$ | $\sigma \in \{0.005, 0.02\}\,\mathrm{N/m}$ | Courbure CSF standard vs Courbure parabolique sur marqueurs CVI (`marker_curvature: true`) |
+| **Axe C : Étude du Lissage SVOF de Helmholtz ($C_s$) vs Lissage Diffusif ($\widetilde{C}$)** | $64\times 192$, $128\times 384$ | $\sigma \in \{0.0, 0.005\}\,\mathrm{N/m}$ | Comparaison entre : (1) Sans lissage (`enable_svof_smoothing: false`), (2) Lissage diffusif (`enable_diffusion_smoothing: true, diffusion_smoothing_steps: 3`), (3) **Lissage SVOF de Helmholtz seul (`enable_svof_smoothing: true`, `svof_filter_width` $k \in \{0.5, 1.0\}$, `use_markers: false`)**, et (4) **Synergie SVOF de Helmholtz ($k = 0.5$) + Marqueurs CVI (`use_markers: true, marker_curvature: true`)** sur la finesse des spires de Kelvin-Helmholtz |
 
 ### Prototype `case/cpp/cas_05_rt_fc_wy_cvi_markers_128x384.json`
 ```json

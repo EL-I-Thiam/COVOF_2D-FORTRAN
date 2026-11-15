@@ -25,7 +25,8 @@ Dans le Régime (ii) ($Bo = 125, \sigma = 1.96\,\mathrm{N/m}$), le sillage tourb
 | :--- | :---: | :---: |
 | Propriétés physiques | $\rho_1=1000, \rho_2=100\,\mathrm{kg/m}^3$, $\mu_1=10, \mu_2=1\,\mathrm{Pa\cdot s}$, $\sigma=24.5\,\mathrm{N/m}$ | $\rho_1=1000, \rho_2=1\,\mathrm{kg/m}^3$, $\mu_1=10, \mu_2=0.1\,\mathrm{Pa\cdot s}$, $\sigma=1.96\,\mathrm{N/m}$ |
 | Séquence de grilles | $40\times 80$, $80\times 160$, $160\times 320$ | $80\times 160$, $160\times 320$ |
-| Configurations comparées | `VOF + CSF` standard vs `FC + WY + CVI + Marqueurs` | `VOF + CSF` standard vs `FC + WY + CVI + Marqueurs` |
+| **Étude du Lissage SVOF de Helmholtz** | `enable_svof_smoothing: false` vs `enable_diffusion_smoothing: true` (`steps: 3`) vs **Lissage SVOF de Helmholtz (`enable_svof_smoothing: true`, `svof_filter_width` $k \in \{0.5, 1.0\}$)** | Comparaison directe : (1) `VOF + CSF diffusif`, (2) **`VOF + CSF SVOF Helmholtz` ($k=0.5$)**, (3) `Marqueurs CVI sans SVOF`, (4) **Synergie `FC + WY + CVI + Marqueurs + SVOF Helmholtz` ($k=0.5$)** |
+| Configurations comparées | `VOF + CSF` (diffusif vs SVOF) vs `FC + WY + CVI + Marqueurs` (avec et sans SVOF) | `VOF + CSF` (diffusif vs SVOF) vs `FC + WY + CVI + Marqueurs` (avec et sans SVOF) |
 
 ### Prototype `case/cpp/cas_07_bulle_bo125_fc_cvi_markers_160x320.json`
 ```json

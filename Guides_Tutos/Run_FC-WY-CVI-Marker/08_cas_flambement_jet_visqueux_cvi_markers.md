@@ -24,11 +24,11 @@ $$Re = \frac{\rho_2 D V_0}{\mu_2} \le Re_c \approx 0.52 \qquad \text{et} \qquad 
 
 ## 3. Matrice des Trois Sous-Cas et Prototype `.json`
 
-| Sous-cas | $D$ ($\mathrm{m}$) | $\mu_2$ ($\mathrm{Pa\cdot s}$) | $V_0$ ($\mathrm{m/s}$) | $Re$ | Régime physique |
+| Sous-cas | $D$ ($\mathrm{m}$) | $\mu_2$ ($\mathrm{Pa\cdot s}$) | $V_0$ ($\mathrm{m/s}$) | $Re$ | Régime physique & Étude du Lissage SVOF |
 | :--- | :---: | :---: | :---: | :---: | :--- |
-| **Sous-cas 1** | $0.08$ | $500.0$ | $0.60$ | $0.1728$ | **Flambement périodique instable** et enroulements ($t_{\mathrm{final}} = 2.0\,\mathrm{s}$) |
-| **Sous-cas 2** | $0.10$ | $300.0$ | $1.00$ | $0.6000$ | **Étalement symétrique stable** sans flambement ($t_{\mathrm{final}} = 2.0\,\mathrm{s}$) |
-| **Sous-cas 3** | $0.10$ | $300.0$ | $6.00$ | $3.6000$ | **Impact inertiel symétrique** et remontée pariétale ($t_{\mathrm{final}} = 0.9\,\mathrm{s}$) |
+| **Sous-cas 1** | $0.08$ | $500.0$ | $0.60$ | $0.1728$ | **Flambement périodique instable** ($t_{\mathrm{final}} = 2.0\,\mathrm{s}$) — Tester : (1) Sans lissage (`enable_svof_smoothing: false`), (2) Lissage diffusif (`enable_diffusion_smoothing: true`), et (3) **Lissage elliptique SVOF de Helmholtz (`enable_svof_smoothing: true`, `svof_filter_width` $k \in \{0.5, 1.0, 1.5\}$)** couplé à `CVI_RK2` |
+| **Sous-cas 2** | $0.10$ | $300.0$ | $1.00$ | $0.6000$ | **Étalement symétrique stable** sans flambement ($t_{\mathrm{final}} = 2.0\,\mathrm{s}$) avec `enable_svof_smoothing: true` ($k = 1.0$) + `CVI_RK2` |
+| **Sous-cas 3** | $0.10$ | $300.0$ | $6.00$ | $3.6000$ | **Impact inertiel symétrique** et remontée pariétale ($t_{\mathrm{final}} = 0.9\,\mathrm{s}$) avec `enable_svof_smoothing: true` ($k = 1.0$) + `CVI_RK2` |
 
 ### Prototype `case/cpp/cas_08_re01728_fc_wy_cvi_markers_160x160.json`
 ```json

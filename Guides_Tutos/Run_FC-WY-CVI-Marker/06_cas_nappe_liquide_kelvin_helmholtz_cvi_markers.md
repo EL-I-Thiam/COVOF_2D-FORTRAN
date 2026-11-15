@@ -32,7 +32,8 @@ Lorsque l'instabilité de Kelvin-Helmholtz s'amplifie ($t \in [2\times 10^{-4}, 
 | Domaine et Nappe | $L_x = L_y = 0.003\,\mathrm{m}$, $y_c = 0.0015\,\mathrm{m}$, $\delta = 0.0003\,\mathrm{m}$ |
 | Rapports de densité | $r_\rho = \rho_2/\rho_1 \in \{100, 1000\}$, $\mu_1 = \mu_2 = 10^{-12}\,\mathrm{Pa\cdot s}$, $\sigma = 0$ |
 | Maillage et Temps | $64\times 64$ et $128\times 128$, $\Delta t = 10^{-6}\,\mathrm{s}$, $t_{\mathrm{final}} = 3\times 10^{-4}\,\mathrm{s}$ (et $5\times 10^{-4}\,\mathrm{s}$) |
-| Configurations comparées | `MONOLITHIC + WY + PLIC` seul vs `MONOLITHIC + WY + PLIC + CVI_RK2 (marker_normals_plic: true)` |
+| **Étude du Lissage SVOF de Helmholtz** | Comparaison à $r_\rho \in \{100, 1000\}$ entre : (1) Sans lissage (`enable_svof_smoothing: false`), (2) Lissage diffusif (`enable_diffusion_smoothing: true`), et (3) **Lissage elliptique SVOF de Helmholtz (`enable_svof_smoothing: true`, `svof_filter_width` $k \in \{0.5, 1.0\}$)** sur la conservation de $E_k(t)/E_k(0)$ et la régularité de l'enroulement |
+| Configurations comparées | `MONOLITHIC + WY + PLIC` (avec et sans SVOF) vs `MONOLITHIC + WY + PLIC + CVI_RK2 (marker_normals_plic: true)` (avec et sans SVOF) |
 
 ### Prototype `case/cpp/cas_06_liquid_sheet_fc_cvi_markers_r1000.json`
 ```json
@@ -51,7 +52,8 @@ Lorsque l'instabilité de Kelvin-Helmholtz s'amplifie ($t \in [2\times 10^{-4}, 
     "enable_convection": true,
     "convective_scheme": "CENTERED",
     "convective_linearization": "ADAMS_BASHFORTH",
-    "enable_svof_smoothing": false,
+    "enable_svof_smoothing": true,
+    "svof_filter_width": 0.5,
     "sigma": 0.0,
     "gx": 0.0,
     "gy": 0.0,

@@ -9,9 +9,11 @@ Ce cas évalue la capacité du couplage **Solveur Monolithique (FC) + VOF-PLIC (
 **Règles impératives :**
 1. Isolez toute la campagne dans `Validation_Totale/Run_CASES/Run_FC-WY-CVI-Marker/04_cas_oscillation_bulle_lamb_cvi_markers/` avec l'arborescence `case/`, `output/`, `figures/`, `scripts/`, `rapport/`.
 2. Comparez systématiquement sur les grilles $N \in \{64, 128, 256\}$ :
-   - **Configuration 1 (Référence VOF + CSF diffusif)** : `use_markers: false`, `enable_diffusion_smoothing: true` (`diffusion_smoothing_steps: 3`).
-   - **Configuration 2 (Hybride FC + WY + CVI + Marqueurs)** : `use_markers: true`, `marker_curvature: true`, `marker_advection_scheme: "CVI_RK2"`, sans lissage diffusif (`enable_diffusion_smoothing: false`).
-   - **Configuration 3 (Hybride avec interpolation bilinéaire non conservative)** : `use_markers: true`, `marker_advection_scheme: "BILINEAR_RK2"`, afin de démontrer le gain de la condition de Liouville ($\nabla \cdot \mathbf{u}_{\mathrm{CVI}} = 0$) sur la distribution des marqueurs aux pôles de l'ellipse après 3 périodes d'oscillation.
+   - **Configuration 1a (Référence VOF + CSF à lissage diffusif Laplacien $\widetilde{C}$)** : `use_markers: false`, `enable_diffusion_smoothing: true` (`diffusion_smoothing_steps: 3`), `enable_svof_smoothing: false`.
+   - **Configuration 1b (VOF + CSF à lissage elliptique SVOF de Helmholtz $C_s$)** : `use_markers: false`, `enable_svof_smoothing: true` (`svof_filter_width` $k \in \{0.5, 1.0\}$), `enable_diffusion_smoothing: false` (où $C_s - k\Delta x\Delta y\nabla^2 C_s = C$ sert à la fois au lissage rhéologique $\rho(C_s), \mu(C_s)$ et au calcul de $\kappa = -\nabla \cdot (\nabla C_s / \|\nabla C_s\|)$).
+   - **Configuration 2a (Hybride FC + WY + CVI + Marqueurs sans lissage SVOF)** : `use_markers: true`, `marker_curvature: true`, `marker_advection_scheme: "CVI_RK2"`, `enable_svof_smoothing: false`, `enable_diffusion_smoothing: false`.
+   - **Configuration 2b (Synergie optimale : Hybride FC + WY + CVI + Marqueurs + Lissage rhéologique SVOF de Helmholtz)** : `use_markers: true`, `marker_curvature: true`, `marker_advection_scheme: "CVI_RK2"`, `enable_svof_smoothing: true` (`svof_filter_width: 0.5`), `enable_diffusion_smoothing: false` (régularisation elliptique de $\rho(C_s), \mu(C_s)$ à $\rho_1/\rho_2 = 5950$ tout en conservant la courbure parabolique sous-maille $\kappa^{\mathrm{marker}}$ et le saut capillaire raide $\nabla C$).
+   - **Configuration 3 (Hybride avec interpolation bilinéaire non conservative)** : `use_markers: true`, `marker_advection_scheme: "BILINEAR_RK2"`, `enable_svof_smoothing: true` (`svof_filter_width: 0.5`), afin de démontrer le gain de la condition de Liouville ($\nabla \cdot \mathbf{u}_{\mathrm{CVI}} = 0$) sur la distribution des marqueurs aux pôles de l'ellipse après 3 périodes d'oscillation.
 
 ---
 

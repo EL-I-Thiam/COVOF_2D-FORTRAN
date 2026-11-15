@@ -189,8 +189,9 @@ def test_palier_1_cvi_divergence():
     assert max_div_err_cvi_fd < 1.0e-10, "CVI Variante B finite-difference divergence exceeds tolerance!"
 
 
-def run_young_laplace_case(bin_path, engine_name, nx, use_markers, np_procs=1):
-    tag = f"{engine_name}_YL_N{nx}_{'MARKERS' if use_markers else 'CSF_STD'}_np{np_procs}"
+def run_young_laplace_case(bin_path, engine_name, nx, use_markers, enable_svof=False, np_procs=1):
+    svof_tag = "_SVOF" if enable_svof else ""
+    tag = f"{engine_name}_YL_N{nx}_{'MARKERS' if use_markers else 'CSF_STD'}{svof_tag}_np{np_procs}"
     out_dir = os.path.join(WORK_DIR, tag)
     if os.path.exists(out_dir):
         shutil.rmtree(out_dir)
@@ -204,6 +205,8 @@ def run_young_laplace_case(bin_path, engine_name, nx, use_markers, np_procs=1):
             "enable_surface_tension": True,
             "enable_convection": False,
             "enable_energy": False,
+            "enable_svof_smoothing": enable_svof,
+            "svof_filter_width": 0.5,
             "enable_diffusion_smoothing": False,
             "sigma": 1.0,
             "gx": 0.0,
@@ -390,11 +393,15 @@ def main():
     print("=" * 72)
     for eng, bpath in [("FORTRAN", BIN_FORTRAN), ("CPP", BIN_CPP)]:
         for nx in [32, 64]:
-            r_std = run_young_laplace_case(bpath, eng, nx, use_markers=False, np_procs=1)
-            r_hyb = run_young_laplace_case(bpath, eng, nx, use_markers=True, np_procs=1)
+            r_std = run_young_laplace_case(bpath, eng, nx, use_markers=False, enable_svof=False, np_procs=1)
+            r_svof = run_young_laplace_case(bpath, eng, nx, use_markers=False, enable_svof=True, np_procs=1)
+            r_hyb = run_young_laplace_case(bpath, eng, nx, use_markers=True, enable_svof=False, np_procs=1)
+            r_hyb_svof = run_young_laplace_case(bpath, eng, nx, use_markers=True, enable_svof=True, np_procs=1)
             print(f"[{eng} {nx}x{nx}]")
-            print(f"  CSF Standard (use_markers=false) : <kappa>={r_std['k_mean']:.4f} (Err L2={r_std['k_l2_err']*100:.2f}%, Linf={r_std['k_linf_err']*100:.2f}%) | dP={r_std['dp_num']:.4f} (Err={r_std['dp_err_rel']*100:.2f}%) | ||u||_inf={r_std['u_max']:.3e}")
+            print(f"  CSF Brut (sans lissage)          : <kappa>={r_std['k_mean']:.4f} (Err L2={r_std['k_l2_err']*100:.2f}%, Linf={r_std['k_linf_err']*100:.2f}%) | dP={r_std['dp_num']:.4f} (Err={r_std['dp_err_rel']*100:.2f}%) | ||u||_inf={r_std['u_max']:.3e}")
+            print(f"  CSF + Lissage SVOF (k=0.5)       : <kappa>={r_svof['k_mean']:.4f} (Err L2={r_svof['k_l2_err']*100:.2f}%, Linf={r_svof['k_linf_err']*100:.2f}%) | dP={r_svof['dp_num']:.4f} (Err={r_svof['dp_err_rel']*100:.2f}%) | ||u||_inf={r_svof['u_max']:.3e}")
             print(f"  Hybride CVI+Marqueurs            : <kappa>={r_hyb['k_mean']:.4f} (Err L2={r_hyb['k_l2_err']*100:.2f}%, Linf={r_hyb['k_linf_err']*100:.2f}%) | dP={r_hyb['dp_num']:.4f} (Err={r_hyb['dp_err_rel']*100:.2f}%) | ||u||_inf={r_hyb['u_max']:.3e} | Marqueurs={r_hyb['n_markers']}")
+            print(f"  Hybride CVI+Marqueurs + SVOF     : <kappa>={r_hyb_svof['k_mean']:.4f} (Err L2={r_hyb_svof['k_l2_err']*100:.2f}%, Linf={r_hyb_svof['k_linf_err']*100:.2f}%) | dP={r_hyb_svof['dp_num']:.4f} (Err={r_hyb_svof['dp_err_rel']*100:.2f}%) | ||u||_inf={r_hyb_svof['u_max']:.3e} | Marqueurs={r_hyb_svof['n_markers']}")
             assert r_hyb["k_l2_err"] < r_std["k_l2_err"], f"{eng}: Marker curvature L2 error should be smaller than unsmoothed CSF!"
             assert r_hyb["u_max"] < r_std["u_max"], f"{eng}: Spurious currents should be reduced with marker curvature!"
 
