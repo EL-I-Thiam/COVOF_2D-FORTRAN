@@ -171,39 +171,48 @@ En sommant ces deux dérivées, même si la divergence moyenne est nulle, il sub
 
 $$\nabla \cdot \mathbf{u}_{\text{bilin}}(\xi, \eta) = \left(\eta - \frac{1}{2}\right)\frac{\Delta u_N - \Delta u_S}{\Delta x} + \left(\xi - \frac{1}{2}\right)\frac{\Delta v_E - \Delta v_W}{\Delta y} \neq 0.$$
 
-### C. Formulation Mathématique Exacte de l'Interpolation CVI pour `COVOF_2D`
-Pour annuler identiquement ce résidu en tout point $(\xi, \eta) \in [0, 1]^2$, on remarque que :
+### C. Formulation Mathématique Exacte de l'Interpolation CVI pour `COVOF_2D` (Variante B — Boîtes Décalées MAC)
 
-$$\frac{\partial}{\partial x}\left[ \frac{1}{2}\xi(1 - \xi) \right] = \frac{1 - 2\xi}{2\Delta x} = -\frac{\xi - \frac{1}{2}}{\Delta x}, \qquad \frac{\partial}{\partial y}\left[ \frac{1}{2}\eta(1 - \eta) \right] = \frac{1 - 2\eta}{2\Delta y} = -\frac{\eta - \frac{1}{2}}{\Delta y}.$$
+Sur une grille décalée MAC 2D où chaque cellule de pression $(i,j) \in [1, N_x] \times [1, N_y]$ couvre $[x_i^f, x_{i+1}^f] \times [y_j^f, y_{j+1}^f]$ de centre $(x_i^c, y_j^c) = \left(x_i^f + \frac{\Delta x}{2}, y_j^f + \frac{\Delta y}{2}\right)$ et possède un halo unique `(0:nx+1, 0:ny+1)`, il convient d'écarter l'approximation centrée sur la cellule de pression (dite *Variante A*, qui définit $u_{SW}, u_{SE}, u_{NW}, u_{NE}$ par moyenne de 2 faces adjacentes sur $(i,j)$). En effet, dans la Variante A, la divergence moyenne combine un filtrage vertical de $\partial_x u$ sur $\{j-1, j, j+1\}$ et un filtrage horizontal de $\partial_y v$ sur $\{i-1, i, i+1\}$, ce qui **ne vérifie pas** $\nabla \cdot \mathbf{u}_{\text{CVI}} \equiv 0$ exactement lorsque $D_{k,l} = 0$.
 
-L'**Interpolation Conservative de Vitesse (CVI)** ([Wang et al., 2015](https://pmc.ncbi.nlm.nih.gov/articles/PMC5089062/) ; [Pusok et al., 2017](https://www.researchgate.net/publication/311165935_On_the_Quality_of_Velocity_Interpolation_Schemes_for_Marker-in-Cell_Method_and_Staggered_Grids)) consiste donc à ajouter à $u_{\text{bilin}}$ le terme quadratique en $\xi(1-\xi)$ qui compense la variation en $\xi$ de $\partial_y v_{\text{bilin}}$, et à ajouter à $v_{\text{bilin}}$ le terme quadratique en $\eta(1-\eta)$ qui compense la variation en $\eta$ de $\partial_x u_{\text{bilin}}$ :
+L'**option retenue et implémentée dans `COVOF_2D` est la Variante B exacte** ([Wang et al., 2015](https://pmc.ncbi.nlm.nih.gov/articles/PMC5089062/) ; [Pusok et al., 2017](https://www.researchgate.net/publication/311165935_On_the_Quality_of_Velocity_Interpolation_Schemes_for_Marker-in-Cell_Method_and_Staggered_Grids)), qui interpole chaque composante de vitesse sur **sa propre boîte décalée MAC** :
 
-$$u_{\text{CVI}}(\xi, \eta) = u_{\text{bilin}}(\xi, \eta) + \frac{\Delta x}{2 \Delta y} \, \xi(1 - \xi) \left( \Delta v_E - \Delta v_W \right),$$
+1. **Boîte décalée horizontale pour $u$** : $\Omega_u(i, j_u) = [x_i^f, x_{i+1}^f] \times [y_{j_u}^c, y_{j_u+1}^c]$, avec :
+   $$j_u = \begin{cases} j - 1 & \text{si } y_p < y_j^c, \\ j & \text{si } y_p \ge y_j^c, \end{cases} \qquad \xi_u = \frac{x_p - x_i^f}{\Delta x} \in [0, 1], \qquad \eta_u = \frac{y_p - y_{j_u}^c}{\Delta y} \in [0, 1].$$
+   Les 4 sommets de $\Omega_u(i, j_u)$ sont les nœuds MAC natifs $u_{i, j_u}, u_{i+1, j_u}, u_{i, j_u+1}, u_{i+1, j_u+1}$, d'accroissements longitudinaux :
+   $$\Delta u_S = u_{i+1, j_u} - u_{i, j_u}, \qquad \Delta u_N = u_{i+1, j_u+1} - u_{i, j_u+1}.$$
 
-$$v_{\text{CVI}}(\xi, \eta) = v_{\text{bilin}}(\xi, \eta) + \frac{\Delta y}{2 \Delta x} \, \eta(1 - \eta) \left( \Delta u_N - \Delta u_S \right).$$
+2. **Boîte décalée verticale pour $v$** : $\Omega_v(i_v, j) = [x_{i_v}^c, x_{i_v+1}^c] \times [y_j^f, y_{j+1}^f]$, avec :
+   $$i_v = \begin{cases} i - 1 & \text{si } x_p < x_i^c, \\ i & \text{si } x_p \ge x_i^c, \end{cases} \qquad \xi_v = \frac{x_p - x_{i_v}^c}{\Delta x} \in [0, 1], \qquad \eta_v = \frac{y_p - y_j^f}{\Delta y} \in [0, 1].$$
+   Les 4 sommets de $\Omega_v(i_v, j)$ sont les nœuds MAC natifs $v_{i_v, j}, v_{i_v+1, j}, v_{i_v, j+1}, v_{i_v+1, j+1}$, d'accroissements longitudinaux :
+   $$\Delta v_W = v_{i_v, j+1} - v_{i_v, j}, \qquad \Delta v_E = v_{i_v+1, j+1} - v_{i_v+1, j}.$$
 
-**Preuve directe de divergence analytique nulle :**
-En dérivant analytiquement $u_{\text{CVI}}$ par rapport à $x$ et $v_{\text{CVI}}$ par rapport à $y$ :
+3. **Interpolations bilinéaires continues sur chaque boîte décalée** :
+   $$u_{\text{bilin}}(\xi_u, \eta_u) = (1 - \eta_u)\left[(1 - \xi_u)u_{i, j_u} + \xi_u u_{i+1, j_u}\right] + \eta_u\left[(1 - \xi_u)u_{i, j_u+1} + \xi_u u_{i+1, j_u+1}\right],$$
+   $$v_{\text{bilin}}(\xi_v, \eta_v) = (1 - \xi_v)\left[(1 - \eta_v)v_{i_v, j} + \eta_v v_{i_v, j+1}\right] + \xi_v\left[(1 - \eta_v)v_{i_v+1, j} + \eta_v v_{i_v+1, j+1}\right].$$
+   Dans la cellule $(i,j)$, que le marqueur se trouve dans la moitié supérieure ($j_u = j$, où $\eta_u = \eta_v - \frac{1}{2}$) ou inférieure ($j_u = j-1$, où $1 - \eta_u = \frac{1}{2} - \eta_v$), et dans la moitié droite ($i_v = i$, où $\xi_v = \xi_u - \frac{1}{2}$) ou gauche ($i_v = i-1$, où $1 - \xi_v = \frac{1}{2} - \xi_u$), les dérivées partielles s'écrivent de façon **uniforme sur les 4 sous-quadrants de $(i,j)$** :
+   $$\frac{\partial u_{\text{bilin}}}{\partial x} = \frac{u_{i+1, j} - u_{i, j}}{\Delta x} + \left(\eta_v - \frac{1}{2}\right)\frac{\Delta u_N - \Delta u_S}{\Delta x},$$
+   $$\frac{\partial v_{\text{bilin}}}{\partial y} = \frac{v_{i, j+1} - v_{i, j}}{\Delta y} + \left(\xi_u - \frac{1}{2}\right)\frac{\Delta v_E - \Delta v_W}{\Delta y}.$$
 
-$$\frac{\partial u_{\text{CVI}}}{\partial x}(\xi, \eta) = \frac{\Delta u_S + \Delta u_N}{2 \Delta x} + \left(\eta - \frac{1}{2}\right)\frac{\Delta u_N - \Delta u_S}{\Delta x} - \left(\xi - \frac{1}{2}\right)\frac{\Delta v_E - \Delta v_W}{\Delta y},$$
+4. **Correction quadratique CVI exacte issue de la divergence discrète MAC $D_{k,l} = 0$** :
+   En vertu de la divergence discrète exacte des cellules MAC ($D_{k,l} = \frac{u_{k+1,l}-u_{k,l}}{\Delta x} + \frac{v_{k,l+1}-v_{k,l}}{\Delta y} = 0$), qui lie $\frac{\Delta u_S}{\Delta x} = D_{i,j_u} - \frac{v_{i,j_u+1}-v_{i,j_u}}{\Delta y}$ et $\frac{\Delta v_W}{\Delta y} = D_{i_v,j} - \frac{u_{i_v+1,j}-u_{i_v,j}}{\Delta x}$, et puisque :
+   $$\frac{\partial}{\partial x}\left[ \frac{1}{2}\xi_u(1 - \xi_u) \right] = -\frac{\xi_u - \frac{1}{2}}{\Delta x}, \qquad \frac{\partial}{\partial y}\left[ \frac{1}{2}\eta_v(1 - \eta_v) \right] = -\frac{\eta_v - \frac{1}{2}}{\Delta y},$$
+   l'**Interpolation Conservative de Vitesse (CVI)** ajoute les termes quadratiques exacts :
+   $$u_{\text{CVI}}(x_p, y_p) = u_{\text{bilin}}(\xi_u, \eta_u) + \frac{\Delta x}{2 \Delta y} \, \xi_u(1 - \xi_u) \left( \Delta v_E - \Delta v_W \right),$$
+   $$v_{\text{CVI}}(x_p, y_p) = v_{\text{bilin}}(\xi_v, \eta_v) + \frac{\Delta y}{2 \Delta x} \, \eta_v(1 - \eta_v) \left( \Delta u_N - \Delta u_S \right).$$
 
-$$\frac{\partial v_{\text{CVI}}}{\partial y}(\xi, \eta) = \frac{\Delta v_W + \Delta v_E}{2 \Delta y} + \left(\xi - \frac{1}{2}\right)\frac{\Delta v_E - \Delta v_W}{\Delta y} - \left(\eta - \frac{1}{2}\right)\frac{\Delta u_N - \Delta u_S}{\Delta x}.$$
+**Preuve directe de divergence analytique nulle et conformité au halo `0:nx+1, 0:ny+1` :**
+En dérivant analytiquement $u_{\text{CVI}}$ par rapport à $x$ et $v_{\text{CVI}}$ par rapport à $y$ dans chacun des 4 sous-quadrants $(i_v \in \{i-1, i\}, j_u \in \{j-1, j\})$ de la cellule $(i,j)$ :
 
-Par addition terme à terme, les variations linéaires en $(\xi - 1/2)$ et $(\eta - 1/2)$ s'éliminent **exactement** pour tout $(\xi, \eta) \in [0, 1]^2$, laissant uniquement la divergence discrète :
+$$\frac{\partial u_{\text{CVI}}}{\partial x}(x_p, y_p) = \frac{u_{i+1, j} - u_{i, j}}{\Delta x} + \left(\eta_v - \frac{1}{2}\right)\frac{\Delta u_N - \Delta u_S}{\Delta x} - \left(\xi_u - \frac{1}{2}\right)\frac{\Delta v_E - \Delta v_W}{\Delta y},$$
 
-$$\nabla \cdot \mathbf{u}_{\text{CVI}}(\xi, \eta) \equiv \frac{\Delta u_S + \Delta u_N}{2 \Delta x} + \frac{\Delta v_W + \Delta v_E}{2 \Delta y} = 0.$$
+$$\frac{\partial v_{\text{CVI}}}{\partial y}(x_p, y_p) = \frac{v_{i, j+1} - v_{i, j}}{\Delta y} + \left(\xi_u - \frac{1}{2}\right)\frac{\Delta v_E - \Delta v_W}{\Delta y} - \left(\eta_v - \frac{1}{2}\right)\frac{\Delta u_N - \Delta u_S}{\Delta x}.$$
 
-**Adaptation exacte aux cellules de pression $(i,j)$ de `COVOF_2D` (Halo de largeur 1) :**
-Dans `COVOF_2D`, où la cellule $(i,j)$ possède un halo unique `(0:nx+1, 0:ny+1)`, on peut construire la CVI :
+Par addition terme à terme, les variations linéaires en $(\xi_u - 1/2)$ et $(\eta_v - 1/2)$ s'annulent **identiquement**, laissant uniquement la divergence discrète exacte de la cellule MAC $(i,j)$ :
 
-- **Variante A (Par cellule de pression $(i,j)$, $C^0$ aux sommets)** : Les valeurs aux 4 coins $(SW, SE, NW, NE)$ de la cellule $(i,j)$ sont obtenues par moyenne sur les faces adjacentes :
-  $$u_{SW} = \frac{u_{i,j-1} + u_{i,j}}{2}, \quad u_{SE} = \frac{u_{i+1,j-1} + u_{i+1,j}}{2}, \quad u_{NW} = \frac{u_{i,j} + u_{i,j+1}}{2}, \quad u_{NE} = \frac{u_{i+1,j} + u_{i+1,j+1}}{2},$$
-  $$v_{SW} = \frac{v_{i-1,j} + v_{i,j}}{2}, \quad v_{SE} = \frac{v_{i,j} + v_{i+1,j}}{2}, \quad v_{NW} = \frac{v_{i-1,j+1} + v_{i,j+1}}{2}, \quad v_{NE} = \frac{v_{i,j+1} + v_{i+1,j+1}}{2}.$$
-  Alors $\frac{\Delta u_S + \Delta u_N}{2\Delta x} + \frac{\Delta v_W + \Delta v_E}{2\Delta y} = \frac{1}{4}\left(D_{i,j-1} + 2 D_{i,j} + D_{i,j+1}\right) + \dots = 0$ dès que $D_{k,l} = 0$ dans la cellule et ses 4 voisines ! De plus, tous les indices $(i\pm 1, j\pm 1)$ pour $(i,j) \in [1, N_x] \times [1, N_y]$ appartiennent **strictement** à `[0:nx+1, 0:ny+1]` sans jamais déborder en `nx+2` !
+$$\nabla \cdot \mathbf{u}_{\text{CVI}}(x_p, y_p) \equiv \frac{u_{i+1, j} - u_{i, j}}{\Delta x} + \frac{v_{i, j+1} - v_{i, j}}{\Delta y} \equiv D_{i,j} = 0.$$
 
-- **Variante B (Par boîtes décalées de Pusok et al., 2017)** : On interpole $u$ dans la cellule décalée en $y$ encadrant le marqueur ($y \in [y_j^c, y_{j+1}^c]$ si $\eta \ge 0.5$, ou $[y_{j-1}^c, y_j^c]$ si $\eta < 0.5$) avec $\Delta u_S = u_{i+1,j} - u_{i,j}$ et $\Delta u_N = u_{i+1,j+1} - u_{i,j+1}$, et symétriquement pour $v$ dans la cellule décalée en $x$ ($x \in [x_i^c, x_{i+1}^c]$ ou $[x_{i-1}^c, x_i^c]$) :
-  $$u_{\text{CVI}}(\xi_u, \eta_u) = (1 - \eta_u)\left[(1-\xi_u)u_{i,j_u} + \xi_u u_{i+1,j_u}\right] + \eta_u\left[(1-\xi_u)u_{i,j_u+1} + \xi_u u_{i+1,j_u+1}\right],$$
-  corrigé par le terme quadratique en $\xi_u(1-\xi_u)$ issu de la divergence nulle de $D_{i,j_u}$ et $D_{i,j_u+1}$. Les deux variantes utilisent uniquement les indices `0` à `nx+1` et garantissent $\nabla \cdot \mathbf{u}_{\text{CVI}} \equiv 0$.
+En 2D, puisque $i \in [1, N_x] \implies i_v \in \{i-1, i\} \subset [0, N_x]$ et $j \in [1, N_y] \implies j_u \in \{j-1, j\} \subset [0, N_y]$, tous les indices requis $(i, j_u), (i+1, j_u+1), (i_v, j), (i_v+1, j+1)$ restent **strictement dans `0:nx+1, 0:ny+1`**, et l'annulation de $\partial_x u_{\text{CVI}} + \partial_y v_{\text{CVI}}$ est exacte à la précision machine ($10^{-16}$ analytiquement, $< 10^{-12}$ par différences finies centrées) dès que $D_{k,l} = 0$.
 
 ---
 

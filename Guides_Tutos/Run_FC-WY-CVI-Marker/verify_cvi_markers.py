@@ -81,41 +81,112 @@ def parse_markers_vtk(vtk_path):
 
 def test_palier_1_cvi_divergence():
     print("=" * 72)
-    print("PALIER 1 : Verification mathematique de l'interpolation CVI (div u_CVI = 0)")
+    print("PALIER 1 : Verification mathematique CVI Variante B (Wang 2015 / Pusok 2017)")
     print("=" * 72)
     random.seed(42)
     dx, dy = 0.03125, 0.025
-    max_div_err_cvi = 0.0
+    max_div_err_cvi_analytic = 0.0
+    max_div_err_cvi_fd = 0.0
     max_div_err_bilin = 0.0
+    max_div_err_var_a = 0.0
 
     for _ in range(5000):
-        u_W = random.uniform(-2.0, 2.0)
-        u_E = random.uniform(-2.0, 2.0)
-        v_S = random.uniform(-2.0, 2.0)
-        v_N = v_S - (dy / dx) * (u_E - u_W)
+        # Construire un bloc 3x3 de cellules MAC (i-1..i+1, j-1..j+1) a divergence discrete exacte D_{k,l} = 0
+        # u de taille (4, 3) pour i in 0..3 (faces), j in 0..2 (cellules)
+        # v de taille (3, 4) pour i in 0..2 (cellules), j in 0..3 (faces)
+        u = np.random.uniform(-2.0, 2.0, size=(4, 3))
+        v = np.random.uniform(-2.0, 2.0, size=(3, 4))
+        for kl_i in range(3):
+            for kl_j in range(3):
+                # Imposer D_{kl_i, kl_j} = (u[kl_i+1, kl_j] - u[kl_i, kl_j])/dx + (v[kl_i, kl_j+1] - v[kl_i, kl_j])/dy == 0
+                v[kl_i, kl_j + 1] = v[kl_i, kl_j] - (dy / dx) * (u[kl_i + 1, kl_j] - u[kl_i, kl_j])
 
-        du_W = random.uniform(-1.0, 1.0)
-        du_E = random.uniform(-1.0, 1.0)
-        dv_S = random.uniform(-1.0, 1.0)
-        dv_N = random.uniform(-1.0, 1.0)
+        # Cellule centrale (i=1, j=1) : tester un point aleatoire dans l'un des 4 sous-quadrants
+        # (en evitant de chevaucher les lignes medianes x=x_c, y=y_c pour le stencil DF eps=1e-7)
+        quad_x = random.choice([0, 1])
+        quad_y = random.choice([0, 1])
+        xi = random.uniform(0.05, 0.45) if quad_x == 0 else random.uniform(0.55, 0.95)
+        eta = random.uniform(0.05, 0.45) if quad_y == 0 else random.uniform(0.55, 0.95)
 
-        xi = random.uniform(0.0, 1.0)
-        eta = random.uniform(0.0, 1.0)
+        def eval_var_b(xi_loc, eta_loc, use_cvi=True):
+            i, j = 1, 1
+            j_u = j - 1 if eta_loc < 0.5 else j
+            i_v = i - 1 if xi_loc < 0.5 else i
+            xi_u = xi_loc
+            eta_u = eta_loc + 0.5 if j_u == j - 1 else eta_loc - 0.5
+            xi_v = xi_loc + 0.5 if i_v == i - 1 else xi_loc - 0.5
+            eta_v = eta_loc
 
-        du_bilin_dx = ((u_E + (eta - 0.5) * du_E) - (u_W + (eta - 0.5) * du_W)) / dx
-        dv_bilin_dy = ((v_N + (xi - 0.5) * dv_N) - (v_S + (xi - 0.5) * dv_S)) / dy
+            u_sw, u_se = u[i, j_u], u[i + 1, j_u]
+            u_nw, u_ne = u[i, j_u + 1], u[i + 1, j_u + 1]
+            v_sw, v_se = v[i_v, j], v[i_v + 1, j]
+            v_nw, v_ne = v[i_v, j + 1], v[i_v + 1, j + 1]
+
+            du_s = u_se - u_sw
+            du_n = u_ne - u_nw
+            dv_w = v_nw - v_sw
+            dv_e = v_ne - v_se
+
+            u_b = (1.0 - eta_u) * ((1.0 - xi_u) * u_sw + xi_u * u_se) + eta_u * ((1.0 - xi_u) * u_nw + xi_u * u_ne)
+            v_b = (1.0 - xi_v) * ((1.0 - eta_v) * v_sw + eta_v * v_nw) + xi_v * ((1.0 - eta_v) * v_se + eta_v * v_ne)
+            if not use_cvi:
+                return u_b, v_b
+            u_c = u_b + 0.5 * (dx / dy) * xi_u * (1.0 - xi_u) * (dv_e - dv_w)
+            v_c = v_b + 0.5 * (dy / dx) * eta_v * (1.0 - eta_v) * (du_n - du_s)
+            return u_c, v_c
+
+        # Divergence analytique de la Variante B
+        i, j = 1, 1
+        j_u = j - 1 if eta < 0.5 else j
+        i_v = i - 1 if xi < 0.5 else i
+        xi_u = xi
+        eta_u = eta + 0.5 if j_u == j - 1 else eta - 0.5
+        xi_v = xi + 0.5 if i_v == i - 1 else xi - 0.5
+        eta_v = eta
+        du_s = u[i + 1, j_u] - u[i, j_u]
+        du_n = u[i + 1, j_u + 1] - u[i, j_u + 1]
+        dv_w = v[i_v, j + 1] - v[i_v, j]
+        dv_e = v[i_v + 1, j + 1] - v[i_v + 1, j]
+
+        du_bilin_dx = ((1.0 - eta_u) * du_s + eta_u * du_n) / dx
+        dv_bilin_dy = ((1.0 - xi_v) * dv_w + xi_v * dv_e) / dy
         div_bilin = du_bilin_dx + dv_bilin_dy
 
-        dcorr_u_dx = (0.5 / dy) * (1.0 - 2.0 * xi) * (dv_N - dv_S)
-        dcorr_v_dy = (0.5 / dx) * (1.0 - 2.0 * eta) * (du_E - du_W)
-        div_cvi = div_bilin + dcorr_u_dx + dcorr_v_dy
+        dcorr_u_dx = (0.5 / dy) * (1.0 - 2.0 * xi_u) * (dv_e - dv_w)
+        dcorr_v_dy = (0.5 / dx) * (1.0 - 2.0 * eta_v) * (du_n - du_s)
+        div_cvi_analytic = div_bilin + dcorr_u_dx + dcorr_v_dy
 
-        max_div_err_cvi = max(max_div_err_cvi, abs(div_cvi))
+        # Verification par differences finies centrees (sans erreur de troncature sur polynome quadratique)
+        eps_x = 1.0e-3 * dx
+        eps_y = 1.0e-3 * dy
+        u_xp, _ = eval_var_b(xi + eps_x / dx, eta, True)
+        u_xm, _ = eval_var_b(xi - eps_x / dx, eta, True)
+        _, v_yp = eval_var_b(xi, eta + eps_y / dy, True)
+        _, v_ym = eval_var_b(xi, eta - eps_y / dy, True)
+        div_cvi_fd = (u_xp - u_xm) / (2.0 * eps_x) + (v_yp - v_ym) / (2.0 * eps_y)
+
+        # Comparaison avec Variante A (moyenne de 2 faces adjacentes aux coins)
+        u_sw_a = 0.5 * (u[i, j - 1] + u[i, j])
+        u_se_a = 0.5 * (u[i + 1, j - 1] + u[i + 1, j])
+        u_nw_a = 0.5 * (u[i, j] + u[i, j + 1])
+        u_ne_a = 0.5 * (u[i + 1, j] + u[i + 1, j + 1])
+        v_sw_a = 0.5 * (v[i - 1, j] + v[i, j])
+        v_se_a = 0.5 * (v[i, j] + v[i + 1, j])
+        v_nw_a = 0.5 * (v[i - 1, j + 1] + v[i, j + 1])
+        v_ne_a = 0.5 * (v[i, j + 1] + v[i + 1, j + 1])
+        div_var_a = ((u_se_a - u_sw_a) + (u_ne_a - u_nw_a)) / (2.0 * dx) + ((v_nw_a - v_sw_a) + (v_ne_a - v_se_a)) / (2.0 * dy)
+
+        max_div_err_cvi_analytic = max(max_div_err_cvi_analytic, abs(div_cvi_analytic))
+        max_div_err_cvi_fd = max(max_div_err_cvi_fd, abs(div_cvi_fd))
         max_div_err_bilin = max(max_div_err_bilin, abs(div_bilin))
+        max_div_err_var_a = max(max_div_err_var_a, abs(div_var_a))
 
-    print(f"  Erreur max |div(u_Bilineaire)| : {max_div_err_bilin:.6e} s^-1 (Violation O(h))")
-    print(f"  Erreur max |div(u_CVI)|        : {max_div_err_cvi:.6e} s^-1 (Zero machine exact)")
-    assert max_div_err_cvi < 1.0e-13, "CVI divergence is not machine zero!"
+    print(f"  Erreur max |div(u_Bilineaire)|          : {max_div_err_bilin:.6e} s^-1 (Violation O(h))")
+    print(f"  Erreur max |div(u_CVI Variante A)|      : {max_div_err_var_a:.6e} s^-1 (Non nulle : moyenne 2 faces)")
+    print(f"  Erreur max |div(u_CVI Variante B)| (DF) : {max_div_err_cvi_fd:.6e} s^-1 (Exact a < 1e-11)")
+    print(f"  Erreur max |div(u_CVI Variante B)| (An) : {max_div_err_cvi_analytic:.6e} s^-1 (Zero machine exact)")
+    assert max_div_err_cvi_analytic < 1.0e-13, "CVI Variante B analytical divergence is not machine zero!"
+    assert max_div_err_cvi_fd < 1.0e-10, "CVI Variante B finite-difference divergence exceeds tolerance!"
 
 
 def run_young_laplace_case(bin_path, engine_name, nx, use_markers, np_procs=1):

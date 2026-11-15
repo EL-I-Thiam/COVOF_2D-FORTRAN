@@ -119,43 +119,59 @@ Ajouter la sous-routine publique `clip_segment_in_cell` qui calcule les deux ext
   end type marker_cloud_t
 ```
 
-2. **Interpolation Conservative de Vitesse (`interpolate_velocity_cvi`)** :
-   Pour une position $(x, y)$ dans le sous-domaine local, identifier la cellule de pression $(i, j)$ :
-   $$i = \max\left(1, \min\left(N_x, \left\lfloor \frac{x - x_{\min,\text{loc}}}{\Delta x} \right\rfloor + 1\right)\right), \quad j = \max\left(1, \min\left(N_y, \left\lfloor \frac{y - y_{\min,\text{loc}}}{\Delta y} \right\rfloor + 1\right)\right),$$
-   et les coordonnées locales réduites $\xi = \frac{x - x_{\text{face}}(i)}{\Delta x} \in [0, 1]$, $\eta = \frac{y - y_{\text{face}}(j)}{\Delta y} \in [0, 1]$.
-   Pour interpoler $u(x,y)$ et $v(x,y)$ avec continuité aux faces et divergence analytiquement nulle dans la cellule $(i,j)$ :
-   - Sur la grille décalée, la divergence discrète dans $(i,j)$ est $D_{i,j} = \frac{u_{i+1,j}-u_{i,j}}{\Delta x} + \frac{v_{i,j+1}-v_{i,j}}{\Delta y} = 0$.
-   - En utilisant les vitesses aux 4 coins de la cellule $(i,j)$ (Variante A, Section 2.5.C) ou les boîtes décalées (Variante B de Pusok et al., 2017) :
+2. **Interpolation Conservative de Vitesse — Variante B Exacte par Boîtes Décalées (`interpolate_velocity_cvi`)** :
+   Pour une position $(x, y)$ dans le sous-domaine local, identifier la cellule de pression $(i, j) \in [1, N_x] \times [1, N_y]$ :
+   $$i = \max\left(1, \min\left(N_x, \left\lfloor \frac{x - x_{\min,\text{loc}}}{\Delta x} \right\rfloor + 1\right)\right), \quad j = \max\left(1, \min\left(N_y, \left\lfloor \frac{y - y_{\min,\text{loc}}}{\Delta y} \right\rfloor + 1\right)\right).$$
+   Contrairement à la Variante A (qui moyenne 2 faces adjacentes aux coins de $(i,j)$ et ne vérifie pas $\nabla \cdot \mathbf{u}_{\text{CVI}} \equiv 0$ exactement), on implémente la **Variante B exacte** ([Wang et al., 2015](https://pmc.ncbi.nlm.nih.gov/articles/PMC5089062/) ; [Pusok et al., 2017](https://www.researchgate.net/publication/311165935_On_the_Quality_of_Velocity_Interpolation_Schemes_for_Marker-in-Cell_Method_and_Staggered_Grids)) :
+   - Interpoler $u$ sur sa propre boîte décalée $[x_i^f, x_{i+1}^f] \times [y_{j_u}^c, y_{j_u+1}^c]$ avec $j_u \in \{j-1, j\}$ selon la position de $y$ par rapport à $y_j^c$ ($\xi_u = \frac{x - x_i^f}{\Delta x} \in [0, 1]$, $\eta_u = \frac{y - y_{j_u}^c}{\Delta y} \in [0, 1]$) ;
+   - Interpoler $v$ sur sa propre boîte décalée $[x_{i_v}^c, x_{i_v+1}^c] \times [y_j^f, y_{j+1}^f]$ avec $i_v \in \{i-1, i\}$ selon la position de $x$ par rapport à $x_i^c$ ($\xi_v = \frac{x - x_{i_v}^c}{\Delta x} \in [0, 1]$, $\eta_v = \frac{y - y_j^f}{\Delta y} \in [0, 1]$) ;
+   - Calculer la correction quadratique à partir de la divergence discrète exacte $D_{k,l} = \frac{u_{k+1,l}-u_{k,l}}{\Delta x} + \frac{v_{k,l+1}-v_{k,l}}{\Delta y}$ des cellules MAC :
      ```fortran
-     u_sw = 0.5_dp * (u_field(i, j-1)   + u_field(i, j))
-     u_se = 0.5_dp * (u_field(i+1, j-1) + u_field(i+1, j))
-     u_nw = 0.5_dp * (u_field(i, j)     + u_field(i, j+1))
-     u_ne = 0.5_dp * (u_field(i+1, j)   + u_field(i+1, j+1))
+     if (yp < y_center(mesh, j)) then
+        j_u = j - 1
+     else
+        j_u = j
+     end if
+     if (xp < x_center(mesh, i)) then
+        i_v = i - 1
+     else
+        i_v = i
+     end if
 
-     v_sw = 0.5_dp * (v_field(i-1, j)   + v_field(i, j))
-     v_se = 0.5_dp * (v_field(i, j)     + v_field(i+1, j))
-     v_nw = 0.5_dp * (v_field(i-1, j+1) + v_field(i, j+1))
-     v_ne = 0.5_dp * (v_field(i, j+1)   + v_field(i+1, j+1))
+     xi_u  = max(0.0_dp, min(1.0_dp, (xp - x_face(mesh, i))     / dx))
+     eta_u = max(0.0_dp, min(1.0_dp, (yp - y_center(mesh, j_u)) / dy))
+     xi_v  = max(0.0_dp, min(1.0_dp, (xp - x_center(mesh, i_v)) / dx))
+     eta_v = max(0.0_dp, min(1.0_dp, (yp - y_face(mesh, j))     / dy))
+
+     u_sw = u_field(i,   j_u)
+     u_se = u_field(i+1, j_u)
+     u_nw = u_field(i,   j_u+1)
+     u_ne = u_field(i+1, j_u+1)
+
+     v_sw = v_field(i_v,   j)
+     v_se = v_field(i_v+1, j)
+     v_nw = v_field(i_v,   j+1)
+     v_ne = v_field(i_v+1, j+1)
 
      du_s = u_se - u_sw
      du_n = u_ne - u_nw
      dv_w = v_nw - v_sw
      dv_e = v_ne - v_se
 
-     u_bilin = (1.0_dp - eta) * ((1.0_dp - xi) * u_sw + xi * u_se) + &
-               eta            * ((1.0_dp - xi) * u_nw + xi * u_ne)
-     v_bilin = (1.0_dp - xi)  * ((1.0_dp - eta) * v_sw + eta * v_nw) + &
-               xi             * ((1.0_dp - eta) * v_se + eta * v_ne)
+     u_bilin = (1.0_dp - eta_u) * ((1.0_dp - xi_u) * u_sw + xi_u * u_se) + &
+               eta_u            * ((1.0_dp - xi_u) * u_nw + xi_u * u_ne)
+     v_bilin = (1.0_dp - xi_v)  * ((1.0_dp - eta_v) * v_sw + eta_v * v_nw) + &
+               xi_v             * ((1.0_dp - eta_v) * v_se + eta_v * v_ne)
 
      if (use_cvi) then
-        u_p = u_bilin + 0.5_dp * (dx / dy) * xi  * (1.0_dp - xi)  * (dv_e - dv_w)
-        v_p = v_bilin + 0.5_dp * (dy / dx) * eta * (1.0_dp - eta) * (du_n - du_s)
+        u_p = u_bilin + 0.5_dp * (dx / dy) * xi_u  * (1.0_dp - xi_u)  * (dv_e - dv_w)
+        v_p = v_bilin + 0.5_dp * (dy / dx) * eta_v * (1.0_dp - eta_v) * (du_n - du_s)
      else
         u_p = u_bilin
         v_p = v_bilin
      end if
      ```
-   *Vérification immédiate :* $\frac{\partial u_p}{\partial x} + \frac{\partial v_p}{\partial y} = \frac{\Delta u_S + \Delta u_N}{2\Delta x} + \frac{\Delta v_W + \Delta v_E}{2\Delta y} = \frac{1}{4}(D_{i,j-1} + 2D_{i,j} + D_{i,j+1}) + \dots = 0$, et tous les accès $(i\pm 1, j\pm 1)$ pour $i \in [1, N_x], j \in [1, N_y]$ restent dans `(0:nx+1, 0:ny+1)` !
+   *Vérification immédiate :* Dans les 4 sous-quadrants $(i_v \in \{i-1, i\}, j_u \in \{j-1, j\})$ de la cellule $(i,j)$, $\frac{\partial u_p}{\partial x} + \frac{\partial v_p}{\partial y} \equiv \frac{u_{i+1,j} - u_{i,j}}{\Delta x} + \frac{v_{i,j+1} - v_{i,j}}{\Delta y} \equiv D_{i,j} = 0$ à la précision machine ($< 10^{-12}$ par différences finies centrées dès que $D_{k,l} = 0$), et tous les accès $(i, j_u), (i+1, j_u+1), (i_v, j), (i_v+1, j+1)$ pour $i \in [1, N_x], j \in [1, N_y]$ restent **strictement** dans `(0:nx+1, 0:ny+1)` !
 
 3. **Advection RK2 (Heun) temporellement d'ordre 2 (`advect_markers_rk2`)** :
    Utilise `fields%u_old, fields%v_old` pour la vitesse $\mathbf{u}^n$ au point initial $\mathbf{x}_p^n$, et `fields%u, fields%v` pour la vitesse $\mathbf{u}^{n+1}$ au point prédicteur $\mathbf{x}_p^*$.

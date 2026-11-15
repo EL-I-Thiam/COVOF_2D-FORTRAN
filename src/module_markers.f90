@@ -206,9 +206,15 @@ contains
   !=============================================================================
   ! Routine pure : interpolate_velocity_cvi
   ! Rôle         : Interpolation Conservative de Vitesse (CVI) H(div)-conforme
-  !                sur grille décalée MAC garantissant analytiquement :
-  !                du_CVI/dx + dv_CVI/dy = (u(i+1,j)-u(i,j))/dx + (v(i,j+1)-v(i,j))/dy
-  !                en tout point (xi, eta) de la cellule (i, j).
+  !                sur grille décalée MAC — Variante B exacte (Wang et al., 2015 ;
+  !                Pusok et al., 2017) :
+  !                - Interpole u sur sa boîte décalée [x_i^f, x_{i+1}^f] x [y_{j_u}^c, y_{j_u+1}^c]
+  !                  avec j_u in {j-1, j} ;
+  !                - Interpole v sur sa boîte décalée [x_{i_v}^c, x_{i_v+1}^c] x [y_j^f, y_{j+1}^f]
+  !                  avec i_v in {i-1, i} ;
+  !                - Garantit analytiquement dans les 4 sous-quadrants de (i, j) :
+  !                  du_CVI/dx + dv_CVI/dy = (u(i+1,j)-u(i,j))/dx + (v(i,j+1)-v(i,j))/dy = D_{i,j}
+  !                  en restant strictement dans le halo unique (0:nx+1, 0:ny+1).
   !=============================================================================
   pure subroutine interpolate_velocity_cvi(mesh, u, v, xp, yp, scheme, up, vp)
     type(mesh_2d_t),  intent(in)  :: mesh
@@ -218,9 +224,12 @@ contains
     character(len=*), intent(in)  :: scheme
     real(dp),         intent(out) :: up, vp
 
-    integer  :: i, j, nx, ny
-    real(dp) :: dx, dy, x_min_loc, y_min_loc, xi, eta
-    real(dp) :: du_eta_W, du_eta_E, dv_xi_S, dv_xi_N
+    integer  :: i, j, i_v, j_u, nx, ny
+    real(dp) :: dx, dy, x_min_loc, y_min_loc
+    real(dp) :: xi_u, eta_u, xi_v, eta_v
+    real(dp) :: u_sw, u_se, u_nw, u_ne
+    real(dp) :: v_sw, v_se, v_nw, v_ne
+    real(dp) :: du_s, du_n, dv_w, dv_e
     real(dp) :: u_bilin, v_bilin, u_corr, v_corr
 
     nx = mesh%nx_local
@@ -236,32 +245,56 @@ contains
     i = max(1, min(nx, i))
     j = max(1, min(ny, j))
 
-    xi  = (xp - x_face(mesh, i)) / dx
-    eta = (yp - y_face(mesh, j)) / dy
-    xi  = max(0.0_dp, min(1.0_dp, xi))
-    eta = max(0.0_dp, min(1.0_dp, eta))
+    ! Indices des boîtes décalées MAC (j_u in {j-1, j} subset [0, ny], i_v in {i-1, i} subset [0, nx])
+    if (yp < y_center(mesh, j)) then
+       j_u = j - 1
+    else
+       j_u = j
+    end if
+    if (xp < x_center(mesh, i)) then
+       i_v = i - 1
+    else
+       i_v = i
+    end if
 
-    ! Pentes transverses centrées sur les faces MAC (strictement dans le halo 0:nx+1, 0:ny+1)
-    du_eta_W = 0.5_dp * (u(i,   j+1) - u(i,   j-1))
-    du_eta_E = 0.5_dp * (u(i+1, j+1) - u(i+1, j-1))
-    dv_xi_S  = 0.5_dp * (v(i+1, j)   - v(i-1, j))
-    dv_xi_N  = 0.5_dp * (v(i+1, j+1) - v(i-1, j+1))
+    ! Coordonnées réduites locales dans chacune des boîtes décalées
+    xi_u  = max(0.0_dp, min(1.0_dp, (xp - x_face(mesh, i))     / dx))
+    eta_u = max(0.0_dp, min(1.0_dp, (yp - y_center(mesh, j_u)) / dy))
+    xi_v  = max(0.0_dp, min(1.0_dp, (xp - x_center(mesh, i_v)) / dx))
+    eta_v = max(0.0_dp, min(1.0_dp, (yp - y_face(mesh, j))     / dy))
 
-    ! Reconstruction bilinéaire MAC continue aux faces normales
-    u_bilin = (1.0_dp - xi) * (u(i,   j) + (eta - 0.5_dp) * du_eta_W) + &
-                        xi  * (u(i+1, j) + (eta - 0.5_dp) * du_eta_E)
-    v_bilin = (1.0_dp - eta) * (v(i, j)   + (xi - 0.5_dp) * dv_xi_S) + &
-                        eta  * (v(i, j+1) + (xi - 0.5_dp) * dv_xi_N)
+    ! Sommets MAC de la boîte décalée u : [x_i^f, x_{i+1}^f] x [y_{j_u}^c, y_{j_u+1}^c]
+    u_sw = u(i,   j_u)
+    u_se = u(i+1, j_u)
+    u_nw = u(i,   j_u+1)
+    u_ne = u(i+1, j_u+1)
+
+    ! Sommets MAC de la boîte décalée v : [x_{i_v}^c, x_{i_v+1}^c] x [y_j^f, y_{j+1}^f]
+    v_sw = v(i_v,   j)
+    v_se = v(i_v+1, j)
+    v_nw = v(i_v,   j+1)
+    v_ne = v(i_v+1, j+1)
+
+    du_s = u_se - u_sw
+    du_n = u_ne - u_nw
+    dv_w = v_nw - v_sw
+    dv_e = v_ne - v_se
+
+    ! Interpolation bilinéaire sur chaque boîte décalée MAC
+    u_bilin = (1.0_dp - eta_u) * ((1.0_dp - xi_u) * u_sw + xi_u * u_se) + &
+              eta_u            * ((1.0_dp - xi_u) * u_nw + xi_u * u_ne)
+    v_bilin = (1.0_dp - xi_v)  * ((1.0_dp - eta_v) * v_sw + eta_v * v_nw) + &
+              xi_v             * ((1.0_dp - eta_v) * v_se + eta_v * v_ne)
 
     if (trim(scheme) == "BILINEAR_RK2" .or. trim(scheme) == "BILINEAR") then
        up = u_bilin
        vp = v_bilin
     else
-       ! Correction quadratique CVI exacte :
-       ! d/dx[u_corr] = -(xi - 1/2)*(dv_xi_N - dv_xi_S)/dy
-       ! d/dy[v_corr] = -(eta - 1/2)*(du_eta_E - du_eta_W)/dx
-       u_corr = 0.5_dp * (dx / dy) * xi * (1.0_dp - xi) * (dv_xi_N - dv_xi_S)
-       v_corr = 0.5_dp * (dy / dx) * eta * (1.0_dp - eta) * (du_eta_E - du_eta_W)
+       ! Correction quadratique CVI exacte (Variante B — Wang et al., 2015 ; Pusok et al., 2017) :
+       ! d/dx[u_corr] = -(xi_u - 1/2)*(dv_e - dv_w)/dy
+       ! d/dy[v_corr] = -(eta_v - 1/2)*(du_n - du_s)/dx
+       u_corr = 0.5_dp * (dx / dy) * xi_u  * (1.0_dp - xi_u)  * (dv_e - dv_w)
+       v_corr = 0.5_dp * (dy / dx) * eta_v * (1.0_dp - eta_v) * (du_n - du_s)
        up = u_bilin + u_corr
        vp = v_bilin + v_corr
     end if
