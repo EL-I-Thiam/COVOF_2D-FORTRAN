@@ -57,8 +57,8 @@ contains
 
     ! Allocation dynamique de tableau contigu en mémoire
     allocate(s_left(ny), r_left(ny), s_right(ny), r_right(ny))
-    ! Allocation dynamique de tableau contigu en mémoire
-    allocate(s_bot(nx), r_bot(nx), s_top(nx), r_top(nx))
+    ! Allocation dynamique de tableau contigu en mémoire (incluant 0 et nx+1 pour les 4 coins diagonaux)
+    allocate(s_bot(0:nx+1), r_bot(0:nx+1), s_top(0:nx+1), r_top(0:nx+1))
 
     ! Affectation et calcul numérique
     s_left(:)  = field(1, 1:ny)
@@ -97,28 +97,28 @@ contains
     ! Affectation et calcul numérique
     if (mesh%neighbor_east /= MPI_PROC_NULL) field(nx+1, 1:ny) = r_right(:)
 
-    ! Affectation et calcul numérique
-    s_bot(:) = field(1:nx, 1)
+    ! Affectation et calcul numérique (incluant i=0 et i=nx+1 pour propager les 4 coins diagonaux)
+    s_bot(0:nx+1) = field(0:nx+1, 1)
     ! Actualisation de la pression statique au centre de la maille
-    s_top(:) = field(1:nx, ny)
+    s_top(0:nx+1) = field(0:nx+1, ny)
 
     ! Affectation et calcul numérique
     n_reqs = 0
     ! Évaluation de la condition logique
     if (mesh%neighbor_south /= MPI_PROC_NULL) then
        ! Appel à la bibliothèque de communication parallèle MPI
-       call MPI_Irecv(r_bot, nx, MPI_DOUBLE_PRECISION, mesh%neighbor_south, 20, mesh%comm, reqs(n_reqs+1), ierr)
+       call MPI_Irecv(r_bot, nx + 2, MPI_DOUBLE_PRECISION, mesh%neighbor_south, 20, mesh%comm, reqs(n_reqs+1), ierr)
        ! Appel à la bibliothèque de communication parallèle MPI
-       call MPI_Isend(s_bot, nx, MPI_DOUBLE_PRECISION, mesh%neighbor_south, 21, mesh%comm, reqs(n_reqs+2), ierr)
+       call MPI_Isend(s_bot, nx + 2, MPI_DOUBLE_PRECISION, mesh%neighbor_south, 21, mesh%comm, reqs(n_reqs+2), ierr)
        ! Affectation et calcul numérique
        n_reqs = n_reqs + 2
     end if
     ! Évaluation de la condition logique
     if (mesh%neighbor_north /= MPI_PROC_NULL) then
        ! Appel à la bibliothèque de communication parallèle MPI
-       call MPI_Irecv(r_top, nx, MPI_DOUBLE_PRECISION, mesh%neighbor_north, 21, mesh%comm, reqs(n_reqs+1), ierr)
+       call MPI_Irecv(r_top, nx + 2, MPI_DOUBLE_PRECISION, mesh%neighbor_north, 21, mesh%comm, reqs(n_reqs+1), ierr)
        ! Appel à la bibliothèque de communication parallèle MPI
-       call MPI_Isend(s_top, nx, MPI_DOUBLE_PRECISION, mesh%neighbor_north, 20, mesh%comm, reqs(n_reqs+2), ierr)
+       call MPI_Isend(s_top, nx + 2, MPI_DOUBLE_PRECISION, mesh%neighbor_north, 20, mesh%comm, reqs(n_reqs+2), ierr)
        ! Affectation et calcul numérique
        n_reqs = n_reqs + 2
     end if
@@ -130,9 +130,9 @@ contains
     end if
 
     ! Affectation et calcul numérique
-    if (mesh%neighbor_south /= MPI_PROC_NULL) field(1:nx, 0) = r_bot(:)
+    if (mesh%neighbor_south /= MPI_PROC_NULL) field(0:nx+1, 0) = r_bot(0:nx+1)
     ! Affectation et calcul numérique
-    if (mesh%neighbor_north /= MPI_PROC_NULL) field(1:nx, ny+1) = r_top(:)
+    if (mesh%neighbor_north /= MPI_PROC_NULL) field(0:nx+1, ny+1) = r_top(0:nx+1)
   end subroutine exchange_halos_scalar
 
   ! [Procédure/Module] subroutine exchange_halos_velocity

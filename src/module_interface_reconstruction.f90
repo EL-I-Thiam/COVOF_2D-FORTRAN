@@ -11,6 +11,7 @@ module module_interface_reconstruction
   ! Procédures publiques
   public :: cut_box_area
   public :: compute_alpha
+  public :: clip_segment_in_cell
   public :: reconstruct_slic
   public :: reconstruct_plic
   public :: reconstruct_elvira
@@ -144,6 +145,76 @@ contains
     end do
     alpha = 0.5_dp * (alpha_low + alpha_high)
   end function compute_alpha
+
+  ! [Procédure/Module] subroutine clip_segment_in_cell
+  ! Extrait les deux extrémités géométriques (x1, y1) et (x2, y2) du segment PLIC
+  ! nx * x + ny * y + alpha = 0 tronqué par la cellule [xmin, xmax] x [ymin, ymax].
+  pure subroutine clip_segment_in_cell(xmin, xmax, ymin, ymax, nx, ny, alpha, x1, y1, x2, y2, valid)
+    real(dp), intent(in)  :: xmin, xmax, ymin, ymax, nx, ny, alpha
+    real(dp), intent(out) :: x1, y1, x2, y2
+    logical,  intent(out) :: valid
+
+    real(dp) :: bx(4), by(4), d(4), px(4), py(4)
+    real(dp) :: d1, d2, t, qx, qy, tol_pt
+    integer  :: i, next_i, k, n_pts
+    logical  :: is_dup
+
+    x1 = 0.0_dp; y1 = 0.0_dp
+    x2 = 0.0_dp; y2 = 0.0_dp
+    valid = .false.
+
+    if (abs(alpha) > 1.0e8_dp) return
+
+    bx(1) = xmin; by(1) = ymin
+    bx(2) = xmax; by(2) = ymin
+    bx(3) = xmax; by(3) = ymax
+    bx(4) = xmin; by(4) = ymax
+
+    do i = 1, 4
+       d(i) = nx * bx(i) + ny * by(i) + alpha
+    end do
+
+    tol_pt = 1.0e-11_dp * max(xmax - xmin, ymax - ymin)
+    n_pts = 0
+
+    do i = 1, 4
+       next_i = mod(i, 4) + 1
+       d1 = d(i)
+       d2 = d(next_i)
+
+       if (abs(d1) <= 1.0e-14_dp) then
+          qx = bx(i); qy = by(i)
+          is_dup = .false.
+          do k = 1, n_pts
+             if (hypot(qx - px(k), qy - py(k)) <= tol_pt) is_dup = .true.
+          end do
+          if (.not. is_dup .and. n_pts < 4) then
+             n_pts = n_pts + 1
+             px(n_pts) = qx; py(n_pts) = qy
+          end if
+       else if ((d1 < 0.0_dp .and. d2 > 0.0_dp) .or. (d1 > 0.0_dp .and. d2 < 0.0_dp)) then
+          t = -d1 / (d2 - d1)
+          qx = bx(i) + t * (bx(next_i) - bx(i))
+          qy = by(i) + t * (by(next_i) - by(i))
+          is_dup = .false.
+          do k = 1, n_pts
+             if (hypot(qx - px(k), qy - py(k)) <= tol_pt) is_dup = .true.
+          end do
+          if (.not. is_dup .and. n_pts < 4) then
+             n_pts = n_pts + 1
+             px(n_pts) = qx; py(n_pts) = qy
+          end if
+       end if
+    end do
+
+    if (n_pts >= 2) then
+       if (hypot(px(2) - px(1), py(2) - py(1)) > tol_pt) then
+          x1 = px(1); y1 = py(1)
+          x2 = px(2); y2 = py(2)
+          valid = .true.
+       end if
+    end if
+  end subroutine clip_segment_in_cell
 
   ! [Procédure/Module] subroutine reconstruct_slic
   subroutine reconstruct_slic(mesh, C, segments)

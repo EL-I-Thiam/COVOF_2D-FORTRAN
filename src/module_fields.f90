@@ -75,6 +75,13 @@ module module_fields
      real(dp), allocatable :: rhoe_star(:, :) ! Énergie totale intermédiaire (rho*e)* aux cellules
      real(dp), allocatable :: C_tilde(:, :)   ! Fraction volumique lissée par diffusion pour CSF
 
+     ! --- Champs Géométriques Hybrides issus des Marqueurs Lagrangiens CVI ---
+     real(dp), allocatable :: marker_nx(:, :)         ! Normale unitaire X issue des marqueurs (orientée vers C=1)
+     real(dp), allocatable :: marker_ny(:, :)         ! Normale unitaire Y issue des marqueurs (orientée vers C=1)
+     real(dp), allocatable :: marker_kappa(:, :)      ! Courbure parabolique locale issue des marqueurs [1/m]
+     logical,  allocatable :: has_marker_normal(:, :) ! Vrai si normale de marqueurs valide dans la cellule
+     logical,  allocatable :: has_marker_kappa(:, :)  ! Vrai si courbure de marqueurs valide dans la cellule
+
      ! --- Indicateurs et Diagnostics de Validation ---
      real(dp) :: mean_nusselt = 0.0_dp       ! Nombre de Nusselt moyen mesuré à la paroi chaude
 
@@ -155,6 +162,11 @@ contains
     allocate(fields%rhov_star(0:nx+1, 0:ny+1))
     allocate(fields%rhoe_star(0:nx+1, 0:ny+1))
     allocate(fields%C_tilde(0:nx+1, 0:ny+1))
+    allocate(fields%marker_nx(0:nx+1, 0:ny+1))
+    allocate(fields%marker_ny(0:nx+1, 0:ny+1))
+    allocate(fields%marker_kappa(0:nx+1, 0:ny+1))
+    allocate(fields%has_marker_normal(0:nx+1, 0:ny+1))
+    allocate(fields%has_marker_kappa(0:nx+1, 0:ny+1))
 
     ! Remise à zéro des valeurs initiales
     call reset_fields(fields)
@@ -203,6 +215,11 @@ contains
     if (allocated(fields%rhov_star))  deallocate(fields%rhov_star)
     if (allocated(fields%rhoe_star))  deallocate(fields%rhoe_star)
     if (allocated(fields%C_tilde))    deallocate(fields%C_tilde)
+    if (allocated(fields%marker_nx))         deallocate(fields%marker_nx)
+    if (allocated(fields%marker_ny))         deallocate(fields%marker_ny)
+    if (allocated(fields%marker_kappa))      deallocate(fields%marker_kappa)
+    if (allocated(fields%has_marker_normal)) deallocate(fields%has_marker_normal)
+    if (allocated(fields%has_marker_kappa))  deallocate(fields%has_marker_kappa)
 
     fields%nx = 0
     fields%ny = 0
@@ -253,6 +270,11 @@ contains
     fields%rhov_star    = 0.0_dp
     fields%rhoe_star    = 0.0_dp
     fields%C_tilde      = 1.0_dp
+    if (allocated(fields%marker_nx))         fields%marker_nx         = 0.0_dp
+    if (allocated(fields%marker_ny))         fields%marker_ny         = 0.0_dp
+    if (allocated(fields%marker_kappa))      fields%marker_kappa      = 0.0_dp
+    if (allocated(fields%has_marker_normal)) fields%has_marker_normal = .false.
+    if (allocated(fields%has_marker_kappa))  fields%has_marker_kappa  = .false.
   end subroutine reset_fields
 
 end module module_fields

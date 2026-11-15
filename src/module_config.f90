@@ -90,6 +90,15 @@ module module_config
      ! Déclaration de variable locale / paramètre de calcul
      real(dp) :: cfl_vof = 0.4_dp
 
+     ! Marqueurs lagrangiens non connectés et interpolation CVI (Optionnels, désactivés par défaut)
+     logical           :: use_markers             = .false.
+     integer           :: markers_per_cell        = 4
+     character(len=32) :: marker_advection_scheme = "CVI_RK2"
+     logical           :: marker_curvature        = .false.
+     logical           :: marker_normals_plic     = .false.
+     integer           :: marker_max_per_cell     = 8
+     logical           :: write_markers_vtk       = .false.
+
      ! Thermal parameters
      logical  :: enable_energy = .false.
      ! Déclaration de variable locale / paramètre de calcul
@@ -653,6 +662,22 @@ contains
     call json_get_string(buf, "vof.tvd_limiter", cfg%tvd_limiter, "NONE")
     ! Appel de sous-programme modulaire
     call json_get_real(buf, "vof.cfl_vof", cfg%cfl_vof, 0.5_dp)
+
+    ! Paramètres des marqueurs lagrangiens non connectés et interpolation CVI
+    call json_get_bool(buf, "vof.use_markers", cfg%use_markers, cfg%use_markers)
+    call json_get_bool(buf, "markers.enabled", cfg%use_markers, cfg%use_markers)
+    call json_get_int(buf, "vof.markers_per_cell", cfg%markers_per_cell, cfg%markers_per_cell)
+    call json_get_int(buf, "markers.markers_per_cell", cfg%markers_per_cell, cfg%markers_per_cell)
+    call json_get_string(buf, "vof.marker_advection_scheme", cfg%marker_advection_scheme, cfg%marker_advection_scheme)
+    call json_get_string(buf, "markers.advection_scheme", cfg%marker_advection_scheme, cfg%marker_advection_scheme)
+    call json_get_bool(buf, "vof.marker_curvature", cfg%marker_curvature, cfg%marker_curvature)
+    call json_get_bool(buf, "markers.use_marker_curvature", cfg%marker_curvature, cfg%marker_curvature)
+    call json_get_bool(buf, "vof.marker_normals_plic", cfg%marker_normals_plic, cfg%marker_normals_plic)
+    call json_get_bool(buf, "markers.use_marker_normals_plic", cfg%marker_normals_plic, cfg%marker_normals_plic)
+    call json_get_int(buf, "vof.marker_max_per_cell", cfg%marker_max_per_cell, cfg%marker_max_per_cell)
+    call json_get_int(buf, "markers.max_per_cell", cfg%marker_max_per_cell, cfg%marker_max_per_cell)
+    call json_get_bool(buf, "vof.write_markers_vtk", cfg%write_markers_vtk, cfg%write_markers_vtk)
+    call json_get_bool(buf, "markers.write_vtk", cfg%write_markers_vtk, cfg%write_markers_vtk)
 
     ! Cohérence stricte : le schéma algébrique TVD ne s'accompagne d'aucune reconstruction géométrique,
     ! tandis que les schémas géométriques (WEYMOUTH_YUE, CIAM) n'utilisent pas de limiteur TVD.

@@ -236,6 +236,18 @@ contains
        end do
        write(vtr_unit, '(A)') '        </DataArray>'
 
+       ! Curvature kappa
+       if (allocated(fields%curvature)) then
+          write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="Curvature" format="ascii">'
+          do j = 1, mesh%ny_local
+             do i = 1, mesh%nx_local
+                write(vtr_unit, '(ES16.8," ")', advance="no") fields%curvature(i, j)
+             end do
+             write(vtr_unit, *)
+          end do
+          write(vtr_unit, '(A)') '        </DataArray>'
+       end if
+
        ! Velocity Vector (au centre des mailles)
        write(vtr_unit, '(A)') '        <DataArray type="Float64" Name="Velocity" NumberOfComponents="3" format="ascii">'
        ! Boucle spatiale sur les cellules locales selon l'axe vertical Y (ordonnées)
@@ -335,6 +347,9 @@ contains
           write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Divergence"/>'
           ! Affectation et calcul numérique
           write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Temperature"/>'
+          if (allocated(fields%curvature)) then
+             write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Curvature"/>'
+          end if
           ! Affectation et calcul numérique
           write(pvtr_unit, '(A)') '      <PDataArray type="Float64" Name="Velocity" NumberOfComponents="3"/>'
           write(pvtr_unit, '(A)') '    </PCellData>'

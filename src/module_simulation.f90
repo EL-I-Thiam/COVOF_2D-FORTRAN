@@ -430,6 +430,9 @@ contains
 
     ! Sauvegarde initiale à t = 0.0
     call this%vtk_writer%write_step(this%mesh, this%fields, step, t)
+    if (this%config%use_markers .and. this%config%write_markers_vtk) then
+       call write_vof_markers_vtk(this%mesh, this%config%output_dir, this%config%case_name, step)
+    end if
     ! Appel de sous-programme modulaire
     call this%vtk_writer%write_diagnostics(this%mesh, this%fields, step, t, this%config%dt)
 
@@ -667,6 +670,9 @@ contains
        if (mod(step, this%config%vtk_interval) == 0 .or. t >= this%config%t_final - 1.0e-10_dp * (abs(this%config%t_final) + 1.0_dp)) then
           ! Appel de sous-programme modulaire
           call this%vtk_writer%write_step(this%mesh, this%fields, step, t)
+          if (this%config%use_markers .and. this%config%write_markers_vtk) then
+             call write_vof_markers_vtk(this%mesh, this%config%output_dir, this%config%case_name, step)
+          end if
        end if
     end do
 
@@ -2177,6 +2183,9 @@ contains
 
     ! Appel de sous-programme modulaire
     call this%vtk_writer%write_step(this%mesh, this%fields, 0, 0.0_dp)
+    if (this%config%use_markers .and. this%config%write_markers_vtk) then
+       call write_vof_markers_vtk(this%mesh, this%config%output_dir, this%config%case_name, 0)
+    end if
 
     ! Affectation et calcul numérique
     t = 0.0_dp
@@ -2251,6 +2260,9 @@ contains
            abs(t - 0.5_dp * T_period) < 0.5_dp * dt) then
           ! Appel de sous-programme modulaire
           call this%vtk_writer%write_step(this%mesh, this%fields, step, t)
+          if (this%config%use_markers .and. this%config%write_markers_vtk) then
+             call write_vof_markers_vtk(this%mesh, this%config%output_dir, this%config%case_name, step)
+          end if
        end if
 
        ! Évaluation de la condition logique

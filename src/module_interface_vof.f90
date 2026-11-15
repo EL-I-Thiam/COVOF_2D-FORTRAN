@@ -9,6 +9,9 @@ module module_interface_vof
   use module_eos, only: eos_compute_chi_T, eos_compute_density
   use module_interface_reconstruction, only: interface_segment_t, cut_box_area, compute_alpha, &
                                             reconstruct_interface, evaluate_limiter
+  use module_markers, only: marker_cloud_t, init_markers_from_vof, advect_markers_rk2, &
+                            migrate_markers_mpi, prune_and_reseed_markers, &
+                            compute_curvature_from_markers, write_markers_vtk
   implicit none
   private
 
@@ -18,9 +21,13 @@ module module_interface_vof
   public :: update_physical_properties
   public :: compute_curvature_and_csf
   public :: smooth_svof_helmholtz
+  public :: write_vof_markers_vtk
 
   ! Compteur de pas pour Strang splitting alterné
   integer, save :: vof_step_count = 0
+
+  ! Nuage global de marqueurs Lagrangiens non-connectés (CVI)
+  type(marker_cloud_t), save :: global_marker_cloud
 
   type :: interface_vof_t
      ! Déclaration de variable locale / paramètre de calcul
@@ -78,20 +85,46 @@ contains
              fields%C(i, j) = 1.0_dp
 
           case (IC_DROPLET)
-             ! Affectation et calcul numérique
-             dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
-             ! Évaluation de la condition logique
-             if (dist < -eps) then
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 1.0_dp
-             ! Branche conditionnelle alternative
-             else if (dist > eps) then
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 0.0_dp
-             ! Branche par défaut si condition non satisfaite
+             if (cfg%use_markers) then
+                x_min = x_face(mesh, i)
+                x_max = x_face(mesh, i + 1)
+                y_min = y_face(mesh, j)
+                y_max = y_face(mesh, j + 1)
+                d_mid = hypot(x - cfg%ic_center_x, y - cfg%ic_center_y)
+                diag = 0.5_dp * hypot(mesh%dx, mesh%dy)
+                if (d_mid + diag <= cfg%ic_radius) then
+                   fields%C(i, j) = 1.0_dp
+                else if (d_mid - diag >= cfg%ic_radius) then
+                   fields%C(i, j) = 0.0_dp
+                else
+                   count_out = 0
+                   do sj = 0, 15
+                      ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
+                      do si = 0, 15
+                         xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                         if (hypot(xs - cfg%ic_center_x, ys - cfg%ic_center_y) <= cfg%ic_radius) then
+                            count_out = count_out + 1
+                         end if
+                      end do
+                   end do
+                   fields%C(i, j) = real(count_out, dp) / 256.0_dp
+                end if
              else
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 0.5_dp - dist / (2.0_dp * eps) - (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+                ! Affectation et calcul numérique
+                dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
+                ! Évaluation de la condition logique
+                if (dist < -eps) then
+                   ! Transport / actualisation de la fraction volumique VOF
+                   fields%C(i, j) = 1.0_dp
+                ! Branche conditionnelle alternative
+                else if (dist > eps) then
+                   ! Transport / actualisation de la fraction volumique VOF
+                   fields%C(i, j) = 0.0_dp
+                ! Branche par défaut si condition non satisfaite
+                else
+                   ! Transport / actualisation de la fraction volumique VOF
+                   fields%C(i, j) = 0.5_dp - dist / (2.0_dp * eps) - (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+                end if
              end if
 
           case (IC_CYLINDER, IC_BUBBLE)
@@ -205,20 +238,46 @@ contains
              end if
 
           case (IC_VORTEX_SHEAR)
-             ! Affectation et calcul numérique
-             dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
-             ! Évaluation de la condition logique
-             if (dist < -eps) then
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 1.0_dp
-             ! Branche conditionnelle alternative
-             else if (dist > eps) then
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 0.0_dp
-             ! Branche par défaut si condition non satisfaite
+             if (cfg%use_markers) then
+                x_min = x_face(mesh, i)
+                x_max = x_face(mesh, i + 1)
+                y_min = y_face(mesh, j)
+                y_max = y_face(mesh, j + 1)
+                d_mid = hypot(x - cfg%ic_center_x, y - cfg%ic_center_y)
+                diag = 0.5_dp * hypot(mesh%dx, mesh%dy)
+                if (d_mid + diag <= cfg%ic_radius) then
+                   fields%C(i, j) = 1.0_dp
+                else if (d_mid - diag >= cfg%ic_radius) then
+                   fields%C(i, j) = 0.0_dp
+                else
+                   count_out = 0
+                   do sj = 0, 15
+                      ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
+                      do si = 0, 15
+                         xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                         if (hypot(xs - cfg%ic_center_x, ys - cfg%ic_center_y) <= cfg%ic_radius) then
+                            count_out = count_out + 1
+                         end if
+                      end do
+                   end do
+                   fields%C(i, j) = real(count_out, dp) / 256.0_dp
+                end if
              else
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 0.5_dp - dist / (2.0_dp * eps) - (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+                ! Affectation et calcul numérique
+                dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
+                ! Évaluation de la condition logique
+                if (dist < -eps) then
+                   ! Transport / actualisation de la fraction volumique VOF
+                   fields%C(i, j) = 1.0_dp
+                ! Branche conditionnelle alternative
+                else if (dist > eps) then
+                   ! Transport / actualisation de la fraction volumique VOF
+                   fields%C(i, j) = 0.0_dp
+                ! Branche par défaut si condition non satisfaite
+                else
+                   ! Transport / actualisation de la fraction volumique VOF
+                   fields%C(i, j) = 0.5_dp - dist / (2.0_dp * eps) - (1.0_dp / (2.0_dp * PI)) * sin(PI * dist / eps)
+                end if
              end if
 
           case (IC_RAYLEIGH_TAYLOR)
@@ -284,6 +343,9 @@ contains
        call smooth_svof_helmholtz(fields, mesh, cfg)
     end if
     call update_physical_properties(fields, mesh, cfg)
+    if (cfg%use_markers) then
+       call init_markers_from_vof(global_marker_cloud, mesh, cfg, fields)
+    end if
     ! Appel de sous-programme modulaire
     call compute_curvature_and_csf(fields, mesh, cfg)
   end subroutine set_initial_conditions
@@ -437,14 +499,11 @@ contains
        return
     end if
 
-    ! Coins de C
-    fields%C(0, 0)       = fields%C(1, 1)
-    ! Transport / actualisation de la fraction volumique VOF
-    fields%C(nx+1, 0)    = fields%C(nx, 1)
-    ! Transport / actualisation de la fraction volumique VOF
-    fields%C(0, ny+1)    = fields%C(1, ny)
-    ! Transport / actualisation de la fraction volumique VOF
-    fields%C(nx+1, ny+1) = fields%C(nx, ny)
+    ! Coins physiques de C (sans écraser les coins diagonaux MPI)
+    if (mesh%is_boundary_left  .and. mesh%is_boundary_bottom) fields%C(0, 0)       = fields%C(1, 1)
+    if (mesh%is_boundary_right .and. mesh%is_boundary_bottom) fields%C(nx+1, 0)    = fields%C(nx, 1)
+    if (mesh%is_boundary_left  .and. mesh%is_boundary_top)    fields%C(0, ny+1)    = fields%C(1, ny)
+    if (mesh%is_boundary_right .and. mesh%is_boundary_top)    fields%C(nx+1, ny+1) = fields%C(nx, ny)
 
     ! 1. Masse volumique arithmétique et viscosité au centre
     do j = 0, ny + 1
@@ -632,6 +691,17 @@ contains
 
     ! Appel de sous-programme modulaire
     call exchange_halos_scalar(kappa, mesh)
+
+    if (cfg%use_markers .and. cfg%marker_curvature) then
+       do j = 0, ny + 1
+          do i = 0, nx + 1
+             if (fields%has_marker_kappa(i, j)) then
+                kappa(i, j) = fields%marker_kappa(i, j)
+             end if
+          end do
+       end do
+    end if
+
     ! Affectation et calcul numérique
     fields%curvature = kappa
 
@@ -639,8 +709,20 @@ contains
     do j = 1, ny
        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx + 1
-          ! Affectation et calcul numérique
-          kap_avg = 0.5_dp * (kappa(i-1, j) + kappa(i, j))
+          if (cfg%use_markers .and. cfg%marker_curvature) then
+             if (fields%has_marker_kappa(i-1, j) .and. fields%has_marker_kappa(i, j)) then
+                kap_avg = 0.5_dp * (fields%marker_kappa(i-1, j) + fields%marker_kappa(i, j))
+             else if (fields%has_marker_kappa(i-1, j)) then
+                kap_avg = fields%marker_kappa(i-1, j)
+             else if (fields%has_marker_kappa(i, j)) then
+                kap_avg = fields%marker_kappa(i, j)
+             else
+                kap_avg = 0.5_dp * (kappa(i-1, j) + kappa(i, j))
+             end if
+          else
+             ! Affectation et calcul numérique
+             kap_avg = 0.5_dp * (kappa(i-1, j) + kappa(i, j))
+          end if
           ! Affectation et calcul numérique
           grad_c  = (fields%C(i, j) - fields%C(i-1, j)) / dx
           ! Affectation et calcul numérique
@@ -652,8 +734,20 @@ contains
     do j = 1, ny + 1
        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
        do i = 1, nx
-          ! Affectation et calcul numérique
-          kap_avg = 0.5_dp * (kappa(i, j-1) + kappa(i, j))
+          if (cfg%use_markers .and. cfg%marker_curvature) then
+             if (fields%has_marker_kappa(i, j-1) .and. fields%has_marker_kappa(i, j)) then
+                kap_avg = 0.5_dp * (fields%marker_kappa(i, j-1) + fields%marker_kappa(i, j))
+             else if (fields%has_marker_kappa(i, j-1)) then
+                kap_avg = fields%marker_kappa(i, j-1)
+             else if (fields%has_marker_kappa(i, j)) then
+                kap_avg = fields%marker_kappa(i, j)
+             else
+                kap_avg = 0.5_dp * (kappa(i, j-1) + kappa(i, j))
+             end if
+          else
+             ! Affectation et calcul numérique
+             kap_avg = 0.5_dp * (kappa(i, j-1) + kappa(i, j))
+          end if
           ! Affectation et calcul numérique
           grad_c  = (fields%C(i, j) - fields%C(i, j-1)) / dy
           ! Affectation et calcul numérique
@@ -691,6 +785,12 @@ contains
     call update_physical_properties(fields, mesh, cfg)
     if (cfg%enable_diffusion_smoothing) then
        call vof_smooth_diffusion(fields, mesh, cfg)
+    end if
+    if (cfg%use_markers) then
+       call advect_markers_rk2(global_marker_cloud, mesh, cfg, fields, dt)
+       call migrate_markers_mpi(global_marker_cloud, mesh, cfg)
+       call prune_and_reseed_markers(global_marker_cloud, mesh, cfg, fields)
+       call compute_curvature_from_markers(global_marker_cloud, mesh, cfg, fields)
     end if
     call compute_curvature_and_csf(fields, mesh, cfg)
   end subroutine advect_vof
@@ -834,6 +934,7 @@ contains
     if (x_first) then
        ! 1. Passe X
        call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       call apply_marker_normals_to_segments(mesh, cfg, fields, fields%C, segments)
        flux_vol = 0.0_dp
        do j = 1, ny
           do i = 1, nx + 1
@@ -875,6 +976,7 @@ contains
 
        ! 2. Passe Y
        call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       call apply_marker_normals_to_segments(mesh, cfg, fields, c_star, segments)
        flux_vol = 0.0_dp
        do j = 1, ny + 1
           do i = 1, nx
@@ -912,6 +1014,7 @@ contains
     else
        ! 1. Passe Y
        call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       call apply_marker_normals_to_segments(mesh, cfg, fields, fields%C, segments)
        flux_vol = 0.0_dp
        do j = 1, ny + 1
           do i = 1, nx
@@ -953,6 +1056,7 @@ contains
 
        ! 2. Passe X
        call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       call apply_marker_normals_to_segments(mesh, cfg, fields, c_star, segments)
        flux_vol = 0.0_dp
        do j = 1, ny
           do i = 1, nx + 1
@@ -1034,6 +1138,7 @@ contains
     if (x_first) then
        ! 1. Passe X (Eq. 15 Weymouth & Yue 2010)
        call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       call apply_marker_normals_to_segments(mesh, cfg, fields, fields%C, segments)
        flux_vol = 0.0_dp
        do j = 1, ny
           do i = 1, nx + 1
@@ -1070,6 +1175,7 @@ contains
 
        ! 2. Passe Y (Eq. 16 Weymouth & Yue 2010)
        call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       call apply_marker_normals_to_segments(mesh, cfg, fields, c_star, segments)
        flux_vol = 0.0_dp
        do j = 1, ny + 1
           do i = 1, nx
@@ -1103,6 +1209,7 @@ contains
     else
        ! 1. Passe Y (Eq. 16 Weymouth & Yue 2010)
        call reconstruct_interface(cfg%reconstruction_method, mesh, fields%C, segments)
+       call apply_marker_normals_to_segments(mesh, cfg, fields, fields%C, segments)
        flux_vol = 0.0_dp
        do j = 1, ny + 1
           do i = 1, nx
@@ -1139,6 +1246,7 @@ contains
 
        ! 2. Passe X (Eq. 15 Weymouth & Yue 2010)
        call reconstruct_interface(cfg%reconstruction_method, mesh, c_star, segments)
+       call apply_marker_normals_to_segments(mesh, cfg, fields, c_star, segments)
        flux_vol = 0.0_dp
        do j = 1, ny
           do i = 1, nx + 1
@@ -1250,5 +1358,49 @@ contains
     call exchange_halos_scalar(fields%C_tilde, mesh)
     deallocate(c_next)
   end subroutine vof_smooth_diffusion
+
+  ! [Procédure/Module] subroutine apply_marker_normals_to_segments
+  subroutine apply_marker_normals_to_segments(mesh, cfg, fields, c_field, segments)
+    type(mesh_2d_t),           intent(in)    :: mesh
+    type(config_t),            intent(in)    :: cfg
+    type(flow_fields_t),       intent(in)    :: fields
+    real(dp),                  intent(in)    :: c_field(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    type(interface_segment_t), intent(inout) :: segments(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+
+    integer  :: i, j, nx, ny
+    real(dp) :: xmin, xmax, ymin, ymax, c_val
+
+    if (.not. (cfg%use_markers .and. cfg%marker_normals_plic)) return
+
+    nx = mesh%nx_local
+    ny = mesh%ny_local
+
+    do j = 0, ny + 1
+       ymin = y_face(mesh, j)
+       ymax = y_face(mesh, j + 1)
+       do i = 0, nx + 1
+          c_val = c_field(i, j)
+          if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+             if (fields%has_marker_normal(i, j)) then
+                xmin = x_face(mesh, i)
+                xmax = x_face(mesh, i + 1)
+                segments(i, j)%nx    = -fields%marker_nx(i, j)
+                segments(i, j)%ny    = -fields%marker_ny(i, j)
+                segments(i, j)%alpha = compute_alpha(xmin, xmax, ymin, ymax, &
+                                                     segments(i, j)%nx, segments(i, j)%ny, c_val)
+             end if
+          end if
+       end do
+    end do
+  end subroutine apply_marker_normals_to_segments
+
+  ! [Procédure/Module] subroutine write_vof_markers_vtk
+  subroutine write_vof_markers_vtk(mesh, output_dir, case_name, step)
+    type(mesh_2d_t),  intent(in) :: mesh
+    character(len=*), intent(in) :: output_dir, case_name
+    integer,          intent(in) :: step
+
+    call write_markers_vtk(global_marker_cloud, mesh, output_dir, case_name, step)
+  end subroutine write_vof_markers_vtk
 
 end module module_interface_vof
