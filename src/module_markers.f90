@@ -571,7 +571,7 @@ contains
     type(flow_fields_t),  intent(in)    :: fields
 
     type(interface_segment_t), allocatable :: segments(:, :)
-    integer  :: p, i, j, k, nx, ny, n_per_cell, max_per_cell, new_count
+    integer  :: p, i, j, k, di, dj, nx, ny, n_per_cell, max_per_cell, new_count
     real(dp) :: c_val, xmin, xmax, ymin, ymax, x1, y1, x2, y2, s
     logical  :: valid, has_mixed_nb
 
@@ -594,13 +594,21 @@ contains
        j = cloud%list(p)%j_cell
        c_val = fields%C(i, j)
 
-       if (c_val <= 1.0e-6_dp .or. c_val >= 1.0_dp - 1.0e-6_dp) then
-          ! Vérifier si un voisin immédiat est mixte (tolérance sous-maille d'une demi-maille)
+       if (c_val <= 0.01_dp .or. c_val >= 1.0_dp - 0.01_dp) then
+          ! Vérifier si un voisin immédiat 3x3 est mixte
           has_mixed_nb = .false.
-          if (fields%C(i-1, j) > 1.0e-5_dp .and. fields%C(i-1, j) < 1.0_dp - 1.0e-5_dp) has_mixed_nb = .true.
-          if (fields%C(i+1, j) > 1.0e-5_dp .and. fields%C(i+1, j) < 1.0_dp - 1.0e-5_dp) has_mixed_nb = .true.
-          if (fields%C(i, j-1) > 1.0e-5_dp .and. fields%C(i, j-1) < 1.0_dp - 1.0e-5_dp) has_mixed_nb = .true.
-          if (fields%C(i, j+1) > 1.0e-5_dp .and. fields%C(i, j+1) < 1.0_dp - 1.0e-5_dp) has_mixed_nb = .true.
+          do dj = -1, 1
+             do di = -1, 1
+                if (di == 0 .and. dj == 0) cycle
+                if (i+di >= 0 .and. i+di <= nx+1 .and. j+dj >= 0 .and. j+dj <= ny+1) then
+                   if (fields%C(i+di, j+dj) > 0.01_dp .and. fields%C(i+di, j+dj) < 1.0_dp - 0.01_dp) then
+                      has_mixed_nb = .true.
+                      exit
+                   end if
+                end if
+             end do
+             if (has_mixed_nb) exit
+          end do
           if (.not. has_mixed_nb) then
              cloud%list(p)%active = .false.
              cycle
@@ -1072,7 +1080,9 @@ contains
              fields%marker_nx(i, j)         = m_nx
              fields%marker_ny(i, j)         = m_ny
              fields%marker_kappa(i, j)      = kap_val
-             fields%has_marker_normal(i, j) = .true.
+             if (fields%C(i, j) > 0.01_dp .and. fields%C(i, j) < 1.0_dp - 0.01_dp .and. n_pts >= 3) then
+                fields%has_marker_normal(i, j) = .true.
+             end if
              fields%has_marker_kappa(i, j)  = .true.
 
              ! Mise à jour de la normale et de la courbure des marqueurs locaux de la cellule (i, j)
@@ -1106,8 +1116,10 @@ contains
     do j = 0, ny + 1
        do i = 0, nx + 1
           if (abs(fields%marker_nx(i, j)) > 1.0e-12_dp .or. abs(fields%marker_ny(i, j)) > 1.0e-12_dp) then
-             fields%has_marker_normal(i, j) = .true.
-             fields%has_marker_kappa(i, j)  = .true.
+             if (fields%C(i, j) > 0.01_dp .and. fields%C(i, j) < 1.0_dp - 0.01_dp) then
+                fields%has_marker_normal(i, j) = .true.
+                fields%has_marker_kappa(i, j)  = .true.
+             end if
           end if
        end do
     end do

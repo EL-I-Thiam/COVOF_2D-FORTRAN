@@ -1369,25 +1369,52 @@ contains
 
     integer  :: i, j, nx, ny
     real(dp) :: xmin, xmax, ymin, ymax, c_val
+    real(dp) :: snx, sny, nrm, gx, gy, g_mag, dot_prod
+    real(dp) :: c_mm, c_0m, c_pm, c_m0, c_p0, c_mp, c_0p, c_pp
+    logical  :: coherent
 
     if (.not. (cfg%use_markers .and. cfg%marker_normals_plic)) return
 
     nx = mesh%nx_local
     ny = mesh%ny_local
 
-    do j = 0, ny + 1
+    do j = 1, ny
        ymin = y_face(mesh, j)
        ymax = y_face(mesh, j + 1)
-       do i = 0, nx + 1
+       do i = 1, nx
           c_val = c_field(i, j)
-          if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          if (c_val > 1.0e-4_dp .and. c_val < 1.0_dp - 1.0e-4_dp) then
              if (fields%has_marker_normal(i, j)) then
-                xmin = x_face(mesh, i)
-                xmax = x_face(mesh, i + 1)
-                segments(i, j)%nx    = -fields%marker_nx(i, j)
-                segments(i, j)%ny    = -fields%marker_ny(i, j)
-                segments(i, j)%alpha = compute_alpha(xmin, xmax, ymin, ymax, &
-                                                     segments(i, j)%nx, segments(i, j)%ny, c_val)
+                snx = -fields%marker_nx(i, j)
+                sny = -fields%marker_ny(i, j)
+                nrm = sqrt(snx**2 + sny**2)
+                if (nrm > 1.0e-12_dp) then
+                   snx = snx / nrm
+                   sny = sny / nrm
+
+                   ! Contrôle de cohérence angulaire avec le gradient volumique de C
+                   c_mm = c_field(i-1, j-1); c_0m = c_field(i, j-1); c_pm = c_field(i+1, j-1)
+                   c_m0 = c_field(i-1, j  );                         c_p0 = c_field(i+1, j  )
+                   c_mp = c_field(i-1, j+1); c_0p = c_field(i, j+1); c_pp = c_field(i+1, j+1)
+
+                   gx = -((c_pp + 2.0_dp*c_p0 + c_pm) - (c_mp + 2.0_dp*c_m0 + c_mm)) / (8.0_dp * mesh%dx)
+                   gy = -((c_pp + 2.0_dp*c_0p + c_mp) - (c_pm + 2.0_dp*c_0m + c_mm)) / (8.0_dp * mesh%dy)
+                   g_mag = sqrt(gx**2 + gy**2)
+
+                   coherent = .true.
+                   if (g_mag > 1.0e-3_dp / min(mesh%dx, mesh%dy)) then
+                      dot_prod = (snx * gx + sny * gy) / g_mag
+                      if (dot_prod < 0.3_dp) coherent = .false.
+                   end if
+
+                   if (coherent) then
+                      xmin = x_face(mesh, i)
+                      xmax = x_face(mesh, i + 1)
+                      segments(i, j)%nx    = snx
+                      segments(i, j)%ny    = sny
+                      segments(i, j)%alpha = compute_alpha(xmin, xmax, ymin, ymax, snx, sny, c_val)
+                   end if
+                end if
              end if
           end if
        end do
