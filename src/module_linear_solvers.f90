@@ -549,6 +549,7 @@ contains
     real(dp) :: tol, r0_norm, r_norm, rho_0, rho_1, alpha, omega, beta, gamma
     ! Déclaration de variable locale / paramètre de calcul
     real(dp) :: sigma11, sigma12, sigma22, rhs1, rhs2, det, s11_s22, gamma1, gamma2
+    real(dp) :: rn1, rn2, inv_rn1, inv_rn2, c12, b1_mr, b2_mr
     ! Déclaration de variable locale / paramètre de calcul
     real(dp), allocatable :: b_hat(:), r_tilde(:)
     ! Déclaration de variable locale / paramètre de calcul
@@ -686,23 +687,28 @@ contains
       ! Affectation et calcul numérique
       rhs2    = global_dot_product(mesh, r0, r2, n)
 
-      ! Affectation et calcul numérique
-      det = sigma11 * sigma22 - sigma12 * sigma12
-      ! Affectation et calcul numérique
-      s11_s22 = sigma11 * sigma22
-
-      ! Évaluation de la condition logique
-      if (s11_s22 < 1.0e-30_dp .or. abs(det) < 1.0e-10_dp * s11_s22) then
-        ! Affectation et calcul numérique
+      ! Minimisation quadratique normalisée et invariante d'échelle
+      rn1 = sqrt(sigma11)
+      rn2 = sqrt(sigma22)
+      if (rn1 < 1.0e-300_dp) then
+        exit
+      else if (rn2 < 1.0e-300_dp) then
         gamma2 = 0.0_dp
-        ! Affectation et calcul numérique
-        gamma1 = rhs1 / (sigma11 + 1.0e-30_dp)
-      ! Branche par défaut si condition non satisfaite
+        gamma1 = rhs1 / sigma11
       else
-        ! Affectation et calcul numérique
-        gamma1 = (rhs1 * sigma22 - rhs2 * sigma12) / det
-        ! Affectation et calcul numérique
-        gamma2 = (rhs2 * sigma11 - rhs1 * sigma12) / det
+        inv_rn1 = 1.0_dp / rn1
+        inv_rn2 = 1.0_dp / rn2
+        c12 = sigma12 * inv_rn1 * inv_rn2
+        b1_mr = rhs1 * inv_rn1
+        b2_mr = rhs2 * inv_rn2
+        det = 1.0_dp - c12 * c12
+        if (abs(det) < 1.0e-14_dp) then
+          gamma2 = 0.0_dp
+          gamma1 = b1_mr * inv_rn1
+        else
+          gamma1 = (b1_mr - c12 * b2_mr) / (det * rn1)
+          gamma2 = (b2_mr - c12 * b1_mr) / (det * rn2)
+        end if
       end if
 
       ! Affectation et calcul numérique
@@ -714,8 +720,8 @@ contains
       ! Affectation et calcul numérique
       if (gamma2 /= 0.0_dp) then
         omega = gamma2
-      else if (abs(gamma1) > 1.0e-30_dp) then
-        omega = -gamma1
+      else if (abs(gamma1) > 1.0e-300_dp) then
+        omega = gamma1
       else
         omega = 1.0_dp
       end if

@@ -1103,6 +1103,7 @@ contains
     double precision :: s_val, val_a
     double precision, allocatable :: u_vec(:,:), r_mat(:,:), r_tilde(:), Ap2(:)
     double precision :: rho_0, rho_1, omega, sigma11, sigma12, sigma22, rhs1, rhs2, det_val, s11_s22, gamma1, gamma2, gamma_val
+    double precision :: rn1, rn2, inv_rn1, inv_rn2, c12, b1_mr, b2_mr
     double precision :: r0_norm
     ! Déclaration de variable locale / paramètre de calcul
     character(len=256) :: err_file, file_name
@@ -1334,21 +1335,34 @@ contains
              end do
           end do
 
-          ! Minimisation quadratique Sleijpen
+          ! Minimisation quadratique Sleijpen (normalisée et invariante d'échelle)
           sigma11 = sum(r_mat(:, 1)**2)
           sigma12 = sum(r_mat(:, 2) * r_mat(:, 1))
           sigma22 = sum(r_mat(:, 2)**2)
           rhs1    = sum(r_mat(:, 0) * r_mat(:, 1))
           rhs2    = sum(r_mat(:, 0) * r_mat(:, 2))
 
-          det_val = sigma11 * sigma22 - sigma12 * sigma12
-          s11_s22 = sigma11 * sigma22
-          if (s11_s22 < 1.0e-30_dp .or. abs(det_val) < 1.0e-10_dp * s11_s22) then
+          rn1 = sqrt(sigma11)
+          rn2 = sqrt(sigma22)
+          if (rn1 < 1.0e-300_dp) then
+             exit
+          else if (rn2 < 1.0e-300_dp) then
              gamma2 = 0.0_dp
-             gamma1 = rhs1 / (sigma11 + 1.0e-30_dp)
+             gamma1 = rhs1 / sigma11
           else
-             gamma1 = (rhs1 * sigma22 - rhs2 * sigma12) / det_val
-             gamma2 = (rhs2 * sigma11 - rhs1 * sigma12) / det_val
+             inv_rn1 = 1.0_dp / rn1
+             inv_rn2 = 1.0_dp / rn2
+             c12 = sigma12 * inv_rn1 * inv_rn2
+             b1_mr = rhs1 * inv_rn1
+             b2_mr = rhs2 * inv_rn2
+             det_val = 1.0_dp - c12 * c12
+             if (abs(det_val) < 1.0e-14_dp) then
+                gamma2 = 0.0_dp
+                gamma1 = b1_mr * inv_rn1
+             else
+                gamma1 = (b1_mr - c12 * b2_mr) / (det_val * rn1)
+                gamma2 = (b2_mr - c12 * b1_mr) / (det_val * rn2)
+             end if
           end if
 
           x = x + gamma1 * r_mat(:, 0) + gamma2 * r_mat(:, 1)
@@ -1356,8 +1370,8 @@ contains
           u_vec(:, 0) = u_vec(:, 0) - (gamma1 * u_vec(:, 1) + gamma2 * u_vec(:, 2))
           if (gamma2 /= 0.0_dp) then
              omega = gamma2
-          else if (abs(gamma1) > 1.0e-30_dp) then
-             omega = -gamma1
+          else if (abs(gamma1) > 1.0e-300_dp) then
+             omega = gamma1
           else
              omega = 1.0_dp
           end if
@@ -1612,6 +1626,7 @@ contains
     integer  :: i_mid, j_mid, c, kl, ku, bw, i_max, j_max
     real(dp) :: tol, r0_norm, r_norm, rho_0, rho_1, beta, gamma, alpha, omega
     real(dp) :: sigma11, sigma12, sigma22, rhs1, rhs2, det, gamma1, gamma2, denom, pivot, factor, s, sub_val, l_val
+    real(dp) :: rn1, rn2, inv_rn1, inv_rn2, c12, b1_mr, b2_mr
     logical  :: use_direct
     character(len=256) :: err_file, hist_file, sol_file, px_file, py_file, vtk_file
 
@@ -1836,20 +1851,34 @@ contains
           call matvec_A(r(1, :), tmp)
           call apply_block_tri(tmp, r(2, :))
 
-          ! Minimisation quadratique
+          ! Minimisation quadratique normalisée et invariante d'échelle
           sigma11 = sum(r(1, :) * r(1, :))
           sigma12 = sum(r(2, :) * r(1, :))
           sigma22 = sum(r(2, :) * r(2, :))
           rhs1    = sum(r(0, :) * r(1, :))
           rhs2    = sum(r(0, :) * r(2, :))
 
-          det = sigma11 * sigma22 - sigma12 * sigma12
-          if (abs(det) < 1.0e-30_dp) then
+          rn1 = sqrt(sigma11)
+          rn2 = sqrt(sigma22)
+          if (rn1 < 1.0e-300_dp) then
+             exit
+          else if (rn2 < 1.0e-300_dp) then
              gamma2 = 0.0_dp
-             gamma1 = rhs1 / (sigma11 + 1.0e-30_dp)
+             gamma1 = rhs1 / sigma11
           else
-             gamma1 = (rhs1 * sigma22 - rhs2 * sigma12) / det
-             gamma2 = (rhs2 * sigma11 - rhs1 * sigma12) / det
+             inv_rn1 = 1.0_dp / rn1
+             inv_rn2 = 1.0_dp / rn2
+             c12 = sigma12 * inv_rn1 * inv_rn2
+             b1_mr = rhs1 * inv_rn1
+             b2_mr = rhs2 * inv_rn2
+             det = 1.0_dp - c12 * c12
+             if (abs(det) < 1.0e-14_dp) then
+                gamma2 = 0.0_dp
+                gamma1 = b1_mr * inv_rn1
+             else
+                gamma1 = (b1_mr - c12 * b2_mr) / (det * rn1)
+                gamma2 = (b2_mr - c12 * b1_mr) / (det * rn2)
+             end if
           end if
 
           x = x + gamma1 * r(0, :) + gamma2 * r(1, :)
@@ -1858,8 +1887,8 @@ contains
 
           if (gamma2 /= 0.0_dp) then
              omega = gamma2
-          else if (abs(gamma1) > 1.0e-30_dp) then
-             omega = -gamma1
+          else if (abs(gamma1) > 1.0e-300_dp) then
+             omega = gamma1
           else
              omega = 1.0_dp
           end if
