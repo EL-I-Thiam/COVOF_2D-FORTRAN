@@ -2,249 +2,207 @@
 
 ## Discrétisation Spatiale sur Grille Cartésienne Décalée (MAC)
 
-Le solveur **COVOF 2D** utilise la discrétisation spatiale sur grille décalée dite *Marker-and-Cell* (MAC), introduite par Harlow et Welch (1965). Ce choix topologique fondamental est universellement reconnu en mécanique des fluides incompressibles pour ses propriétés mathématiques intrinsèques d'inf-sup stabilité (condition de Ladyzhenskaya-Babuška-Brezzi ou LBB discrète) et l'élimination naturelle des oscillations parasites en damier (*checkerboard oscillations*) de pression, sans requérir de dissipation artificielle ni de correction de Rhie-Chow.
+Le solveur **COVOF 2D** emploie la discrétisation par volumes finis sur grille cartésienne décalée dite *Marker-and-Cell* (MAC, Harlow & Welch 1965). Ce positionnement entrelacé des inconnues garantit la condition inf-sup (Ladyzhenskaya-Babuška-Brezzi discrète) et élimine intrinsèquement tout mode parasite en damier (*checkerboard*) sur la pression sans recourir à l'interpolation de Rhie-Chow ni à une stabilisation artificielle.
 
-### Positionnement Staggered des Variables Primordiales
+### Localisation des Variables Primordiales
 
-Le domaine de calcul bidimensionnel est pavé par un maillage régulier de pas $\Delta x$ et $\Delta y$. Les différentes grandeurs physiques sont localisées comme suit :
+Sur une grille uniforme de pas $\Delta x = L_x / N_x$ et $\Delta y = L_y / N_y$, les grandeurs sont stockées aux positions géométriques suivantes (indices locaux $i \in [1, N_{x,\text{loc}}]$, $j \in [1, N_{y,\text{loc}}]$ entourés d'une couche fantôme $0$ et $N+1$) :
 
 1. **Centres des cellules $(i, j)$ :**
-   - Pression hydrodynamique $p_{i, j}$
-   - Fraction volumique VOF $C_{i, j}$
-   - Masse volumique $\rho_{i, j}$ et viscosité dynamique cellulaire $\mu_{i, j}$
-   - Température scalaire $T_{i, j}$
-   - Paramètre adaptatif de pénalité de Lagrangien augmenté $r_{i, j}$
-   - Compressibilité isotherme $\chi_{T, i, j}$
+   Pression $p_{i,j}$, fraction volumique VOF $C_{i,j}$, versions régularisées $C_{s,i,j}$ et $\widetilde{C}_{i,j}$, masse volumique $\rho_{i,j}$, viscosité $\mu_{i,j}$, température $T_{i,j}$, énergie totale $e_{i,j}$ et $\rho e_{i,j}$, compressibilité $\chi_{T,i,j}$, paramètre AAL $r_{\text{aal},i,j}$, courbure $\kappa_{i,j}$ et normale $\mathbf{n}_{i,j}$.
+2. **Faces verticales $(i - \frac{1}{2}, j)$ (notées `u(i, j)` dans le code, face Ouest de la cellule $(i,j)$) :**
+   Vitesse horizontale $u_{i,j}$, masse volumique de face $\rho_{u,i,j}$, force capillaire horizontale $F_{\sigma, x, i, j}$, quantité de mouvement intermédiaire $(\rho u)^*_{i,j}$.
+3. **Faces horizontales $(i, j - \frac{1}{2})$ (notées `v(i, j)` dans le code, face Sud de la cellule $(i,j)$) :**
+   Vitesse verticale $v_{i,j}$, masse volumique de face $\rho_{v,i,j}$, force capillaire verticale $F_{\sigma, y, i, j}$, flottabilité de Boussinesq et quantité de mouvement intermédiaire $(\rho v)^*_{i,j}$.
+4. **Sommets / Nœuds $(i - \frac{1}{2}, j - \frac{1}{2})$ (notés `mu_node(i, j)` dans le code) :**
+   Viscosité harmonique nodale $\mu_{\text{node}, i, j}$ utilisée pour discrétiser les dérivées croisées de cisaillement $\mu(\partial_y u + \partial_x v)$.
 
-2. **Faces verticales (Normales à $x$) $(i + \frac{1}{2}, j)$ :**
-   - Composante horizontale de la vitesse $u_{i+1/2, j}$
-   - Masse volumique transportée aux faces $\rho_{u, i+1/2, j}$
-   - Force volumique superficielle horizontale $f_{\sigma, x, i+1/2, j}$
-
-3. **Faces horizontales (Normales à $y$) $(i, j + \frac{1}{2})$ :**
-   - Composante verticale de la vitesse $v_{i, j+1/2}$
-   - Masse volumique transportée aux faces $\rho_{v, i, j+1/2}$
-   - Force volumique superficielle verticale $f_{\sigma, y, i, j+1/2}$
-   - Terme de flottabilité thermique de Boussinesq $f_{\text{boussinesq}, y, i, j+1/2}$
-
-4. **Sommets / Nœuds de coin $(i + \frac{1}{2}, j + \frac{1}{2})$ :**
-   - Viscosité dynamique harmonique nodale $\mu_{i+1/2, j+1/2}$
-   - Taux de déformation croisé $\left( \frac{\partial u}{\partial y} + \frac{\partial v}{\partial x} \right)$
-   - Contrainte de cisaillement visqueuse $\tau_{xy, i+1/2, j+1/2}$
-
-```
-               (i, j+1)
-                  |
-        +---------v---------+
-        |                   |
-        |      p(i, j)      |
-   u    |      C(i, j)      |    u
-(i-1/2,j)----> T(i, j)     ----> (i+1/2, j)
-        |     rho(i, j)     |
-        |                   |
-        +---------^---------+
-                  |
-                (i, j)
-              v(i, j-1/2)
+```text
+                       v(i, j+1)  [face Nord de (i,j)]
+                 +---------^---------+
+                 |                   |
+                 |  p(i,j), C(i,j)   |
+      u(i, j)  ---->  rho, mu, T   ---->  u(i+1, j)
+   [face Ouest]  |  kappa, chi_T     |  [face Est]
+                 |                   |
+                 +---------^---------+
+                       v(i, j)    [face Sud de (i,j)]
+     mu_node(i, j) au coin Sud-Ouest (i-1/2, j-1/2)
 ```
 
-### Gradients Discrets et Conservation de la Divergence
+### Dualité Divergence-Gradient sur Grille MAC
 
-Sur la grille MAC, l'opérateur de divergence discrète de la vitesse $(\nabla \cdot \mathbf{u})_{i, j}$ au centre de la cellule $(i, j)$ s'écrit de manière compacte et exacte au second ordre :
+Avec cette convention d'indiçage exacte du code (`u(i,j)` à gauche et `u(i+1,j)` à droite de la cellule `(i,j)`), la divergence discrète $(\nabla_h \cdot \mathbf{u})_{i,j}$ et le gradient de pression s'écrivent :
 
-$$(\nabla \cdot \mathbf{u})_{i, j} = \frac{u_{i+1/2, j} - u_{i-1/2, j}}{\Delta x} + \frac{v_{i, j+1/2} - v_{i, j-1/2}}{\Delta y}$$
+$$(\nabla_h \cdot \mathbf{u})_{i,j} = \frac{u_{i+1,j} - u_{i,j}}{\Delta x} + \frac{v_{i,j+1} - v_{i,j}}{\Delta y}$$
 
-Réciproquement, les composantes du gradient de pression agissant respectivement sur les équations de quantité de mouvement en $u$ et en $v$ s'évaluent sans aucune interpolation :
+$$\left(\frac{\partial p}{\partial x}\right)_{i,j} = \frac{p_{i,j} - p_{i-1,j}}{\Delta x} \quad (\text{sur face } u_{i,j}), \qquad \left(\frac{\partial p}{\partial y}\right)_{i,j} = \frac{p_{i,j} - p_{i,j-1}}{\Delta y} \quad (\text{sur face } v_{i,j})$$
 
-$$\left( \frac{\partial p}{\partial x} \right)_{i+1/2, j} = \frac{p_{i+1, j} - p_{i, j}}{\Delta x}, \quad \left( \frac{\partial p}{\partial y} \right)_{i, j+1/2} = \frac{p_{i, j+1} - p_{i, j}}{\Delta y}$$
-
-Cette dualité adjointe parfaite assure que le gradient discret $B^T$ est l'opposé exact de l'adjoint de l'opérateur de divergence discrète $B$, conférant au système de Stokes une structure point-selle symétrique parfaite.
+Cette dualité adjointe ($\mathbf{D} = -\mathbf{G}^T$ à un facteur volumique $\Delta x \Delta y$ près) assure la symétrie parfaite de la matrice de Stokes et l'annulation exacte de la divergence dans les solveurs monolithiques et AAL.
 
 ---
 
-## Schémas d'Advection et Linéarisations Convectives
+## Schémas Convectifs et Linéarisations de l'Inertie
 
-Le terme d'advection non linéaire $(\mathbf{u} \cdot \nabla) \mathbf{u}$ dans les équations de quantité de mouvement représente le couplage cinématique d'inertie. COVOF 2D met à disposition quatre formulations sélectionnables par la clé `convective_linearization` dans le fichier JSON.
+Le traitement du terme non linéaire $(\mathbf{u} \cdot \nabla)\mathbf{u}$ est configuré par deux clés complémentaires dans `physics` (ou au niveau racine) :
+- `physics.convective_scheme` : `"UPWIND"`, `"CENTERED"`, `"TVD_SUPERBEE"`.
+- `physics.convective_linearization` : `"PICARD"`, `"ADAMS_BASHFORTH"` (alias `"AB2"`), `"NEWTON"`.
 
-### Schéma Décentré Amont d'Ordre 1 (`UPWIND`)
+### Schémas Spatiaux (`convective_scheme`)
 
-Le schéma décentré amont utilise le sens de propagation de l'écoulement pour évaluer la vitesse sur les faces de contrôle :
+1. **Décentré Amont d'Ordre 1 (`"UPWIND"`) :**
+   Inconditionnellement stable et monotone même à grand nombre de Reynolds de maille $Re_\Delta > 2$, au prix d'une diffusion numérique $\mathcal{O}(\Delta x)$.
+2. **Centré d'Ordre 2 (`"CENTERED"`) :**
+   Évalue les vitesses aux faces par moyenne arithmétique symétrique, atteignant l'ordre $\mathcal{O}(\Delta x^2)$ sans dissipation artificielle, idéal pour la DNS lorsque $Re_\Delta \le 2$.
+3. **Haute Résolution TVD (`"TVD_SUPERBEE"`) :**
+   Combine la précision d'ordre 2 dans les zones régulières et le limiteur non linéaire Superbee près des gradients raides.
 
-$$\left( u \frac{\partial u}{\partial x} \right)_{i+1/2, j} \approx \begin{cases} u_{i+1/2, j} \frac{u_{i+1/2, j} - u_{i-1/2, j}}{\Delta x} & \text{si } u_{i+1/2, j} \ge 0 \\ u_{i+1/2, j} \frac{u_{i+3/2, j} - u_{i+1/2, j}}{\Delta x} & \text{si } u_{i+1/2, j} < 0 \end{cases}$$
+### Linéarisations Temporelles du Terme Convectif (`convective_linearization`)
 
-- **Avantages :** Stabilité inconditionnelle, positivité stricte, absence d'oscillations numériques parasites même à très haut nombre de Reynolds de maille $Re_{\Delta} = \frac{\rho U \Delta x}{\mu} > 2$.
-- **Inconvénients :** Diffusion numérique artificielle d'ordre 1 proportionnelle à $\frac{u \Delta x}{2}$, tronquant les tourbillons fins.
-
-### Schéma Centré d'Ordre 2 (`CENTERED`)
-
-Le schéma centré calcule la moyenne arithmétique de la vitesse aux interfaces de chaque volume de contrôle :
-
-$$\left( u \frac{\partial u}{\partial x} \right)_{i+1/2, j} \approx \frac{1}{\Delta x} \left[ \left(\frac{u_{i+1/2, j} + u_{i+3/2, j}}{2}\right)^2 - \left(\frac{u_{i-1/2, j} + u_{i+1/2, j}}{2}\right)^2 \right]$$
-
-- **Avantages :** Précision spatiale rigoureusement d'ordre 2 $\mathcal{O}(\Delta x^2, \Delta y^2)$, aucune diffusion numérique artificielle, conservation stricte de l'énergie cinétique globale.
-- **Précautions :** Peut générer des oscillations de dispersion lorsque $Re_{\Delta} > 2$, nécessitant un maillage suffisamment résolu.
-
-### Linéarisation Complète de Newton (`NEWTON`)
-
-Pour les simulations monolithiques stationnaires ou à grands pas de temps, COVOF 2D dispose d'une linéarisation complète de Newton-Raphson de l'opérateur convectif :
-
-$$\mathbf{u}^{n+1} = \mathbf{u}^* + \delta \mathbf{u}$$
-
-$$(\mathbf{u}^{n+1} \cdot \nabla) \mathbf{u}^{n+1} \approx (\mathbf{u}^* \cdot \nabla) \delta \mathbf{u} + (\delta \mathbf{u} \cdot \nabla) \mathbf{u}^* + (\mathbf{u}^* \cdot \nabla) \mathbf{u}^*$$
-
-Cette formulation introduit les dérivées croisées $\frac{\partial u}{\partial x}$, $\frac{\partial u}{\partial y}$, $\frac{\partial v}{\partial x}$, $\frac{\partial v}{\partial y}$ dans la matrice jacobienne du système linéaire, garantissant un taux de convergence asymptotique **quadratique** indispensable pour la convergence rapide des solveurs de Krylov couplés.
-
-### Schéma d'Adams-Bashforth d'Ordre 2 (`ADAMS_BASHFORTH` / `AB2`)
-
-Dans ce schéma, la vitesse advectante est extrapolée explicitement à partir des deux pas de temps antérieurs $(n)$ et $(n-1)$ :
-
-$$\mathbf{u}_{\text{adv}} = \frac{3}{2}\mathbf{u}^n - \frac{1}{2}\mathbf{u}^{n-1}$$
-
-L'équation en vitesse devient alors un problème linéaire à coefficients constants durant le pas de temps, découplant l'advection du problème de diffusion-continuité.
+1. **Linéarisation de Picard (`"PICARD"`, défaut) :**
+   La vitesse advectante est figée au pas connu $\mathbf{u}^n$ : $(\mathbf{u}^n \cdot \nabla)\mathbf{u}^{n+1}$. Simple et robuste, précise à l'ordre 1 en temps sur l'advection.
+2. **Extrapolation d'Adams-Bashforth d'Ordre 2 (`"ADAMS_BASHFORTH"` / `"AB2"`) :**
+   Lorsque l'historique $\mathbf{u}^{n-1}$ est disponible (`fields.has_nm1 == true`), la vitesse advectrice est extrapolée à l'ordre 2 selon l'Équation 10 de *Fluids* 2021 :
+   $$\mathbf{u}_{\text{adv}} = 2 \mathbf{u}^n - \mathbf{u}^{n-1} \quad \text{ou} \quad \text{flux extrapolés } \frac{3}{2}\mathcal{C}(\mathbf{u}^n) - \frac{1}{2}\mathcal{C}(\mathbf{u}^{n-1})$$
+   préservant la linéarité du système implicite tout en atteignant l'ordre 2 temporel.
+3. **Linéarisation Complète de Newton (`"NEWTON"`) :**
+   Inclut le terme jacobien croisé $(\delta \mathbf{u} \cdot \nabla)\mathbf{u}^n$ en plus de $(\mathbf{u}^n \cdot \nabla)\mathbf{u}^{n+1}$ dans l'opérateur matriciel `apply_system_matrix` (et le terme quadratique $-(\mathbf{u}^n \cdot \nabla)\mathbf{u}^n$ au second membre `assemble_rhs`), accélérant la convergence sur les écoulements stationnaires ou à grands pas de temps.
 
 ---
 
-## Discrétisation Temporelle et Stabilité
+## Discrétisation Temporelle et Pas de Temps Adaptatif
 
-Le choix de l'algorithme d'avancement en temps est piloté par la clé `time.scheme` dans le fichier de configuration.
+### Schémas Temporels Implémentés (`time.time_scheme`)
 
-### Schémas Temporels Implémentés
+1. **Euler Implicite d'Ordre 1 (`"EULER"`, défaut) :**
+   $$\frac{\mathbf{u}^{n+1} - \mathbf{u}^n}{\Delta t}, \qquad \alpha_{\text{time}} = 1.0$$
+2. **Schéma de Gear / BDF2 d'Ordre 2 (`"GEAR"` ou `"BDF2"`) :**
+   Dès le pas 2 (`fields.has_nm1 == true`), le terme instationnaire utilise la formule rétrograde d'ordre 2 à 3 niveaux temporels :
+   $$\frac{3 \mathbf{u}^{n+1} - 4 \mathbf{u}^n + \mathbf{u}^{n-1}}{2 \Delta t}, \qquad \alpha_{\text{time}} = 1.5$$
+   (avec amorçage automatique par Euler implicite $\alpha_{\text{time}} = 1.0$ au pas 1).
+3. **Transport Inertiel Conservatif `SSP-RK3` (`physics.enable_ssp_rk3_momentum = true`) :**
+   Activé automatiquement lorsque `compressible = true` (ou manuellement), un schéma de Runge-Kutta TVD à 3 étages transporte la quantité de mouvement $(\rho u, \rho v)$ de façon conservative avant l'étape de couplage vitesse-pression (étape 1 de *Fluids* 2024).
 
-1. **Euler Explicite d'Ordre 1 (`EULER_EXPLICIT`) :**
-   $$\frac{\mathbf{u}^{n+1} - \mathbf{u}^n}{\Delta t} = \mathbf{F}(\mathbf{u}^n)$$
-   Utilisé principalement pour la vérification numérique ou les régimes purement dominés par la convection avec CFL strict.
+### Pas de Temps Adaptatif (`time.adaptive_dt = true`)
 
-2. **Schéma de Gear / BDF2 d'Ordre 2 (`GEAR` / `BDF2`) :**
-   Schéma à trois pas de temps implicite, inconditionnellement stable pour les termes linéaires :
-   $$\frac{3 \mathbf{u}^{n+1} - 4 \mathbf{u}^n + \mathbf{u}^{n-1}}{2 \Delta t} = \mathbf{F}(\mathbf{u}^{n+1})$$
-   Dans COVOF 2D, le coefficient $\alpha_{\text{time}}$ est automatiquement basculé à $1.5$ dès que l'historique temporel $\mathbf{u}^{n-1}$ (`fields.has_nm1`) est disponible, avec repli sur Euler implicite ($\alpha_{\text{time}} = 1.0$) lors du tout premier pas de temps.
+À chaque itération, `Simulation::compute_time_step()` (`sim_compute_time_step` en Fortran) évalue la vitesse maximale globale $U_{\max} = \max_{i,j} \sqrt{|u_{i,j}|^2 + |v_{i,j}|^2}$ via `MPI_Allreduce(..., MPI_MAX)` et borne le pas de temps par :
 
-3. **Runge-Kutta à Préservation de Stabilité Forte (`SSP_RK3`) :**
-   Schéma d'ordre 3 en trois sous-étapes pour l'advection conservative conjointe de la masse et de la quantité de mouvement (modèle Consistent Mass-Momentum d'El Ouafa et al., *Fluids* 2021) :
-   $$\mathbf{u}^{(1)} = \mathbf{u}^n + \Delta t \mathcal{L}(\mathbf{u}^n)$$
-   $$\mathbf{u}^{(2)} = \frac{3}{4}\mathbf{u}^n + \frac{1}{4}\mathbf{u}^{(1)} + \frac{1}{4}\Delta t \mathcal{L}(\mathbf{u}^{(1)})$$
-   $$\mathbf{u}^{n+1} = \frac{1}{3}\mathbf{u}^n + \frac{2}{3}\mathbf{u}^{(2)} + \frac{2}{3}\Delta t \mathcal{L}(\mathbf{u}^{(2)})$$
+$$\Delta t_{\text{CFL}} = \text{CFL}_{\max} \frac{\min(\Delta x, \Delta y)}{\max(U_{\max}, 10^{-6})}$$
 
-### Critères de Stabilité et Pas de Temps Adaptatif (CFL)
+$$\Delta t_{\sigma} = \begin{cases} \sqrt{\frac{(\rho_1 + \rho_2) \, \min(\Delta x, \Delta y)^3}{4 \pi \sigma}} & \text{si } \text{enable\_surface\_tension} \text{ et } \sigma > 0 \\ +\infty & \text{sinon} \end{cases}$$
 
-Lorsque `time.adaptative_dt` est activé, COVOF 2D recalcule à chaque itération le pas de temps maximal admissible $\Delta t$ sous la triple contrainte de Courant-Friedrichs-Lewy (CFL) :
+$$\Delta t = \min\left(\Delta t_{\text{init}}, \, \Delta t_{\text{CFL}}, \, \Delta t_{\sigma}\right)$$
 
-1. **Condition CFL Convective :**
-   $$\Delta t_{\text{conv}} = \text{CFL} \cdot \left[ \max_{i, j} \left( \frac{|u_{i+1/2, j}|}{\Delta x} + \frac{|v_{i, j+1/2}|}{\Delta y} \right) \right]^{-1}$$
+où $\Delta t_{\text{init}}$ est `time.dt` et $\text{CFL}_{\max}$ est `time.cfl_max` (le pas est également tronqué sur le dernier pas pour atteindre exactement `time.t_final`).
 
-2. **Condition CFL Diffusive Visqueuse (pour intégration explicite) :**
-   $$\Delta t_{\text{diff}} = \frac{1}{2} \min_{i, j} \left( \frac{\rho_{i, j}}{\mu_{i, j}} \right) \left[ \frac{1}{\Delta x^2} + \frac{1}{\Delta y^2} \right]^{-1}$$
+---
 
-3. **Condition Capillaire d'Ondes de Surface (Brackbill et al. 1992) :**
-   $$\Delta t_{\text{cap}} = \sqrt{\frac{(\rho_1 + \rho_2) \min(\Delta x, \Delta y)^3}{4 \pi \sigma}}$$
+## Suivi d'Interface VOF et Méthode Hybride FC-WY-CVI-Marker
 
-Le pas de temps effectif retenu est :
-$$\Delta t^{n+1} = \min \left( \Delta t_{\text{max}}, \Delta t_{\text{conv}}, \Delta t_{\text{diff}}, \Delta t_{\text{cap}} \right)$$
+### Reconstruction Géométrique et Advection VOF (`vof.*`)
+
+Le module `InterfaceTracker` (`module_interface_vof` en Fortran) met à disposition deux familles d'advection de la fraction volumique $C$ :
+
+1. **Schémas géométriques (`"WEYMOUTH_YUE"` par défaut, et `"CIAM"`) :**
+   - Couplés aux algorithmes de reconstruction affine $n_x x + n_y y + \alpha = 0$ : `"PLIC"` (Youngs), `"ELVIRA"` (6 candidats de fonctions de hauteur, ordre 2 exact sur droites), `"LVIRA"` (moindres carrés non linéaires sur $3\times 3$) ou `"SLIC"`.
+   - **Schéma conservatif de Weymouth & Yue (2010)** avec splitting alterné de Strang (X puis Y aux pas pairs, Y puis X aux pas impairs) : fixe l'indicatrice binaire de dilatation $C_{d,i,j} = \mathbf{1}_{C_{i,j}^n \ge 0.5}$ au début du pas et transporte :
+     $$C_{i,j}^* = C_{i,j}^n - \frac{\Delta V_{i+1,j}^x - \Delta V_{i,j}^x}{\Delta x \Delta y} + C_{d,i,j} \frac{\Delta t}{\Delta x}(u_{i+1,j}^{n+1} - u_{i,j}^{n+1})$$
+     $$C_{i,j}^{n+1} = C_{i,j}^* - \frac{\Delta V_{i,j+1}^y - \Delta V_{i,j}^y}{\Delta x \Delta y} + C_{d,i,j} \frac{\Delta t}{\Delta y}(v_{i,j+1}^{n+1} - v_{i,j}^{n+1})$$
+     où $\Delta V$ est calculé exactement par découpe géométrique Sutherland-Hodgman + Shoelace (`cut_box_area`). Sous $\text{CFL}_{\text{vof}} < 0.5$ et $\nabla_h \cdot \mathbf{u}^{n+1} = 0$, la somme des flux télescope et **conserve le volume à la précision du solveur linéaire**.
+2. **Schéma algébrique (`"VOF_TVD"` / `"TVD"`) :**
+   Sans reconstruction géométrique (`reconstruction_method` forcée à `"NONE"`), piloté par les limiteurs `"SUPERBEE"`, `"VAN_LEER"`, `"MUSCL"` ou `"HRIC"`.
+
+### Méthode Hybride FC-WY-CVI-Marker (Variante B Exacte sur Boîtes MAC Décalées)
+
+Lorsqu'on active `vof.use_markers = true` (ou `markers.enabled = true`), COVOF 2D associe au transport VOF-WY un **nuage de marqueurs lagrangiens non connectés** (`InterfaceMarkers` / `module_markers`) sans arêtes ni maillage surfacique, totalement insensible aux ruptures et coalescences.
+
+#### 1. Interpolation Conservative de la Vitesse (CVI — Variante B exacte)
+Selon le théorème de Liouville, l'interpolation bilinéaire standard sur grille MAC produit une divergence continue non nulle d'ordre $\mathcal{O}(h)$ qui crée des amas artificiels de marqueurs. COVOF 2D implémente la **Variante B exacte de Wang et al. (2015) / Pusok et al. (2017)** (`interpolate_velocity_cvi`) en interpolant chaque composante sur **sa propre boîte décalée MAC** :
+- Boîte pour $u$ : $\Omega_u(i, j_u) = [x_i^f, x_{i+1}^f] \times [y_{j_u}^c, y_{j_u+1}^c]$ avec $j_u = j - 1$ si $y_p < y_j^c$ sinon $j$, et coordonnées réduites $(\xi_u, \eta_u) \in [0, 1]^2$.
+- Boîte pour $v$ : $\Omega_v(i_v, j) = [x_{i_v}^c, x_{i_v+1}^c] \times [y_j^f, y_{j+1}^f]$ avec $i_v = i - 1$ si $x_p < x_i^c$ sinon $i$, et coordonnées réduites $(\xi_v, \eta_v) \in [0, 1]^2$.
+- Formule CVI exacte avec corrections quadratiques solénoïdales ($\Delta v_E = v_{i_v+1,j+1} - v_{i_v+1,j}$, $\Delta v_W = v_{i_v,j+1} - v_{i_v,j}$, $\Delta u_N = u_{i+1,j_u+1} - u_{i,j_u+1}$, $\Delta u_S = u_{i+1,j_u} - u_{i,j_u}$) :
+  $$u_{\text{CVI}}(x_p, y_p) = u_{\text{bilin}}(\xi_u, \eta_u) + \frac{\Delta x}{2 \Delta y} \, \xi_u (1 - \xi_u) (\Delta v_E - \Delta v_W)$$
+  $$v_{\text{CVI}}(x_p, y_p) = v_{\text{bilin}}(\xi_v, \eta_v) + \frac{\Delta y}{2 \Delta x} \, \eta_v (1 - \eta_v) (\Delta u_N - \Delta u_S)$$
+En dérivant analytiquement dans chacun des 4 sous-quadrants de $(i, j)$, tous les termes linéaires croisés s'annulent identiquement :
+$$\frac{\partial u_{\text{CVI}}}{\partial x} + \frac{\partial v_{\text{CVI}}}{\partial y} \equiv \frac{u_{i+1,j} - u_{i,j}}{\Delta x} + \frac{v_{i,j+1} - v_{i,j}}{\Delta y} = D_{i,j}$$
+tout en restant strictement dans la couche unique de halo `(0:nx+1, 0:ny+1)`. *(L'option `marker_advection_scheme = "BILINEAR_RK2"` permet de désactiver la correction quadratique à des fins d'étude comparative).*
+
+#### 2. Advection RK2-Heun, Migration MPI, Élagage et Courbure Parabolique
+À l'intérieur de `InterfaceTracker::advect` (`advect_vof`), juste après l'advection VOF et le lissage SVOF/diffusif et juste avant `compute_curvature_and_CSF` :
+1. **Advection RK2-Heun (`advect_rk2` / `advect_markers_rk2`) :** Prédit $\mathbf{x}_p^* = \mathbf{x}_p^n + \Delta t \, \mathbf{u}_{\text{CVI}}(\mathbf{x}_p^n; \mathbf{u}^n)$, effectue si nécessaire un routage MPI aller-retour à 4 passes pour évaluer $\mathbf{u}_{\text{CVI}}(\mathbf{x}_p^*; \mathbf{u}^{n+1})$ sur le rang propriétaire, puis corrige $\mathbf{x}_p^{n+1} = \mathbf{x}_p^n + \frac{\Delta t}{2}[\mathbf{u}_1 + \mathbf{u}_2]$.
+2. **Migration MPI en 2 passes (`migrate_mpi` / `migrate_markers_mpi`) :** Passe X (Ouest $\leftrightarrow$ Est avec repliement périodique éventuel) puis Passe Y (Sud $\leftrightarrow$ Nord) sans nécessiter de voisins diagonaux.
+3. **Élagage et ré-ensemencement sélectif (`prune_and_reseed`) :**
+   - Supprime les marqueurs tombés en phase pure ($C < 10^{-6}$ ou $C > 1 - 10^{-6}$ dans le voisinage $3\times 3$) et élague par sous-octants si une cellule dépasse `marker_max_per_cell` (défaut `8`).
+   - Ensemence uniquement les cellules interfaciales dépeuplées ($N_p = 0$) avec `markers_per_cell` marqueurs (défaut `4`) sans jamais écraser ni projeter les marqueurs actifs existants.
+4. **Courbure et normale dans le repère tourné $(\tau, \eta)$ (`compute_curvature_from_markers`) :**
+   - Échange les marqueurs fantômes dans une bande $2.5 h$ entre rangs MPI.
+   - Filtre les marqueurs voisins par proximité et cohérence angulaire $\mathbf{n}_p \cdot \mathbf{n}_{i,j}^{\text{ref}} \ge 0.5$ (protégeant les filaments et jupes minces contre le mélange des faces opposées).
+   - Ajuste une parabole pondérée $\eta(\tau) = a \tau^2 + b \tau + c$ par moindres carrés $3\times 3$ :
+     $$\mathbf{n}_{i,j}^{\text{marker}} = \frac{\mathbf{e}_\eta - b \mathbf{e}_\tau}{\sqrt{1 + b^2}}, \qquad \kappa_{i,j}^{\text{marker}} = \frac{2a}{(1 + b^2)^{3/2}}$$
+     avec écrêtage Nyquist $|\kappa| \le 2/\min(\Delta x, \Delta y)$, passe conservative de lissage tangentiel et repli sur la courbure CSF si $M < 4$.
+   - Si `marker_normals_plic = true`, injecte $\mathbf{n}^{\text{marker}}$ (sous réserve de cohérence angulaire $\ge 0.5$ avec le gradient VOF) dans les segments PLIC pour l'étape suivante (`apply_marker_normals_to_segments`).
 
 ---
 
 ## Formulations du Couplage Vitesse-Pression
 
-Le traitement de la contrainte d'incompressibilité $\nabla \cdot \mathbf{u} = 0$ constitue le cœur algorithmique de tout solveur Navier-Stokes. COVOF 2D intègre cinq formulations majeures.
+COVOF 2D propose cinq formulations pilotées par `solver.type` :
 
-### 1. Lagrangien Augmenté Standard (`AUGMENTED_LAGRANGIAN`)
+### 1. Lagrangien Augmenté Standard (`"AUGMENTED_LAGRANGIAN"`, défaut)
+Ajoute le terme de pénalité $-r_{\text{al}} \nabla(\nabla \cdot \mathbf{u}^{k+1})$ à l'équation de quantité de mouvement avec un scalaire uniforme `solver.r_al`, puis actualise la pression par boucle d'Uzawa (`solver.uzawa_iter`) :
 
-La méthode du Lagrangien Augmenté (Fortin & Glowinski, 1982 ; Caltagirone & Breil, 1999) pénalise l'équation de quantité de mouvement par la divergence de la vitesse tout en conservant le gradient de pression :
+$$p^{k+1} = p^k - r_{\text{al}} (\nabla_h \cdot \mathbf{u}^{k+1})$$
 
-$$\rho \left( \frac{\alpha_{\text{time}} \mathbf{u}^{k+1}}{\Delta t} + (\mathbf{u}^n \cdot \nabla)\mathbf{u}^{k+1} \right) - \nabla \cdot \boldsymbol{\tau}^{k+1} - r \nabla(\nabla \cdot \mathbf{u}^{k+1}) = -\nabla p^k + \mathbf{f}$$
+avec arrêt anticipé dès que $\|\nabla_h \cdot \mathbf{u}^{k+1}\|_\infty \le \text{uzawa\_tol}$.
 
-où $r$ est un paramètre scalaire uniforme de pénalité de Lagrangien augmenté ($r \sim 10^2 - 10^4\,\text{Pa}\cdot\text{s}\cdot\text{m}^{-1}$, configuré via `solver.r_al`). La pression est ensuite réactualisée par une étape d'Uzawa :
+### 2. Lagrangien Augmenté Adaptatif Incompressible (`"AAL"` / `"ADAPTATIVE_AUGMENTED_LAGRANGIAN"`)
+Détermine cellule par cellule le paramètre optimal $r(t, M)$ (Vincent et al., *Computers & Fluids* 33, 2004, Éq. 14) en pondérant les sept échelles physiques locales par `solver.k_aal` ($K_{\text{aal}} \in [10, 1000]$, défaut `100.0`) :
 
-$$p^{k+1} = p^k - r \nabla \cdot \mathbf{u}^{k+1}$$
+$$r_{i,j} = K_{\text{aal}} \max\left( \alpha_{\text{time}}\rho \frac{L_0^2}{t_0}, \; \rho u_0 L_0, \; \rho \frac{L_0^2}{u_0}\|\mathbf{g}\|, \; \frac{p_0 L_0}{u_0}, \; \mu, \; \mu \frac{\Delta x \Delta y}{\mathcal{K}}, \; \frac{\sigma}{u_0} \right)$$
 
-Si `solver.uzawa_iter = 1`, la méthode se comporte comme un pseudo-pas fractionnaire très rapide. Si `solver.uzawa_iter > 1`, une boucle itérative d'Uzawa est exécutée jusqu'à ce que $\|\nabla \cdot \mathbf{u}^{k+1}\|_\infty \le \epsilon_{\text{uzawa}}$ (`solver.uzawa_tol`), assurant une divergence rigoureusement nulle au pas de temps $n+1$.
+Les échelles de référence (`l0_ref`, `t0_ref`, `u0_ref`, `p0_ref`) sont calculées automatiquement si laissées à `0.0`.
 
-### 2. Lagrangien Augmenté Adaptatif Incompressible (`AAL`)
+### 3. Lagrangien Augmenté Compressible Bas-Mach (`"C-AAL"` / `"CAAL"`)
+Active automatiquement `compressible = true` et `adaptative_al = true`. Régularise la pénalité dans les zones compressibles ($\chi_T > 0$) et actualise la pression selon la contrainte barotrope :
 
-Dans les écoulements diphasiques présentant de forts contrastes de masse volumique ($\rho_1/\rho_2 \ge 10^3$) et de viscosité ($\mu_1/\mu_2 \ge 10^2$), une valeur scalaire uniforme de $r$ dégrade considérablement le conditionnement du système linéaire. La méthode AAL (*Adaptative Augmented Lagrangian*, Vincent et al., *Computers & Fluids* 2004) détermine automatiquement un champ local de pénalité $r(t, \mathbf{x})$ cellule par cellule :
+$$r_{\text{eff}, i,j} = \frac{r_{i,j}}{1 + r_{i,j} \frac{\chi_{T,i,j}}{\Delta t}}, \qquad p_{i,j}^{k+1} = p_{i,j}^k - r_{\text{eff}, i,j} \left[ (\nabla_h \cdot \mathbf{u}^{k+1})_{i,j} + \frac{\chi_{T,i,j}}{\Delta t}(p_{i,j}^k - p_{i,j}^n) \right]$$
 
-$$r_{i, j} = K_{\text{aal}} \cdot \max \left( \tau_{\text{instat}}, \tau_{\text{inert}}, \tau_{\text{grav}}, \tau_{\text{pres}}, \tau_{\text{visc}}, \tau_{\text{cap}}, \tau_{\text{brink}} \right)$$
+### 4. Résolution Monolithique Tout-Couplé (`"MONOLITHIC"` / `"FULLY_COUPLED"` / `"FC"`)
+Assemble simultanément la vitesse et la pression dans le système point-selle sans pénalité ($r = 0$) :
 
-où les temps caractéristiques physiques sont construits à partir des échelles globales du problème :
-- Terme instationnaire : $\tau_{\text{instat}} = \alpha_{\text{time}} \rho_{i, j} \frac{L_0^2}{t_0}$
-- Terme inertiel : $\tau_{\text{inert}} = \rho_{i, j} u_0 L_0$
-- Terme gravitationnel : $\tau_{\text{grav}} = \rho_{i, j} \frac{L_0^2}{u_0} \|\mathbf{g}\|$
-- Terme de pression : $\tau_{\text{pres}} = \frac{p_0 L_0}{u_0}$
-- Terme visqueux : $\tau_{\text{visc}} = \mu_{i, j}$
-- Terme capillaire : $\tau_{\text{cap}} = \frac{\sigma}{u_0}$
-- Terme de Brinkman : $\tau_{\text{brink}} = \mu_{i, j} \frac{\Delta x \Delta y}{\mathcal{K}_{i, j}}$
+$$\begin{pmatrix} \mathbf{A}_u & \mathbf{A}_{uv} & \mathbf{G}_x \\ \mathbf{A}_{vu} & \mathbf{A}_v & \mathbf{G}_y \\ \mathbf{D}_x & \mathbf{D}_y & -\mathbf{C}_p \end{pmatrix} \begin{pmatrix} \mathbf{u}^{n+1} \\ \mathbf{v}^{n+1} \\ \mathbf{p}^{n+1} \end{pmatrix} = \begin{pmatrix} \mathbf{f}_u \\ \mathbf{f}_v \\ \mathbf{g}_p \end{pmatrix}$$
 
-Ce préconditionnement physique optimal assure une convergence quasi insensible aux sauts de propriétés interfaciales.
+où $\mathbf{C}_p = \text{diag}(\chi_T \Delta x \Delta y / \Delta t)$ en compressible ($\mathbf{0}$ en incompressible). La ligne de continuité n'étant pas divisée par $\rho$, ce système garantit une divergence discrète à la tolérance linéaire `solver.tol` (typiquement $10^{-10}$) quel que soit le saut $\rho_1 / \rho_2$.
 
-### 3. Lagrangien Augmenté Compressible Bas-Mach (`C-AAL`)
-
-Pour les régimes compressibles bas-Mach (`solver.type = "C-AAL"`), le terme de compressibilité isotherme $\chi_T = \frac{1}{\rho c_s^2}$ modifie la contrainte de fermeture. Le paramètre adaptatif de pénalité est régularisé selon :
-
-$$r_{\text{eff}, i, j} = \frac{r_{\text{AAL}, i, j}}{1 + r_{\text{AAL}, i, j} \frac{\chi_{T, i, j}}{\Delta t}}$$
-
-et la mise à jour d'Uzawa devient :
-
-$$p^{k+1}_{i, j} = p^k_{i, j} - r_{\text{eff}, i, j} \left[ (\nabla \cdot \mathbf{u}^{k+1})_{i, j} + \frac{\chi_{T, i, j}}{\Delta t} (p^k_{i, j} - p^n_{i, j}) \right]$$
-
-### 4. Résolution Monolithique Tout-Couplé (`MONOLITHIC` / `FULLY_COUPLED`)
-
-Dans la formulation monolithique, la vitesse et la pression sont assemblées simultanément au sein d'un système point-selle global sans paramètre de pénalité ($r = 0$) :
-
-$$\begin{pmatrix} A_{\mathbf{u}} & B^T \\ B & -C_p \end{pmatrix} \begin{pmatrix} \mathbf{u}^{n+1} \\ p^{n+1} \end{pmatrix} = \begin{pmatrix} \mathbf{f}_{\mathbf{u}} \\ g_p \end{pmatrix}$$
-
-où :
-- $A_{\mathbf{u}}$ est le bloc de quantité de mouvement vectoriel discret.
-- $B^T$ est la matrice du gradient de pression discret.
-- $B$ est la matrice de divergence discrète ($B = - (B^T)^T$).
-- $C_p = \text{diag}\left( \frac{\chi_T \Delta x \Delta y}{\Delta t} \right)$ est la matrice de compressibilité barotrope ($C_p = 0$ en incompressible strict).
-
-Ce système est résolu de manière unifiée à chaque pas de temps via les solveurs de Krylov couplés au préconditionneur par blocs triangulaires.
-
-### 5. Méthode de Projection Standard (`STANDARD_PROJECTION`)
-
-La méthode de projection de Chorin-Temam sépare la résolution en deux sous-étapes découplées :
-1. **Étape prédictive :** Calcul d'un champ de vitesse intermédiaire $\mathbf{u}^*$ sans gradient de pression.
-2. **Étape de projection :** Résolution d'une équation de Poisson pour le pseudo-potentiel de pression $\phi$ :
-   $$\nabla \cdot \left( \frac{1}{\rho} \nabla \phi \right) = \frac{\nabla \cdot \mathbf{u}^*}{\Delta t}$$
-3. **Étape de correction solénoïdale :**
-   $$\mathbf{u}^{n+1} = \mathbf{u}^* - \frac{\Delta t}{\rho} \nabla \phi, \quad p^{n+1} = p^n + \phi$$
+### 5. Méthode de Projection Standard (`"STANDARD_PROJECTION"` / `"PROJECTION"`)
+Résout successivement la prédiction visqueuse $\mathbf{u}^*$, l'équation de Poisson en pression $\nabla \cdot (\frac{1}{\rho}\nabla \phi) = \frac{1}{\Delta t}\nabla \cdot \mathbf{u}^*$, puis corrige $\mathbf{u}^{n+1} = \mathbf{u}^* - \frac{\Delta t}{\rho}\nabla \phi$.
 
 ---
 
-## Solveurs Linéaires de Krylov Matrix-Free
+## Solveurs Linéaires de Krylov et Préconditionneurs
 
-COVOF 2D met en œuvre une infrastructure de solveurs de Krylov **sans matrice explicite (*Matrix-Free*)**. L'opérateur complet $A \mathbf{x}$ n'est jamais assemblé sous forme de matrice creuse globale en mémoire, mais calculé à la volée par passage direct des pochoirs volumes finis décalés sur les tableaux locaux avec synchronisation MPI des mailles fantômes.
+COVOF 2D implémente une architecture **Matrix-Free** (l'opérateur complet $A \mathbf{x}$ est appliqué par parcours des pochoirs MAC avec synchronisation MPI des halos via `apply_system_matrix`) complétée par des blocs locaux pour le préconditionnement (`Fuu`, `Fvv`, `SchurLaplace` en CSR côté C++, stencils 5-points côté Fortran).
 
-### Algorithmes de Résolution Linéaire
+### Solveurs Linéaires (`solver.linear_solver`)
 
-1. **BiCGSTAB(2) (`LINEAR_BICGSTAB2`) :**
-   Algorithme de Sleijpen et van der Vorst (1993). Il combine deux étapes de BiCG avec une étape de minimisation polynomiale locale d'ordre 2, offrant une robustesse exceptionnelle contre les stagnations sur les systèmes asymétriques à fort gradient convectif.
-2. **BiCGSTAB (`LINEAR_BICGSTAB`) :**
-   Algorithme standard de van der Vorst (1992), rapide et efficace pour les matrices asymétriques modérément raides.
-3. **Gradient Conjugué Préconditionné (`LINEAR_CG`) :**
-   Algorithme classique de Hestenes et Stiefel (1952). Strictement dédié aux opérateurs symétriques définis positifs (système de Poisson en pression ou étape de diffusion pure).
-4. **GMRES(m) (`LINEAR_GMRES`) :**
-   *Generalized Minimal Residual* redémarré de Saad et Schultz (1986). Minimise la norme euclidienne du résidu dans le sous-espace de Krylov orthogonalisé par Modified Gram-Schmidt.
-5. **MINRES (`LINEAR_MINRES`) :**
-   Algorithme de Paige et Saunders (1975). Dédié aux systèmes linéaires **symétriques indéfinis** tels que les systèmes point-selle Navier-Stokes de Stokes ou monolithiques. Repose sur la tridiagonalisation de Lanczos à trois termes et les rotations de Givens, garantissant une minimisation monotone de la norme du résidu avec un coût mémoire minimal.
-6. **Solveur Direct Exact (`LINEAR_DIRECT` / `MUMPS`) :**
-   Factorisation LU complète par blocs via les routines LAPACK standards `dgetrf` (décomposition $P A = L U$) et `dgetrs` (descente et remontée triangulaires). Pour les régimes stationnaires linéaires, la factorisation factorisée est mise en cache pour éliminer tout surcoût de factorisation aux pas de temps ultérieurs.
+| Mot-Clé | Algorithme | Domaine d'Emploi Recommandé |
+| :--- | :--- | :--- |
+| `"BICGSTAB2"` (défaut) | BiCGSTAB(2) (Sleijpen & van der Vorst 1993) | Opérateurs asymétriques convectifs, AAL, C-AAL et Monolithique |
+| `"BICGSTAB"` | BiCGSTAB standard (van der Vorst 1992) | Systèmes asymétriques modérément raides |
+| `"CG"` / `"CONJUGATE_GRADIENT"` | Gradient Conjugué Préconditionné | Opérateurs symétriques définis positifs (Stokes pur, Poisson, diffusion) |
+| `"GMRES"` | GMRES(30) redémarré (Arnoldi + Givens) | Systèmes fortement non normaux |
+| `"MINRES"` | Minimal Residual (Paige & Saunders 1975) | Systèmes point-selle symétriques indéfinis |
+| `"DIRECT"` / `"MUMPS"` | Factorisation LU LAPACK (`dgetrf`/`dgetrs`) | Petits maillages de référence ou validation exacte (avec mise en cache si $\Delta t$ constant) |
 
----
+*(Remarque : C++ dispose également des passerelles `PetscSolverBridge` (`"PETSC"`) et `HypreSolverBridge` (`"HYPRE"`) qui basculent automatiquement sur `BiCGSTAB2Solver` si PETSc/HYPRE ne sont pas liés).*
 
-## Préconditionneurs Linéaires Parallèles
+### Préconditionneurs (`solver.precond_type` / `solver.preconditioner`)
 
-Le choix du préconditionneur est essentiel pour accélérer la convergence des méthodes de Krylov. COVOF 2D propose cinq préconditionneurs natifs :
-
-1. **Jacobi Diagonal (`PRECOND_JACOBI` / `DIAGONAL`) :**
-   Inversion de la diagonale enrichie de l'opérateur local. Cette diagonale intègre la contribution instationnaire, la diffusion visqueuse $\mathcal{O}(\mu/\Delta x^2)$, la pénalité de Lagrangien augmenté adaptatif $\mathcal{O}(r/\Delta x^2)$, la résistance de Brinkman $\mu/\mathcal{K}$ et les termes diagonaux de Newton.
-2. **SSOR / Gauss-Seidel Symétrique (`PRECOND_SSOR`) :**
-   Balayage avant (*forward sweep*) puis balayage arrière (*backward sweep*) sur la grille locale avec coefficient de relaxation optimal $\omega = 1.0$, offrant un lissage haute fréquence efficace.
-3. **ILU(0) (`PRECOND_ILU0`) :**
-   Factorisation incomplète sans remplissage sur les blocs de vitesse et pression.
-4. **Blocs Triangulaires avec Complément de Schur (`PRECOND_BLOCK_TRIANGULAR` / `BT_SBP`) :**
-   Préconditionneur spécifique dédié au système monolithique tout-couplé (El Ouafa et al., 2021/2023). Il s'appuie sur une factorisation triangulaire supérieure par blocs :
-   $$P = \begin{pmatrix} D_{\mathbf{u}} & B^T \\ 0 & S_p \end{pmatrix}$$
-   où $D_{\mathbf{u}}$ est l'approximation diagonale du bloc de quantité de mouvement et $S_p$ est le complément de Schur approché $S_p \approx B D_{\mathbf{u}}^{-1} B^T - C_p$, résolu par balayages de Gauss-Seidel symétriques.
-5. **Préconditionneur Personnalisé (`PRECOND_CUSTOM`) :**
-   Point d'entrée permettant à l'utilisateur d'injecter une fonction lambda C++ ou un pointeur de procédure Fortran (`custom_precond_hook`) pour tester de nouvelles heuristiques spectrales ou des couplages multigrilles externes.
+| Mot-Clé (et Alias) | Formulation | Recommandation |
+| :--- | :--- | :--- |
+| `"JACOBI"` / `"DIAGONAL"` (défaut) | Inversion de la diagonale locale enrichie (`diag_u`, `diag_v`, `diag_p`) | Optimal et 100 % parallèle pour `AAL` et `C-AAL` |
+| `"BLOCK_TRIANGULAR"` / `"BT_SBP"` / `"SCHUR"` | Factorisation par blocs triangulaires $P = \begin{pmatrix} D_u & G \\ 0 & S \end{pmatrix}$ avec 8 balayages SSOR sur le complément de Schur $S$ et 4 balayages sur $F_u, F_v$ | Indispensable pour le mode `"MONOLITHIC"` |
+| `"SSOR"` / `"GAUSS_SEIDEL"` | Lissage avant/arrière symétrique ($\omega = 1.0$) | Écoulements modérément visqueux |
+| `"ILU0"` / `"ILU"` | Factorisation incomplète ILU(0) locale par sous-domaine | Systèmes raides sur sous-domaines compacts |
+| `"CUSTOM"` | Hook utilisateur (`CustomPreconditioner::set_custom_operator` / `custom_precond_hook`) | Prototypage de nouveaux préconditionneurs |
+| `"NONE"` | Identité ($P = I$) | Diagnostic de conditionnement |

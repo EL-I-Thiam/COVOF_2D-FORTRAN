@@ -1,36 +1,48 @@
-# INSTRUCTIONS D'EXÉCUTION POUR AGENT / MODÈLE IA — CAS 8 (FC-WY-CVI-MARKER) : FLAMBEMENT D'UN JET LIQUIDE VISQUEUX 2D (CAS 3.3 *FLUIDS* 2021) AVEC MARQUEURS CVI (`08_cas_flambement_jet_visqueux_cvi_markers`)
+# INSTRUCTIONS D'EXÉCUTION POUR AGENT / MODÈLE IA — CAS 8 (FC-WY-CVI-MARKER) : FLAMBEMENT D'UN JET LIQUIDE VISQUEUX 2D (*FLUIDS* 2021, CAS 3.3) (`08_cas_flambement_jet_visqueux_cvi_markers`)
 
-## 1. Mission et Rôle de l'Agent
+## 1. Mission, Contraintes Critiques et Interdictions Absolues
 
-Vous êtes un agent autonome chargé d'exécuter, de vérifier et de post-traiter de bout en bout le **Cas de Validation 8 de la méthode hybride FC-WY-CVI-Marker (`08_cas_flambement_jet_visqueux_cvi_markers`)** sur les moteurs **C++17** (`covof2d_cpp`) et **Fortran 2018** (`covof2d_fortran`) de la plateforme **COVOF 2D**.
+Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et de post-traiter de bout en bout le **Cas de Validation 8 (`08_cas_flambement_jet_visqueux_cvi_markers`)** sur les moteurs précompilés **C++17** (`COVOF_2D-C++/bin/covof2d_cpp`) et **Fortran 2018** (`COVOF_2D-FORTRAN/bin/covof2d_fortran`).
 
-Ce cas correspond au **Cas 3.3 de [El Ouafa, Vincent & Le Chenadec (*Fluids* 2021)](https://doi.org/10.3390/fluids6010023)** couplé à l'architecture **Solveur Monolithique (FC) + VOF-PLIC (Weymouth & Yue) + Interpolation CVI + Marqueurs Non Connectés**. Il constitue le test ultime de robustesse rhéologique et géométrique du code ($\rho_2/\rho_1 = 1529.6$, $\mu_2/\mu_1 = 2.70\times 10^5$) :
-1. Validation du diagramme de stabilité du flambement visqueux ($Re = 0.1728 \le 0.52$ instable vs $Re = 0.60$ et $Re = 3.60$ symétriques stables) ;
-2. Suivi lagrangien sans perte de divergence (`CVI_RK2` sur le champ monolithique `FC`) des multiples replis en accordéon du cordon visqueux et des fines lames d'air piégées lors de l'empilement sur la paroi inférieure ($t \in [1.0, 2.0]\,\mathrm{s}$).
-
----
-
-## 2. Théorie : Instabilité de Flambement Visqueux et Suivi des Replis par Marqueurs CVI
-
-Dans une cavité carrée $\Omega = [0, 1] \times [0, 1]\,\mathrm{m}^2$ initialement remplie d'air ($\rho_1 = 1.1768\,\mathrm{kg/m}^3$, $\mu_1 = 1.85\times 10^{-3}\,\mathrm{Pa\cdot s}$, $C = 1$), un jet plan très visqueux ($\rho_2 = 1800.0\,\mathrm{kg/m}^3$, $\mu_2 = 500.0\,\mathrm{Pa\cdot s}$, $C = 0$) de largeur $D = 0.08\,\mathrm{m}$ est injecté verticalement depuis le centre de la paroi supérieure ($x_c = 0.5\,\mathrm{m}, y = 1.0\,\mathrm{m}$) à la vitesse $v_{\mathrm{in}} = -V_0 = -0.60\,\mathrm{m/s}$ sous la gravité $g_y = -9.81\,\mathrm{m/s}^2$.
-Le flambement périodique se déclenche lorsque :
-$$Re = \frac{\rho_2 D V_0}{\mu_2} \le Re_c \approx 0.52 \qquad \text{et} \qquad \frac{H}{D} > 3\pi \approx 9.4248.$$
-
-### 2.1 Rôle du couplage FC + WY + CVI + Marqueurs lors de l'empilement des plis
-1. **Solveur Monolithique FC + SVOF Helmholtz** : À $\mu_2/\mu_1 = 2.7\times 10^5$, la méthode de projection standard diverge vers $t \approx 1.4\,\mathrm{s}$ lors de l'impact des plis, tandis que le solveur monolithique **FC** maintient $\|B_u \mathbf{u}^{n+1}\|_\infty \le 10^{-10}$ jusqu'à $t = 2.0\,\mathrm{s}$.
-2. **Ré-ensemencement automatique à l'injecteur `JET_INLET` et filtrage angulaire dans les plis** : À chaque pas de temps, les mailles d'interface au bord de l'injecteur supérieur ($y = 1.0\,\mathrm{m}$) sont automatiquement ré-ensemencées en marqueurs, et le filtrage directionnel $\mathbf{n}_p \cdot \mathbf{n}_{i,j}^{\mathrm{ref}} \ge 0.5$ préserve la séparation des lames d'air entre deux boucles repliées du jet.
+### Interdictions absolues et règles de fidélité
+1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires.
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/08_cas_flambement_jet_visqueux_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
+3. **VÉRIFICATION DES MARQUEURS ET DU RÉ-ENSEMENCEMENT À L'INJECTEUR `JET_INLET`** :
+   Dans les binaires C++ et Fortran actualisés, lorsque `vof.use_markers` est activé, la condition initiale `"VISCOUS_JET"` utilise un sous-échantillonnage $16\times 16$ par cellule autour du bouchon d'injection (`center_x`, `jet_width`) et `prune_and_reseed` ré-ensemence les flancs du jet entrant au bord supérieur `JET_INLET` ($y = L_y$).
+   **Obligation absolue :** Le script de post-traitement doit vérifier et rapporter l'évolution réelle `n_markers(t)` depuis `*_markers_*.vtk` et vérifier que les marqueurs suivent bien le développement du jet entrant (ou signaler tout comportement réel observé).
+4. **RÔLE DU LISSAGE SVOF ($\sigma = 0$)** : Puisque $\sigma = 0$, `enable_diffusion_smoothing` (`C_tilde`) n'a aucun effet dans les équations ; testez uniquement l'effet de **`enable_svof_smoothing`** (`false` vs `true` pour $k \in \{0.5, 1.0, 1.5\}$).
+5. **ZÉRO RÉSULTAT EN DUR, ZÉRO TIMEOUT MASQUÉ** : Toute valeur de divergence, itérations Krylov depuis `.log`, loi de volume injecté $V_{\mathrm{jet}}(t)$ ou non-convergence doit être rapportée fidèlement.
 
 ---
 
-## 3. Matrice des Trois Sous-Cas et Prototype `.json`
+## 2. Arborescence et Théorie du Flambement Visqueux
 
-| Sous-cas | $D$ ($\mathrm{m}$) | $\mu_2$ ($\mathrm{Pa\cdot s}$) | $V_0$ ($\mathrm{m/s}$) | $Re$ | Régime physique & Étude du Lissage SVOF |
-| :--- | :---: | :---: | :---: | :---: | :--- |
-| **Sous-cas 1** | $0.08$ | $500.0$ | $0.60$ | $0.1728$ | **Flambement périodique instable** ($t_{\mathrm{final}} = 2.0\,\mathrm{s}$) — Tester : (1) Sans lissage (`enable_svof_smoothing: false`), (2) Lissage diffusif (`enable_diffusion_smoothing: true`), et (3) **Lissage elliptique SVOF de Helmholtz (`enable_svof_smoothing: true`, `svof_filter_width` $k \in \{0.5, 1.0, 1.5\}$)** couplé à `CVI_RK2` |
-| **Sous-cas 2** | $0.10$ | $300.0$ | $1.00$ | $0.6000$ | **Étalement symétrique stable** sans flambement ($t_{\mathrm{final}} = 2.0\,\mathrm{s}$) avec `enable_svof_smoothing: true` ($k = 1.0$) + `CVI_RK2` |
-| **Sous-cas 3** | $0.10$ | $300.0$ | $6.00$ | $3.6000$ | **Impact inertiel symétrique** et remontée pariétale ($t_{\mathrm{final}} = 0.9\,\mathrm{s}$) avec `enable_svof_smoothing: true` ($k = 1.0$) + `CVI_RK2` |
+```text
+VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/08_cas_flambement_jet_visqueux_cvi_markers/
+├── case/{cpp,fortran}/
+├── output/{cpp,fortran}/
+├── figures/
+├── scripts/{create_cases.py,run_all_simulations.py,postprocess_analysis.py}
+└── rapport/
+```
 
-### Prototype `case/cpp/cas_08_re01728_fc_wy_cvi_markers_160x160.json`
+Dans une cavité carrée $\Omega = [0, 1] \times [0, 1]\,\mathrm{m}^2$ initialement remplie d'air ($\rho_1 = 1.1768\,\mathrm{kg/m}^3$, $\mu_1 = 1.85\times 10^{-3}\,\mathrm{Pa\cdot s}$, $C = 1$), un jet très visqueux ($\rho_2 = 1800.0\,\mathrm{kg/m}^3$, $\mu_2 \in \{300, 500\}\,\mathrm{Pa\cdot s}$, $C = 0$) de largeur $D$ est injecté en $(x_c = 0.5\,\mathrm{m}, y = 1.0\,\mathrm{m})$ à vitesse $v_{\mathrm{in}} = -V_0$ sous $g_y = -9.81\,\mathrm{m/s}^2$, avec $\sigma = 0$ et débit compensé exact sur `top` (`JET_INLET`, $v_{\mathrm{out}} = +V_0 \frac{D}{L_x - D}$).
+- Critère de flambement : $Re = \frac{\rho_2 D V_0}{\mu_2} \le Re_c \approx 0.52$ et $H/D > 3\pi \approx 9.4248$.
+- Volume théorique de fluide 2 injecté : $V_{\mathrm{jet}}^{\mathrm{th}}(t) = V_{\mathrm{jet}}(0) + D \, V_0 \, t$ (vérifié contre `bubble_volume` de `*_history.csv` et l'intégrale de `1-C` sur `.vtr`).
+
+---
+
+## 3. Matrice Complète des Paramètres Physiques et Numériques
+
+Tous les essais utilisent `GEAR`, `ADAMS_BASHFORTH`, `CENTERED`, `WEYMOUTH_YUE`, `PLIC`, `tvd_limiter: "NONE"`, `VISCOUS_JET`, `JET_INLET`, $\Delta t = 5\times 10^{-4}\,\mathrm{s}$, grille $80\times 80$ et $160\times 160$ (privilégier `np=4` en MPI si le budget temps séquentiel l'exige pour `MONOLITHIC`/`AAL`) :
+
+| Sous-cas | $D$ [m] | $\mu_2$ [Pa$\cdot$s] | $V_0$ [m/s] | $Re$ | $t_{\mathrm{final}}$ [s] | Configurations testées (`tol: 1e-8, max_iter: 1000`) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **Sous-cas 1 (Flambement)** | $0.08$ | $500.0$ | $0.60$ | $0.1728$ | $2.0$ | `MONOLITHIC` + `SVOF` ($k \in \{0.5, 1.0, 1.5\}$ vs `false`) ; `use_markers: true` (`CVI_RK2`) vs `false` ; comparaison avec `AAL` (`k_aal=100, uzawa_iter=4`) et `STANDARD_PROJECTION` (seq) ; parité C++/Fortran |
+| **Sous-cas 2 (Stable)** | $0.10$ | $300.0$ | $1.00$ | $0.6000$ | $2.0$ | `MONOLITHIC` + `SVOF (k=1.0)` + `WY + PLIC` (`use_markers: true` et `false`) |
+| **Sous-cas 3 (Inertiel)** | $0.10$ | $300.0$ | $6.00$ | $3.6000$ | $0.9$ | `MONOLITHIC` + `SVOF (k=1.0)` + `WY + PLIC` (`use_markers: true` et `false`) |
+
+### Prototype `case/cpp/cas_08_re01728_fc_svof_k10_160.json`
 ```json
 {
   "mode": "NAVIER_STOKES",
@@ -48,10 +60,12 @@ $$Re = \frac{\rho_2 D V_0}{\mu_2} \le Re_c \approx 0.52 \qquad \text{et} \qquad 
     "gy": -9.81,
     "sigma": 0.0,
     "enable_surface_tension": false,
+    "enable_convection": true,
     "convective_scheme": "CENTERED",
     "convective_linearization": "ADAMS_BASHFORTH",
     "enable_svof_smoothing": true,
-    "svof_filter_width": 1.0
+    "svof_filter_width": 1.0,
+    "enable_diffusion_smoothing": false
   },
   "time": {
     "dt": 0.0005,
@@ -63,7 +77,6 @@ $$Re = \frac{\rho_2 D V_0}{\mu_2} \le Re_c \approx 0.52 \qquad \text{et} \qquad 
   "initial_condition": {
     "type": "VISCOUS_JET",
     "center_x": 0.5,
-    "center_y": 1.0,
     "jet_width": 0.08
   },
   "boundary_conditions": {
@@ -81,7 +94,6 @@ $$Re = \frac{\rho_2 D V_0}{\mu_2} \le Re_c \approx 0.52 \qquad \text{et} \qquad 
   },
   "solver": {
     "type": "MONOLITHIC",
-    "r_al": 0.0,
     "linear_solver": "BICGSTAB2",
     "tol": 1e-08,
     "max_iter": 1000,
@@ -102,8 +114,8 @@ $$Re = \frac{\rho_2 D V_0}{\mu_2} \le Re_c \approx 0.52 \qquad \text{et} \qquad 
     "write_markers_vtk": true
   },
   "output": {
-    "output_dir": "Validation_Totale/Run_CASES/Run_FC-WY-CVI-Marker/08_cas_flambement_jet_visqueux_cvi_markers/output/cpp/re01728_fc_cvi_160x160",
-    "case_name": "cas_08_re01728_fc_cvi_160x160",
+    "output_dir": "output/cpp/re01728_svof_k10_160",
+    "case_name": "cas_08_re01728_160",
     "vtk_interval": 100,
     "log_interval": 20,
     "write_csv_history": true
@@ -113,8 +125,7 @@ $$Re = \frac{\rho_2 D V_0}{\mu_2} \le Re_c \approx 0.52 \qquad \text{et} \qquad 
 
 ---
 
-## 4. Livrables et Post-Traitement Attendus
+## 4. Livrables, Post-Traitement et Rédaction du Rapport
 
-1. **Séquence temporelle du flambement ($t \in \{0.25, 0.75, 1.25, 2.0\}\,\mathrm{s}$)** (`figures/sequence_flambement_re01728_cvi_markers.png`) superposant le champ $C$, les lignes de courant et les marqueurs `*_markers_*.vtk`.
-2. **Vérification de la loi d'injection linéaire du volume $V_{\mathrm{jet}}(t) = V_{\mathrm{jet}}(0) + D V_0 t$ et de la divergence $\|\nabla\cdot\mathbf{u}\|_\infty(t)$** (`figures/volume_injecte_et_divergence_fc_cvi.pdf`).
-3. **Rapport PDF complet (`rapport/rapport_validation_08_flambement_jet_visqueux_cvi_markers.pdf`)**.
+1. **Vérifications obligatoires** : `V_jet(t)` mesuré sur `.vtr` vs `V_jet(0) + D*V0*t`, `max_div(t)`, itérations Krylov depuis `.log`, `n_markers(t)` réel depuis `*_markers_*.vtk`, amplitude latérale de flambement $x_{\mathrm{jet}}(y,t)$ sur l'iso-contour $C=0.5$.
+2. **Livrables** : `figures/sequence_flambement_re01728.{png,pdf}`, `figures/volume_injecte_et_divergence.{png,pdf}`, `figures/diagramme_stabilite_et_svof.{png,pdf}`, `figures/dual_code_parity_cas08.{png,pdf}`, `rapport/rapport_validation_08_flambement_jet_visqueux_cvi_markers.{md,pdf}` avec table complète des paramètres JSON et transparence totale sur `n_markers`, les solveurs et la parité.

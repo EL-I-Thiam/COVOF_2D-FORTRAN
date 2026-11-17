@@ -1,40 +1,50 @@
-# INSTRUCTIONS D'EXÉCUTION POUR AGENT / MODÈLE IA — CAS 7 (FC-WY-CVI-MARKER) : ASCENSION D'UNE BULLE 2D DÉFORMABLE ($Bo = 10$ ET $Bo = 125$ À JUPES FINES) AVEC MARQUEURS CVI (`07_cas_ascension_bulle_2d_cvi_markers`)
+# INSTRUCTIONS D'EXÉCUTION POUR AGENT / MODÈLE IA — CAS 7 (FC-WY-CVI-MARKER) : ASCENSION D'UNE BULLE 2D DÉFORMABLE ($Bo = 10$ ET $Bo = 125$) (`07_cas_ascension_bulle_2d_cvi_markers`)
 
-## 1. Mission et Rôle de l'Agent
+## 1. Mission, Contraintes Critiques et Interdictions Absolues
 
-Vous êtes un agent autonome chargé d'exécuter, de vérifier et de post-traiter de bout en bout le **Cas de Validation 7 de la méthode hybride FC-WY-CVI-Marker (`07_cas_ascension_bulle_2d_cvi_markers`)** sur les moteurs **C++17** (`covof2d_cpp`) et **Fortran 2018** (`covof2d_fortran`) de la plateforme **COVOF 2D**.
+Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et de post-traiter de bout en bout le **Cas de Validation 7 (`07_cas_ascension_bulle_2d_cvi_markers`)** sur les moteurs précompilés **C++17** (`COVOF_2D-C++/bin/covof2d_cpp`) et **Fortran 2018** (`COVOF_2D-FORTRAN/bin/covof2d_fortran`).
 
-Ce cas applique le couplage **Solveur Monolithique (FC) + VOF-PLIC (Weymouth & Yue) + Interpolation CVI + Marqueurs Non Connectés** au benchmark de référence de Hysing et al. (2009) pour l'ascension d'une bulle 2D sous capillarité :
-- **Régime (i) — Bulle ellipsoïdale ($Re = 35, Bo = 10, \rho_1/\rho_2 = 10, \mu_1/\mu_2 = 10$)** ;
-- **Régime (ii) — Bulle en calotte à jupes fines ($Re = 35, Bo = 125, \rho_1/\rho_2 = 1000, \mu_1/\mu_2 = 100$)**.
-
----
-
-## 2. Théorie : Dynamique Capillaire et Préservation des Jupes Gazeuses ($Bo = 125$)
-
-Dans la colonne fermée $\Omega = [0, 1.0] \times [0, 2.0]\,\mathrm{m}^2$ ($g_y = -0.98\,\mathrm{m/s}^2$, $t_{\mathrm{final}} = 3.0\,\mathrm{s}$), une bulle initialement circulaire de rayon $R_0 = 0.25\,\mathrm{m}$ est centrée en $(0.5, 0.5)\,\mathrm{m}$.
-Dans le Régime (ii) ($Bo = 125, \sigma = 1.96\,\mathrm{N/m}$), le sillage tourbillonnaire étire l'arrière de la bulle en deux **jupes gazeuses latérales extrêmement minces** à partir de $t = 1.8\,\mathrm{s}$.
-- Avec un schéma VOF eulérien standard, dès que l'épaisseur des jupes devient inférieure à $1.5\,\Delta x$, la courbure eulérienne $\kappa = -\nabla \cdot (\nabla \widetilde{C}/\|\nabla \widetilde{C}\|)$ dégénère et fragmente prématurément les jupes en gouttelettes satellites.
-- Avec le couplage **FC + WY + CVI + Marqueurs** (`marker_curvature: true`, `marker_normals_plic: true`), l'ajustement parabolique local dans le repère tourné $(\tau, \eta)$ avec filtrage angulaire $\mathbf{n}_p \cdot \mathbf{n}_{i,j}^{\mathrm{ref}} \ge 0.5$ fournit une courbure régulière aux pointes des jupes et maintient leur continuité lagrangienne.
+### Interdictions absolues et règles de fidélité
+1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires.
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/07_cas_ascension_bulle_2d_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
+3. **SPÉCIFICATION EXPLICITE DE LA GÉOMÉTRIE (`axis_a`, `axis_b`, `pert_amp`)** : Spécifiez explicitement **`"axis_a": 0.25, "axis_b": 0.25, "pert_amp": 0.0`** dans `"initial_condition"` de tous les JSON afin de garantir une bulle strictement circulaire ($R_0 = 0.25\,\mathrm{m}$) avec sous-échantillonnage net `16x16` dans toutes les configurations.
+4. **STABILITÉ CAPILLAIRE ET BUDGET CPU** : Sur $Bo = 125$ ($\rho_1=1000, \rho_2=1.0, \sigma=1.96$), vérifiez si $\Delta t$ respecte le critère capillaire côté gaz ($\Delta t_{\sigma,\mathrm{gaz}} = \sqrt{2\rho_2 h^3/(4\pi\sigma)} \approx 1.26\times 10^{-3}\,\mathrm{s}$ sur $80\times 160$ et $4.46\times 10^{-4}\,\mathrm{s}$ sur $160\times 320$). Sur `160x320`, privilégiez `np=4` en MPI (pour `MONOLITHIC` / `AAL`, jamais `STANDARD_PROJECTION`) si le temps séquentiel menace de dépasser le timeout, et rapportez tout timeout ou instabilité sans rien masquer.
+5. **ZÉRO RÉSULTAT EN DUR, ZÉRO FALLBACK** : Comparez toujours les méthodes au même instant exact ; relevez les itérations Krylov depuis `.log` et la conservation volumique depuis `.vtr`.
 
 ---
 
-## 3. Matrice des Paramètres et Prototype `.json`
+## 2. Arborescence et Théorie (Benchmark de Hysing et al., 2009)
 
-| Catégorie | Régime (i) ($Bo = 10$) | Régime (ii) ($Bo = 125$) |
-| :--- | :---: | :---: |
-| Propriétés physiques | $\rho_1=1000, \rho_2=100\,\mathrm{kg/m}^3$, $\mu_1=10, \mu_2=1\,\mathrm{Pa\cdot s}$, $\sigma=24.5\,\mathrm{N/m}$ | $\rho_1=1000, \rho_2=1\,\mathrm{kg/m}^3$, $\mu_1=10, \mu_2=0.1\,\mathrm{Pa\cdot s}$, $\sigma=1.96\,\mathrm{N/m}$ |
-| Séquence de grilles | $40\times 80$, $80\times 160$, $160\times 320$ | $80\times 160$, $160\times 320$ |
-| **Étude du Lissage SVOF de Helmholtz** | `enable_svof_smoothing: false` vs `enable_diffusion_smoothing: true` (`steps: 3`) vs **Lissage SVOF de Helmholtz (`enable_svof_smoothing: true`, `svof_filter_width` $k \in \{0.5, 1.0\}$)** | Comparaison directe : (1) `VOF + CSF diffusif`, (2) **`VOF + CSF SVOF Helmholtz` ($k=0.5$)**, (3) `Marqueurs CVI sans SVOF`, (4) **Synergie `FC + WY + CVI + Marqueurs + SVOF Helmholtz` ($k=0.5$)** |
-| Configurations comparées | `VOF + CSF` (diffusif vs SVOF) vs `FC + WY + CVI + Marqueurs` (avec et sans SVOF) | `VOF + CSF` (diffusif vs SVOF) vs `FC + WY + CVI + Marqueurs` (avec et sans SVOF) |
+```text
+VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/07_cas_ascension_bulle_2d_cvi_markers/
+├── case/{cpp,fortran}/
+├── output/{cpp,fortran}/
+├── figures/
+├── scripts/{create_cases.py,run_all_simulations.py,postprocess_analysis.py}
+└── rapport/
+```
 
-### Prototype `case/cpp/cas_07_bulle_bo125_fc_cvi_markers_160x320.json`
+Dans la colonne $\Omega = [0, 1.0] \times [0, 2.0]\,\mathrm{m}^2$ ($g_y = -0.98\,\mathrm{m/s}^2$, $t_{\mathrm{final}} = 3.0\,\mathrm{s}$, parois latérales `FREE_SLIP`, parois inférieure/supérieure `DIRICHLET` $u=v=0$), une bulle de gaz circulaire (`C = 0`, fluide 2) de rayon $R_0 = 0.25\,\mathrm{m}$ est centrée en $(0.5, 0.5)\,\mathrm{m}$ :
+- **Régime (i) ($Bo = 10, Re = 35$)** : $\rho_1=1000, \rho_2=100\,\mathrm{kg/m}^3$, $\mu_1=10, \mu_2=1\,\mathrm{Pa\cdot s}$, $\sigma=24.5\,\mathrm{N/m}$. Références Hysing (groupe 1) : $V_{\max} \approx 0.2417\,\mathrm{m/s}$ à $t \approx 0.921\,\mathrm{s}$, $y_c(3.0\,\mathrm{s}) \approx 1.0813\,\mathrm{m}$.
+- **Régime (ii) ($Bo = 125, Re = 35$)** : $\rho_1=1000, \rho_2=1\,\mathrm{kg/m}^3$, $\mu_1=10, \mu_2=0.1\,\mathrm{Pa\cdot s}$, $\sigma=1.96\,\mathrm{N/m}$ (formation de jupes latérales minces après $t \approx 1.8\,\mathrm{s}$).
+*(Note sur `enable_diffusion_smoothing: true` : `C_tilde` est lissé dès $t=0$ avec conditions de Neumann aux bords puis à chaque pas $n \ge 1$.)*
+
+---
+
+## 3. Matrice Complète des Paramètres Physiques et Numériques
+
+| Régime | Grilles $N_x \times N_y$ | Pas de temps $\Delta t$ [s] (`t_final=3.0`) | Configurations comparées (`MONOLITHIC` + `WY` + `PLIC`) |
+| :--- | :---: | :---: | :--- |
+| **Régime (i) : $Bo = 10$** | $40\times 80$, $80\times 160$, $160\times 320$ | $0.005,\, 0.0025,\, 0.00125$ | (1) `CSF Diffusif` (`diffusion_smoothing_steps: 2`, `use_markers: false`), (2) `CSF SVOF` (`k=0.5`, `use_markers: false`), (3) `Marqueurs CVI` sans SVOF, (4) `Marqueurs CVI + SVOF (k=0.5)` (`marker_curvature: true, marker_normals_plic: true`) |
+| **Régime (ii) : $Bo = 125$** | $80\times 160$, $160\times 320$ | $0.00125,\, 0.0005$ ($\le \Delta t_{\sigma,\mathrm{gaz}}$) | Même comparaison à 4 méthodes + étude `CVI_RK2` vs `BILINEAR_RK2` (`80x160`, même `marker_normals_plic: true`) + parité C++/Fortran (`80x160`) |
+
+### Prototype `case/cpp/cas_07_bo125_cvi_svof_80x160.json`
 ```json
 {
   "mode": "NAVIER_STOKES",
   "mesh": {
-    "nx": 160,
-    "ny": 320,
+    "nx": 80,
+    "ny": 160,
     "lx": 1.0,
     "ly": 2.0
   },
@@ -58,7 +68,9 @@ Dans le Régime (ii) ($Bo = 125, \sigma = 1.96\,\mathrm{N/m}$), le sillage tourb
     "type": "BUBBLE",
     "center_x": 0.5,
     "center_y": 0.5,
-    "radius": 0.25
+    "radius": 0.25,
+    "axis_a": 0.25,
+    "axis_b": 0.25
   },
   "time": {
     "dt": 0.00125,
@@ -94,10 +106,10 @@ Dans le Régime (ii) ($Bo = 125, \sigma = 1.96\,\mathrm{N/m}$), le sillage tourb
     "write_markers_vtk": true
   },
   "output": {
-    "output_dir": "Validation_Totale/Run_CASES/Run_FC-WY-CVI-Marker/07_cas_ascension_bulle_2d_cvi_markers/output/cpp/bo125_cvi_160x320",
-    "case_name": "cas_07_bulle_bo125_cvi_160x320",
-    "vtk_interval": 80,
-    "log_interval": 20,
+    "output_dir": "output/cpp/bo125_cvi_svof_80x160",
+    "case_name": "cas_07_bo125_cvi_80",
+    "vtk_interval": 160,
+    "log_interval": 40,
     "write_csv_history": true
   }
 }
@@ -105,8 +117,8 @@ Dans le Régime (ii) ($Bo = 125, \sigma = 1.96\,\mathrm{N/m}$), le sillage tourb
 
 ---
 
-## 4. Livrables et Post-Traitement Attendus
+## 4. Livrables, Post-Traitement et Rédaction du Rapport
 
-1. **Évolution temporelle de la vitesse d'ascension $V_c(t)$ et du centroïde $y_c(t)$** (`figures/cinematique_bulle_bo10_bo125_cvi.pdf`) comparée aux valeurs de référence de Hysing et al. (2009).
-2. **Comparaison de la géométrie des jupes fines à $t = 3.0\,\mathrm{s}$ ($Bo = 125$)** (`figures/jupes_bo125_vof_vs_cvi_markers.png`) superposant le contour $C=0.5$ et le nuage de marqueurs `*_markers_*.vtk`.
-3. **Rapport PDF complet (`rapport/rapport_validation_07_ascension_bulle_2d_cvi_markers.pdf`)**.
+1. **Grandeurs extraites depuis `*_history.csv`, `.vtr`, `*_markers_*.vtk` et `.log`** :
+   - $y_c(t)$, $V_c(t)$, $V_{\max}$ et $t(V_{\max})$ (comparés à Hysing 2009 pour $Bo=10$) ; circularité $\psi = P_{\mathrm{cercle}} / P_{\mathrm{bulle}}$ sur le contour $C=0.5$ du `.vtr` ; conservation $|V(t)-V(0)|/V(0)$ sur `.vtr` ; `n_markers(t)` ; itérations Krylov et `max_div`.
+2. **Livrables** : `figures/cinematique_bulle_bo10_bo125.{png,pdf}`, `figures/jupes_bo125_contour_et_marqueurs.{png,pdf}`, `figures/dual_code_parity_cas07.{png,pdf}`, `rapport/rapport_validation_07_ascension_bulle_2d_cvi_markers.{md,pdf}` avec table complète des paramètres JSON et analyse objective (incluant tout éventuel pincement ou différence entre méthodes/codes).

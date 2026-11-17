@@ -126,7 +126,7 @@ contains
              end if
 
           case (IC_CYLINDER, IC_BUBBLE)
-             if (cfg%ic_type == IC_CYLINDER .or. trim(cfg%reconstruction_method) == "PLIC" .or. &
+             if (cfg%use_markers .or. cfg%ic_type == IC_CYLINDER .or. trim(cfg%reconstruction_method) == "PLIC" .or. &
                  (cfg%ic_axis_a > 0.0_dp .and. cfg%ic_axis_b > 0.0_dp)) then
                 x_min = x_face(mesh, i)
                 x_max = x_face(mesh, i + 1)
@@ -163,16 +163,33 @@ contains
              end if
 
           case (IC_DAM_BREAK)
-             ! Affectation et calcul numérique
-             if (x >= cfg%ic_box_x0 .and. x <= cfg%ic_box_x1 .and. &
-                 ! Affectation et calcul numérique
-                 y >= cfg%ic_box_y0 .and. y <= cfg%ic_box_y1) then
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 1.0_dp
-             ! Branche par défaut si condition non satisfaite
+             if (cfg%use_markers) then
+                x_min = x_face(mesh, i)
+                y_min = y_face(mesh, j)
+                count_out = 0
+                do sj = 0, 15
+                   ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
+                   do si = 0, 15
+                      xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                      if (xs >= cfg%ic_box_x0 .and. xs <= cfg%ic_box_x1 .and. &
+                          ys >= cfg%ic_box_y0 .and. ys <= cfg%ic_box_y1) then
+                         count_out = count_out + 1
+                      end if
+                   end do
+                end do
+                fields%C(i, j) = real(count_out, dp) / 256.0_dp
              else
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 0.0_dp
+                ! Affectation et calcul numérique
+                if (x >= cfg%ic_box_x0 .and. x <= cfg%ic_box_x1 .and. &
+                    ! Affectation et calcul numérique
+                    y >= cfg%ic_box_y0 .and. y <= cfg%ic_box_y1) then
+                   ! Transport / actualisation de la fraction volumique VOF
+                   fields%C(i, j) = 1.0_dp
+                ! Branche par défaut si condition non satisfaite
+                else
+                   ! Transport / actualisation de la fraction volumique VOF
+                   fields%C(i, j) = 0.0_dp
+                end if
              end if
 
           case (IC_LIQUID_SHEET)
@@ -207,10 +224,26 @@ contains
                 half_w_jet = 0.04_dp
              end if
              stub_h_jet = 2.0_dp * mesh%dy
-             if (y >= mesh%ly - stub_h_jet .and. abs(x - x_c_jet) <= half_w_jet) then
-                fields%C(i, j) = 0.0_dp ! Amorce liquide (fluide 2)
+             if (cfg%use_markers) then
+                x_min = x_face(mesh, i)
+                y_min = y_face(mesh, j)
+                count_out = 0
+                do sj = 0, 15
+                   ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
+                   do si = 0, 15
+                      xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                      if (.not. (ys >= mesh%ly - stub_h_jet .and. abs(xs - x_c_jet) <= half_w_jet)) then
+                         count_out = count_out + 1
+                      end if
+                   end do
+                end do
+                fields%C(i, j) = real(count_out, dp) / 256.0_dp
              else
-                fields%C(i, j) = 1.0_dp ! Cavité de gaz (fluide 1)
+                if (y >= mesh%ly - stub_h_jet .and. abs(x - x_c_jet) <= half_w_jet) then
+                   fields%C(i, j) = 0.0_dp ! Amorce liquide (fluide 2)
+                else
+                   fields%C(i, j) = 1.0_dp ! Cavité de gaz (fluide 1)
+                end if
              end if
 
           case (IC_VORTEX_SHEAR)
@@ -257,16 +290,33 @@ contains
              end if
 
           case (IC_RAYLEIGH_TAYLOR)
-             ! Affectation et calcul numérique
-             int_y = cfg%ic_center_y + cfg%ic_pert_amp * cos(2.0_dp * PI * cfg%ic_pert_k * x / mesh%lx)
-             ! Évaluation de la condition logique
-             if (y >= int_y) then
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 1.0_dp ! Fluide lourd au-dessus
-             ! Branche par défaut si condition non satisfaite
+             if (cfg%use_markers) then
+                x_min = x_face(mesh, i)
+                y_min = y_face(mesh, j)
+                count_out = 0
+                do sj = 0, 15
+                   ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
+                   do si = 0, 15
+                      xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                      int_y = cfg%ic_center_y + cfg%ic_pert_amp * cos(2.0_dp * PI * cfg%ic_pert_k * xs / mesh%lx)
+                      if (ys >= int_y) then
+                         count_out = count_out + 1
+                      end if
+                   end do
+                end do
+                fields%C(i, j) = real(count_out, dp) / 256.0_dp
              else
-                ! Transport / actualisation de la fraction volumique VOF
-                fields%C(i, j) = 0.0_dp ! Fluide léger en dessous
+                ! Affectation et calcul numérique
+                int_y = cfg%ic_center_y + cfg%ic_pert_amp * cos(2.0_dp * PI * cfg%ic_pert_k * x / mesh%lx)
+                ! Évaluation de la condition logique
+                if (y >= int_y) then
+                   ! Transport / actualisation de la fraction volumique VOF
+                   fields%C(i, j) = 1.0_dp ! Fluide lourd au-dessus
+                ! Branche par défaut si condition non satisfaite
+                else
+                   ! Transport / actualisation de la fraction volumique VOF
+                   fields%C(i, j) = 0.0_dp ! Fluide léger en dessous
+                end if
              end if
 
           case (IC_LAPLACIAN_TEST)
@@ -317,6 +367,9 @@ contains
     ! Appel de sous-programme modulaire
     if (cfg%enable_svof_smoothing) then
        call smooth_svof_helmholtz(fields, mesh, cfg)
+    end if
+    if (cfg%enable_diffusion_smoothing) then
+       call vof_smooth_diffusion(fields, mesh, cfg)
     end if
     call update_physical_properties(fields, mesh, cfg)
     if (cfg%use_markers) then
@@ -931,7 +984,15 @@ contains
              end if
           end do
        end do
-       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) flux_vol(1, 1:ny) = flux_vol(nx + 1, 1:ny)
+       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) then
+          do j = 1, ny
+             if (fields%u(1, j) >= 0.0_dp) then
+                flux_vol(1, j) = flux_vol(nx + 1, j)
+             else
+                flux_vol(nx + 1, j) = flux_vol(1, j)
+             end if
+          end do
+       end if
 
        c_star = fields%C
        do j = 1, ny
@@ -973,7 +1034,15 @@ contains
              end if
           end do
        end do
-       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) flux_vol(1:nx, 1) = flux_vol(1:nx, ny + 1)
+       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) then
+          do i = 1, nx
+             if (fields%v(i, 1) >= 0.0_dp) then
+                flux_vol(i, 1) = flux_vol(i, ny + 1)
+             else
+                flux_vol(i, ny + 1) = flux_vol(i, 1)
+             end if
+          end do
+       end if
 
        c_final = c_star
        do j = 1, ny
@@ -1011,7 +1080,15 @@ contains
              end if
           end do
        end do
-       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) flux_vol(1, 1:ny) = flux_vol(nx + 1, 1:ny)
+       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) then
+          do i = 1, nx
+             if (fields%v(i, 1) >= 0.0_dp) then
+                flux_vol(i, 1) = flux_vol(i, ny + 1)
+             else
+                flux_vol(i, ny + 1) = flux_vol(i, 1)
+             end if
+          end do
+       end if
 
        c_star = fields%C
        do j = 1, ny
@@ -1053,7 +1130,15 @@ contains
              end if
           end do
        end do
-       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) flux_vol(1:nx, 1) = flux_vol(1:nx, ny + 1)
+       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) then
+          do j = 1, ny
+             if (fields%u(1, j) >= 0.0_dp) then
+                flux_vol(1, j) = flux_vol(nx + 1, j)
+             else
+                flux_vol(nx + 1, j) = flux_vol(1, j)
+             end if
+          end do
+       end if
 
        c_final = c_star
        do j = 1, ny
@@ -1135,7 +1220,15 @@ contains
              end if
           end do
        end do
-       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) flux_vol(1, 1:ny) = flux_vol(nx + 1, 1:ny)
+       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) then
+          do j = 1, ny
+             if (fields%u(1, j) >= 0.0_dp) then
+                flux_vol(1, j) = flux_vol(nx + 1, j)
+             else
+                flux_vol(nx + 1, j) = flux_vol(1, j)
+             end if
+          end do
+       end if
 
        c_star = fields%C
        do j = 1, ny
@@ -1172,7 +1265,15 @@ contains
              end if
           end do
        end do
-       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) flux_vol(1:nx, 1) = flux_vol(1:nx, ny + 1)
+       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) then
+          do i = 1, nx
+             if (fields%v(i, 1) >= 0.0_dp) then
+                flux_vol(i, 1) = flux_vol(i, ny + 1)
+             else
+                flux_vol(i, ny + 1) = flux_vol(i, 1)
+             end if
+          end do
+       end if
 
        c_final = c_star
        do j = 1, ny
@@ -1206,7 +1307,15 @@ contains
              end if
           end do
        end do
-       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) flux_vol(1, 1:ny) = flux_vol(nx + 1, 1:ny)
+       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) then
+          do i = 1, nx
+             if (fields%v(i, 1) >= 0.0_dp) then
+                flux_vol(i, 1) = flux_vol(i, ny + 1)
+             else
+                flux_vol(i, ny + 1) = flux_vol(i, 1)
+             end if
+          end do
+       end if
 
        c_star = fields%C
        do j = 1, ny
@@ -1243,7 +1352,15 @@ contains
              end if
           end do
        end do
-       if (cfg%bc_bottom%btype == BC_PERIODIC .and. mesh%py == 1) flux_vol(1:nx, 1) = flux_vol(1:nx, ny + 1)
+       if (cfg%bc_left%btype == BC_PERIODIC .and. mesh%px == 1) then
+          do j = 1, ny
+             if (fields%u(1, j) >= 0.0_dp) then
+                flux_vol(1, j) = flux_vol(nx + 1, j)
+             else
+                flux_vol(nx + 1, j) = flux_vol(1, j)
+             end if
+          end do
+       end if
 
        c_final = c_star
        do j = 1, ny
@@ -1319,6 +1436,10 @@ contains
 
     do s = 1, steps
        call exchange_halos_scalar(fields%C_tilde, mesh)
+       if (mesh%is_boundary_left)   fields%C_tilde(0, 1:ny)    = fields%C_tilde(1, 1:ny)
+       if (mesh%is_boundary_right)  fields%C_tilde(nx+1, 1:ny) = fields%C_tilde(nx, 1:ny)
+       if (mesh%is_boundary_bottom) fields%C_tilde(0:nx+1, 0)  = fields%C_tilde(0:nx+1, 1)
+       if (mesh%is_boundary_top)    fields%C_tilde(0:nx+1, ny+1) = fields%C_tilde(0:nx+1, ny)
        c_next = fields%C_tilde
 
        do j = 1, ny
@@ -1332,6 +1453,10 @@ contains
     end do
 
     call exchange_halos_scalar(fields%C_tilde, mesh)
+    if (mesh%is_boundary_left)   fields%C_tilde(0, 1:ny)    = fields%C_tilde(1, 1:ny)
+    if (mesh%is_boundary_right)  fields%C_tilde(nx+1, 1:ny) = fields%C_tilde(nx, 1:ny)
+    if (mesh%is_boundary_bottom) fields%C_tilde(0:nx+1, 0)  = fields%C_tilde(0:nx+1, 1)
+    if (mesh%is_boundary_top)    fields%C_tilde(0:nx+1, ny+1) = fields%C_tilde(0:nx+1, ny)
     deallocate(c_next)
   end subroutine vof_smooth_diffusion
 
@@ -1348,6 +1473,7 @@ contains
     real(dp) :: snx, sny, nrm, gx, gy, g_mag, dot_prod
     real(dp) :: c_mm, c_0m, c_pm, c_m0, c_p0, c_mp, c_0p, c_pp
     logical  :: coherent
+    real(dp), allocatable :: seg_nx(:, :), seg_ny(:, :)
 
     if (.not. (cfg%use_markers .and. cfg%marker_normals_plic)) return
 
@@ -1380,7 +1506,7 @@ contains
                    coherent = .true.
                    if (g_mag > 1.0e-3_dp / min(mesh%dx, mesh%dy)) then
                       dot_prod = (snx * gx + sny * gy) / g_mag
-                      if (dot_prod < 0.3_dp) coherent = .false.
+                      if (dot_prod < 0.5_dp) coherent = .false.
                    end if
 
                    if (coherent) then
@@ -1395,6 +1521,75 @@ contains
           end if
        end do
     end do
+
+    ! Synchronisation MPI / periodique des segments vers les mailles fantomes
+    allocate(seg_nx(0:nx+1, 0:ny+1), seg_ny(0:nx+1, 0:ny+1))
+    seg_nx = 0.0_dp
+    seg_ny = 0.0_dp
+    seg_nx(1:nx, 1:ny) = segments(1:nx, 1:ny)%nx
+    seg_ny(1:nx, 1:ny) = segments(1:nx, 1:ny)%ny
+    call exchange_halos_scalar(seg_nx, mesh)
+    call exchange_halos_scalar(seg_ny, mesh)
+
+    if (mesh%is_boundary_left) then
+       seg_nx(0, 1:ny) = seg_nx(1, 1:ny)
+       seg_ny(0, 1:ny) = seg_ny(1, 1:ny)
+    end if
+    if (mesh%is_boundary_right) then
+       seg_nx(nx+1, 1:ny) = seg_nx(nx, 1:ny)
+       seg_ny(nx+1, 1:ny) = seg_ny(nx, 1:ny)
+    end if
+    if (mesh%is_boundary_bottom) then
+       seg_nx(0:nx+1, 0) = seg_nx(0:nx+1, 1)
+       seg_ny(0:nx+1, 0) = seg_ny(0:nx+1, 1)
+    end if
+    if (mesh%is_boundary_top) then
+       seg_nx(0:nx+1, ny+1) = seg_nx(0:nx+1, ny)
+       seg_ny(0:nx+1, ny+1) = seg_ny(0:nx+1, ny)
+    end if
+
+    do j = 1, ny
+       c_val = c_field(0, j)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          snx = seg_nx(0, j); sny = seg_ny(0, j); nrm = hypot(snx, sny)
+          if (nrm > 1.0e-12_dp) then
+             snx = snx / nrm; sny = sny / nrm
+             segments(0, j)%nx = snx; segments(0, j)%ny = sny
+             segments(0, j)%alpha = compute_alpha(x_face(mesh, 0), x_face(mesh, 1), y_face(mesh, j), y_face(mesh, j + 1), snx, sny, c_val)
+          end if
+       end if
+       c_val = c_field(nx + 1, j)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          snx = seg_nx(nx + 1, j); sny = seg_ny(nx + 1, j); nrm = hypot(snx, sny)
+          if (nrm > 1.0e-12_dp) then
+             snx = snx / nrm; sny = sny / nrm
+             segments(nx + 1, j)%nx = snx; segments(nx + 1, j)%ny = sny
+             segments(nx + 1, j)%alpha = compute_alpha(x_face(mesh, nx + 1), x_face(mesh, nx + 2), y_face(mesh, j), y_face(mesh, j + 1), snx, sny, c_val)
+          end if
+       end if
+    end do
+
+    do i = 0, nx + 1
+       c_val = c_field(i, 0)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          snx = seg_nx(i, 0); sny = seg_ny(i, 0); nrm = hypot(snx, sny)
+          if (nrm > 1.0e-12_dp) then
+             snx = snx / nrm; sny = sny / nrm
+             segments(i, 0)%nx = snx; segments(i, 0)%ny = sny
+             segments(i, 0)%alpha = compute_alpha(x_face(mesh, i), x_face(mesh, i + 1), y_face(mesh, 0), y_face(mesh, 1), snx, sny, c_val)
+          end if
+       end if
+       c_val = c_field(i, ny + 1)
+       if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
+          snx = seg_nx(i, ny + 1); sny = seg_ny(i, ny + 1); nrm = hypot(snx, sny)
+          if (nrm > 1.0e-12_dp) then
+             snx = snx / nrm; sny = sny / nrm
+             segments(i, ny + 1)%nx = snx; segments(i, ny + 1)%ny = sny
+             segments(i, ny + 1)%alpha = compute_alpha(x_face(mesh, i), x_face(mesh, i + 1), y_face(mesh, ny + 1), y_face(mesh, ny + 2), snx, sny, c_val)
+          end if
+       end if
+    end do
+    deallocate(seg_nx, seg_ny)
   end subroutine apply_marker_normals_to_segments
 
   ! [Procédure/Module] subroutine write_vof_markers_vtk

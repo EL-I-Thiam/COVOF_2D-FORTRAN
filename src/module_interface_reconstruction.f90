@@ -578,13 +578,15 @@ contains
 
   ! [Procédure/Module] subroutine reconstruct_interface
   subroutine reconstruct_interface(method_name, mesh, C, segments)
+    use module_mpi_comm, only: exchange_halos_scalar
     character(len=*), intent(in) :: method_name
     type(mesh_2d_t), intent(in) :: mesh
     real(dp), intent(in) :: C(0:mesh%nx_local+1, 0:mesh%ny_local+1)
     type(interface_segment_t), intent(out) :: segments(0:mesh%nx_local+1, 0:mesh%ny_local+1)
 
-    integer :: i, j, nx, ny, i_left_src, i_right_src, j_bot_src, j_top_src
-    real(dp) :: c_val
+    integer :: i, j, nx, ny
+    real(dp) :: c_val, snx, sny, nrm
+    real(dp), allocatable :: seg_nx(:, :), seg_ny(:, :)
 
     select case (trim(method_name))
     case ("SLIC")
@@ -599,64 +601,85 @@ contains
 
     nx = mesh%nx_local
     ny = mesh%ny_local
-    if (.not. mesh%is_boundary_left .and. mesh%size <= 1) then
-       i_left_src = nx
-    else
-       i_left_src = 1
+    allocate(seg_nx(0:nx+1, 0:ny+1), seg_ny(0:nx+1, 0:ny+1))
+    seg_nx = 0.0_dp
+    seg_ny = 0.0_dp
+    seg_nx(1:nx, 1:ny) = segments(1:nx, 1:ny)%nx
+    seg_ny(1:nx, 1:ny) = segments(1:nx, 1:ny)%ny
+    call exchange_halos_scalar(seg_nx, mesh)
+    call exchange_halos_scalar(seg_ny, mesh)
+
+    if (mesh%is_boundary_left) then
+       seg_nx(0, 1:ny) = seg_nx(1, 1:ny)
+       seg_ny(0, 1:ny) = seg_ny(1, 1:ny)
     end if
-    if (.not. mesh%is_boundary_right .and. mesh%size <= 1) then
-       i_right_src = 1
-    else
-       i_right_src = nx
+    if (mesh%is_boundary_right) then
+       seg_nx(nx+1, 1:ny) = seg_nx(nx, 1:ny)
+       seg_ny(nx+1, 1:ny) = seg_ny(nx, 1:ny)
     end if
-    if (.not. mesh%is_boundary_bottom .and. mesh%size <= 1) then
-       j_bot_src = ny
-    else
-       j_bot_src = 1
+    if (mesh%is_boundary_bottom) then
+       seg_nx(0:nx+1, 0) = seg_nx(0:nx+1, 1)
+       seg_ny(0:nx+1, 0) = seg_ny(0:nx+1, 1)
     end if
-    if (.not. mesh%is_boundary_top .and. mesh%size <= 1) then
-       j_top_src = 1
-    else
-       j_top_src = ny
+    if (mesh%is_boundary_top) then
+       seg_nx(0:nx+1, ny+1) = seg_nx(0:nx+1, ny)
+       seg_ny(0:nx+1, ny+1) = seg_ny(0:nx+1, ny)
     end if
 
     do j = 1, ny
        c_val = C(0, j)
        if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
-          segments(0, j)%nx = segments(i_left_src, j)%nx
-          segments(0, j)%ny = segments(i_left_src, j)%ny
-          segments(0, j)%alpha = compute_alpha(x_face(mesh, 0), x_face(mesh, 1), &
-                                               y_face(mesh, j), y_face(mesh, j + 1), &
-                                               segments(0, j)%nx, segments(0, j)%ny, c_val)
+          snx = seg_nx(0, j); sny = seg_ny(0, j)
+          nrm = hypot(snx, sny)
+          if (nrm > 1.0e-12_dp) then
+             snx = snx / nrm; sny = sny / nrm
+             segments(0, j)%nx = snx
+             segments(0, j)%ny = sny
+             segments(0, j)%alpha = compute_alpha(x_face(mesh, 0), x_face(mesh, 1), &
+                                                  y_face(mesh, j), y_face(mesh, j + 1), snx, sny, c_val)
+          end if
        end if
        c_val = C(nx + 1, j)
        if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
-          segments(nx + 1, j)%nx = segments(i_right_src, j)%nx
-          segments(nx + 1, j)%ny = segments(i_right_src, j)%ny
-          segments(nx + 1, j)%alpha = compute_alpha(x_face(mesh, nx + 1), x_face(mesh, nx + 2), &
-                                                    y_face(mesh, j), y_face(mesh, j + 1), &
-                                                    segments(nx + 1, j)%nx, segments(nx + 1, j)%ny, c_val)
+          snx = seg_nx(nx + 1, j); sny = seg_ny(nx + 1, j)
+          nrm = hypot(snx, sny)
+          if (nrm > 1.0e-12_dp) then
+             snx = snx / nrm; sny = sny / nrm
+             segments(nx + 1, j)%nx = snx
+             segments(nx + 1, j)%ny = sny
+             segments(nx + 1, j)%alpha = compute_alpha(x_face(mesh, nx + 1), x_face(mesh, nx + 2), &
+                                                       y_face(mesh, j), y_face(mesh, j + 1), snx, sny, c_val)
+          end if
        end if
     end do
 
     do i = 0, nx + 1
        c_val = C(i, 0)
        if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
-          segments(i, 0)%nx = segments(i, j_bot_src)%nx
-          segments(i, 0)%ny = segments(i, j_bot_src)%ny
-          segments(i, 0)%alpha = compute_alpha(x_face(mesh, i), x_face(mesh, i + 1), &
-                                               y_face(mesh, 0), y_face(mesh, 1), &
-                                               segments(i, 0)%nx, segments(i, 0)%ny, c_val)
+          snx = seg_nx(i, 0); sny = seg_ny(i, 0)
+          nrm = hypot(snx, sny)
+          if (nrm > 1.0e-12_dp) then
+             snx = snx / nrm; sny = sny / nrm
+             segments(i, 0)%nx = snx
+             segments(i, 0)%ny = sny
+             segments(i, 0)%alpha = compute_alpha(x_face(mesh, i), x_face(mesh, i + 1), &
+                                                  y_face(mesh, 0), y_face(mesh, 1), snx, sny, c_val)
+          end if
        end if
        c_val = C(i, ny + 1)
        if (c_val > 1.0e-6_dp .and. c_val < 1.0_dp - 1.0e-6_dp) then
-          segments(i, ny + 1)%nx = segments(i, j_top_src)%nx
-          segments(i, ny + 1)%ny = segments(i, j_top_src)%ny
-          segments(i, ny + 1)%alpha = compute_alpha(x_face(mesh, i), x_face(mesh, i + 1), &
-                                                    y_face(mesh, ny + 1), y_face(mesh, ny + 2), &
-                                                    segments(i, ny + 1)%nx, segments(i, ny + 1)%ny, c_val)
+          snx = seg_nx(i, ny + 1); sny = seg_ny(i, ny + 1)
+          nrm = hypot(snx, sny)
+          if (nrm > 1.0e-12_dp) then
+             snx = snx / nrm; sny = sny / nrm
+             segments(i, ny + 1)%nx = snx
+             segments(i, ny + 1)%ny = sny
+             segments(i, ny + 1)%alpha = compute_alpha(x_face(mesh, i), x_face(mesh, i + 1), &
+                                                       y_face(mesh, ny + 1), y_face(mesh, ny + 2), snx, sny, c_val)
+          end if
        end if
     end do
+    deallocate(seg_nx, seg_ny)
   end subroutine reconstruct_interface
 
   ! [Procédure/Module] function evaluate_limiter

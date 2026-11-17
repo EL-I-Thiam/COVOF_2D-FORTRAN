@@ -20,7 +20,7 @@ module module_vtk_writer
 
   type :: vtk_writer_t
      ! Déclaration de variable locale / paramètre de calcul
-     character(len=256) :: output_dir = "output"
+     character(len=512) :: output_dir = "output"
      ! Déclaration de variable locale / paramètre de calcul
      character(len=128) :: case_name  = "covof2d_case"
      ! Déclaration de variable locale / paramètre de calcul
@@ -54,7 +54,7 @@ contains
     ! Déclaration de variable locale / paramètre de calcul
     character(len=512) :: csv_path, mkdir_cmd
     ! Déclaration de variable locale / paramètre de calcul
-    integer :: io_stat
+    integer :: io_stat, ierr
 
     ! Affectation et calcul numérique
     this%output_dir = trim(out_dir)
@@ -81,6 +81,7 @@ contains
           flush(this%csv_unit)
        end if
     end if
+    call MPI_Barrier(mesh%comm, ierr)
   end subroutine vtk_init
 
   !-----------------------------------------------------------------------------

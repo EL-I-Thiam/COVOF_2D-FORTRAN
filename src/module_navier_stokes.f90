@@ -788,7 +788,7 @@ contains
           dof = p_offset + (j - 1) * mesh%nx_local + i
           ! Affectation et calcul numérique
           ! Régularisation minimale du mode constant de pression sans briser la contrainte d'incompressibilité
-          if (i == 1 .and. j == 1 .and. .not. cfg%compressible) then
+          if (mesh%rank == 0 .and. i == 1 .and. j == 1 .and. .not. cfg%compressible) then
              div_val = div_cell(i, j) * dvol + 1.0e-10_dp * tf%p(1, 1) * dvol
           else
              div_val = div_cell(i, j) * dvol

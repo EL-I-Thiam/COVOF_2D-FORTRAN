@@ -1,41 +1,48 @@
-# INSTRUCTIONS D'EXÉCUTION POUR AGENT / MODÈLE IA — CAS 6 (FC-WY-CVI-MARKER) : CISAILLEMENT PÉRIODIQUE DE KELVIN-HELMHOLTZ D'UNE NAPPE LIQUIDE (CAS 3.2 *FLUIDS* 2021) AVEC MARQUEURS CVI (`06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers`)
+# INSTRUCTIONS D'EXÉCUTION POUR AGENT / MODÈLE IA — CAS 6 (FC-WY-CVI-MARKER) : CISAILLEMENT PÉRIODIQUE DE KELVIN-HELMHOLTZ D'UNE NAPPE LIQUIDE (*FLUIDS* 2021, CAS 3.2) (`06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers`)
 
-## 1. Mission et Rôle de l'Agent
+## 1. Mission, Contraintes Critiques et Interdictions Absolues
 
-Vous êtes un agent autonome chargé d'exécuter, de vérifier et de post-traiter de bout en bout le **Cas de Validation 6 de la méthode hybride FC-WY-CVI-Marker (`06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers`)** sur les moteurs **C++17** (`covof2d_cpp`) et **Fortran 2018** (`covof2d_fortran`) de la plateforme **COVOF 2D**.
+Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et de post-traiter de bout en bout le **Cas de Validation 6 (`06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers`)** sur les moteurs précompilés **C++17** (`COVOF_2D-C++/bin/covof2d_cpp`) et **Fortran 2018** (`COVOF_2D-FORTRAN/bin/covof2d_fortran`).
 
-Ce cas correspond au **Cas 3.2 de [El Ouafa, Vincent & Le Chenadec (*Fluids* 2021)](https://doi.org/10.3390/fluids6010023)** couplé à l'architecture **Solveur Monolithique (FC) + VOF-PLIC (Weymouth & Yue) + Interpolation CVI + Marqueurs Non Connectés**. Il valide simultanément :
-1. La conservation de l'énergie cinétique $E_k(t)/E_k(0)$ en écoulement d'Euler diphasique à grand rapport de densité ($r_\rho = \rho_2/\rho_1 \in \{100, 1000\}$) grâce au solveur **Monolithique FC** et au schéma convectif centré (`CENTERED`) ;
-2. Le maintien de l'intégrité géométrique des deux interfaces opposées de la nappe liquide mince ($\delta_0 = 3\times 10^{-4}\,\mathrm{m}$, soit 6 mailles à $t=0$ sur grille $64\times 64$) lorsqu'elle s'étire sous la taille d'une maille ($\delta_{\mathrm{loc}}(t) < \Delta x$) grâce au **filtrage directionnel des marqueurs CVI** ($\mathbf{n}_p \cdot \mathbf{n}_{i,j}^{\mathrm{ref}} \ge 0.5$).
-
----
-
-## 2. Théorie : Nappe Liquide Cisaillée et Protection des Films Minces par Filtrage Angulaire
-
-Dans une boîte carrée périodique en $x$ de côté $L = 3\times 10^{-3}\,\mathrm{m}$ ($\Omega = [0, L] \times [0, L]$), une nappe liquide horizontale d'épaisseur $\delta = 3\times 10^{-4}\,\mathrm{m}$ est centrée en $y_c = L/2 = 1.5\times 10^{-3}\,\mathrm{m}$.
-Le champ de vitesse initial est analytiquement solénoïdal ($\nabla \cdot \mathbf{u}_0 \equiv 0$) :
-$$u(x, y, 0) = A - 0.04 \cos\left(\frac{2\pi x}{L}\right) \left(\frac{L}{2\pi}\right) \left(-\frac{2}{\delta}\right) \exp\left(-\frac{2|y - y_c|}{\delta}\right),$$
-$$v(x, y, 0) = 0.04 \sin\left(\frac{2\pi x}{L}\right) \exp\left(-\frac{2|y - y_c|}{\delta}\right),$$
-avec $A = 2.0\,\mathrm{m/s}$ dans le liquide et $A = 30.0\,\mathrm{m/s}$ dans le gaz.
-
-### 2.1 Pourquoi le couplage CVI + Marqueurs à filtrage angulaire est décisif sur la nappe liquide
-Lorsque l'instabilité de Kelvin-Helmholtz s'amplifie ($t \in [2\times 10^{-4}, 5\times 10^{-4}]\,\mathrm{s}$), la nappe liquide s'affine localement jusqu'à $\delta_{\mathrm{loc}} \le \Delta x$.
-- L'interpolateur **CVI** (`CVI_RK2`) sur le champ de vitesse monolithique **FC** ($\|B_u \mathbf{u}^{n+1}\|_\infty \le 10^{-10}$) advecte les deux rideaux de marqueurs (interface supérieure de normale $\mathbf{n}^+ \approx (0, +1)$ et interface inférieure de normale $\mathbf{n}^- \approx (0, -1)$) le long des lignes de courant exactes, y compris à travers la frontière périodique $x=0 \leftrightarrow x=L$.
-- Le **filtrage angulaire** ($\mathbf{n}_p \cdot \mathbf{n}_{i,j}^{\mathrm{ref}} \ge 0.5$) garantit que seules les particules appartenant au bon côté de la nappe sont utilisées pour reconstruire la normale PLIC (`marker_normals_plic: true`), empêchant l'annulation mutuelle des deux interfaces opposées.
+### Interdictions absolues et règles de fidélité
+1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires.
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
+3. **PARAMÈTRES CODÉS EN DUR DANS LES BINAIRES POUR `LIQUID_SHEET`** :
+   Dans `Simulation.cpp` et `module_simulation.f90`, le profil de vitesse initial ($A_{\mathrm{gaz}} = 30.0\,\mathrm{m/s}$, $A_{\mathrm{liq}} = 2.0\,\mathrm{m/s}$, amplitude `0.04`) est codé en dur pour `LIQUID_SHEET`, et la fraction volumique initiale utilise un profil lissé sur `eps = 1.5*max(dx,dy)`, ce qui ensemence les marqueurs sur ~3 mailles d'épaisseur par interface. Reportez fidèlement ces valeurs réelles dans le rapport.
+4. **VÉRIFICATION PÉRIODIQUE ET DU LISSAGE SVOF** :
+   - Vérifiez objectivement la conservation de masse $|\Delta V|/V_0$ entre `covof2d_cpp` et `covof2d_fortran` ainsi qu'entre `np=1`, `np=2` et `np=4` en condition `PERIODIC` (sans supposition a priori).
+   - À $\sigma = 0$, `enable_diffusion_smoothing` (`C_tilde`) est sans effet ; seul **`enable_svof_smoothing`** ($C_s$) modifie $\rho(C_s)$ et $\mu(C_s)$.
+5. **ZÉRO RÉSULTAT EN DUR, ZÉRO DISSIMULATION** : Toute divergence, asymétrie périodique ou écart C++/Fortran observé dans les `.csv` / `.vtr` / `.vtk` doit être rapporté tel quel.
 
 ---
 
-## 3. Matrice des Paramètres et Prototype `.json`
+## 2. Arborescence et Théorie de la Nappe Liquide Cisaillée
 
-| Paramètre | Spécification |
-| :--- | :--- |
-| Domaine et Nappe | $L_x = L_y = 0.003\,\mathrm{m}$, $y_c = 0.0015\,\mathrm{m}$, $\delta = 0.0003\,\mathrm{m}$ |
-| Rapports de densité | $r_\rho = \rho_2/\rho_1 \in \{100, 1000\}$, $\mu_1 = \mu_2 = 10^{-12}\,\mathrm{Pa\cdot s}$, $\sigma = 0$ |
-| Maillage et Temps | $64\times 64$ et $128\times 128$, $\Delta t = 10^{-6}\,\mathrm{s}$, $t_{\mathrm{final}} = 3\times 10^{-4}\,\mathrm{s}$ (et $5\times 10^{-4}\,\mathrm{s}$) |
-| **Étude du Lissage SVOF de Helmholtz** | Comparaison à $r_\rho \in \{100, 1000\}$ entre : (1) Sans lissage (`enable_svof_smoothing: false`), (2) Lissage diffusif (`enable_diffusion_smoothing: true`), et (3) **Lissage elliptique SVOF de Helmholtz (`enable_svof_smoothing: true`, `svof_filter_width` $k \in \{0.5, 1.0\}$)** sur la conservation de $E_k(t)/E_k(0)$ et la régularité de l'enroulement |
-| Configurations comparées | `MONOLITHIC + WY + PLIC` (avec et sans SVOF) vs `MONOLITHIC + WY + PLIC + CVI_RK2 (marker_normals_plic: true)` (avec et sans SVOF) |
+```text
+VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers/
+├── case/{cpp,fortran}/
+├── output/{cpp,fortran}/
+├── figures/
+├── scripts/{create_cases.py,run_all_simulations.py,postprocess_analysis.py}
+└── rapport/
+```
 
-### Prototype `case/cpp/cas_06_liquid_sheet_fc_cvi_markers_r1000.json`
+Dans $\Omega = [0, L] \times [0, L]$ ($L = 3\times 10^{-3}\,\mathrm{m}$), périodique selon $x$ et `FREE_SLIP` selon $y$, une nappe liquide horizontale ($C = 1$, fluide 1 dans `COVOF_2D` pour `LIQUID_SHEET`, $\rho_1 = 1.0\,\mathrm{kg/m}^3$, $\mu_1 = 10^{-12}\,\mathrm{Pa\cdot s}$) d'épaisseur $\delta = 3\times 10^{-4}\,\mathrm{m}$ centrée en $y_c = 1.5\times 10^{-3}\,\mathrm{m}$ est plongée dans le fluide 2 ($\rho_2 \in \{100, 1000\}\,\mathrm{kg/m}^3$, $\mu_2 = 10^{-12}\,\mathrm{Pa\cdot s}$), avec $\sigma = 0$.
+*(Remarque : vérifiez dans `Density` du `.vtr` à $t=0$ quel fluide porte $C=1$ et quel fluide porte $\rho_2$, afin que l'analyse physique soit cohérente avec le champ réel.)*
+
+---
+
+## 3. Matrice Complète des Paramètres Physiques et Numériques
+
+Tous les essais utilisent `test_case: "CAS_10_LIQUID_SHEET"`, `MONOLITHIC` (`BICGSTAB2`, `BLOCK_TRIANGULAR`, `tol: 1e-10`, `max_iter: 1000`), `GEAR`, `ADAMS_BASHFORTH`, `CENTERED`, `WEYMOUTH_YUE`, `PLIC`, `tvd_limiter: "NONE"`, $\Delta t = 10^{-6}\,\mathrm{s}$, `t_final = 3e-4 s` (et `5e-4 s` pour étudier l'étirement maximal) :
+
+| Axe d'étude | Grilles | Rapports $\rho_2/\rho_1$ | Lissage SVOF (`svof_filter_width`) | Marqueurs (`use_markers` / `scheme` / `marker_normals_plic`) |
+| :--- | :---: | :---: | :--- | :--- |
+| **Axe A : Conservation $E_k(t)/E_k(0)$ ($r_\rho = 100, 1000$)** | $64\times 64$, $128\times 128$ | $100,\, 1000$ | `false` vs `true` ($k \in \{0.5, 1.0\}$) | `false` (`WY+PLIC` seul) vs `true` (`"CVI_RK2"`, `marker_curvature: false`, `marker_normals_plic: true`) |
+| **Axe B : CVI vs Bilinéaire sur cisaillement** | $64\times 64$ | $1000$ | `true` ($k=0.5$) | `"CVI_RK2"` vs `"BILINEAR_RK2"` (avec même `marker_normals_plic: false`) |
+| **Axe C : Parité dual-code (`np=1`)** | $64\times 64$, $128\times 128$ | $100,\, 1000$ | `false` et `true` ($k=0.5$) | `covof2d_cpp` vs `covof2d_fortran` |
+
+### Prototype `case/cpp/cas_06_sheet_cvi_svof_r1000_n64.json`
 ```json
 {
   "mode": "NAVIER_STOKES",
@@ -54,6 +61,7 @@ Lorsque l'instabilité de Kelvin-Helmholtz s'amplifie ($t \in [2\times 10^{-4}, 
     "convective_linearization": "ADAMS_BASHFORTH",
     "enable_svof_smoothing": true,
     "svof_filter_width": 0.5,
+    "enable_diffusion_smoothing": false,
     "sigma": 0.0,
     "gx": 0.0,
     "gy": 0.0,
@@ -75,7 +83,7 @@ Lorsque l'instabilité de Kelvin-Helmholtz s'amplifie ($t \in [2\times 10^{-4}, 
     "time_scheme": "GEAR",
     "dt": 1e-06,
     "t_final": 0.0003,
-    "cfl_max": 0.45,
+    "cfl_max": 0.7,
     "adaptive_dt": false
   },
   "vof": {
@@ -95,15 +103,13 @@ Lorsque l'instabilité de Kelvin-Helmholtz s'amplifie ($t \in [2\times 10^{-4}, 
     "type": "MONOLITHIC",
     "linear_solver": "BICGSTAB2",
     "tol": 1e-10,
-    "max_iter": 800,
-    "r_al": 0.0,
-    "uzawa_iter": 1,
+    "max_iter": 1000,
     "use_precond": true,
     "precond_type": "BLOCK_TRIANGULAR"
   },
   "output": {
-    "output_dir": "Validation_Totale/Run_CASES/Run_FC-WY-CVI-Marker/06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers/output/cpp/fc_cvi_r1000",
-    "case_name": "cas_06_liquid_sheet_cvi_r1000",
+    "output_dir": "output/cpp/sheet_cvi_svof_r1000_n64",
+    "case_name": "cas_06_sheet_r1000_n64",
     "vtk_interval": 50,
     "log_interval": 25,
     "write_csv_history": true
@@ -113,8 +119,7 @@ Lorsque l'instabilité de Kelvin-Helmholtz s'amplifie ($t \in [2\times 10^{-4}, 
 
 ---
 
-## 4. Livrables et Diagnostics Attendus
+## 4. Livrables, Post-Traitement et Rédaction du Rapport
 
-1. **Courbes d'énergie cinétique normalisée $E_k(t)/E_k(0)$** (`figures/conservation_energie_cinetique_nappe.pdf`) pour $r_\rho \in \{100, 1000\}$.
-2. **Superposition du contour VOF $C=0.5$ et des deux rideaux de marqueurs CVI** (`figures/nappe_liquide_rideaux_marqueurs_cvi.png`) montrant la préservation du ligament mince et la traversée périodique $x=0 \leftrightarrow x=L$.
-3. **Rapport PDF complet (`rapport/rapport_validation_06_nappe_liquide_kelvin_helmholtz_cvi_markers.pdf`)**.
+1. **Extraction fidèle** : Tracer $E_k(t)/E_k(0)$ (colonne `kinetic_energy` de `*_history.csv`), `max_div`, itérations Krylov depuis `.log`, nombre de marqueurs `n_markers(t)` et traversée périodique $x=0 \leftrightarrow x=L$, dérive volumique $|V(t)-V(0)|/V(0)$ depuis `.vtr`.
+2. **Livrables** : `figures/conservation_energie_cinetique_nappe.{png,pdf}`, `figures/nappe_liquide_rideaux_marqueurs_cvi.{png,pdf}`, `figures/dual_code_parity_cas06.{png,pdf}`, `rapport/rapport_validation_06_nappe_liquide_kelvin_helmholtz_cvi_markers.{md,pdf}` avec table complète des paramètres JSON et compte-rendu fidèle des éventuels écarts C++/Fortran ou de périodicité.

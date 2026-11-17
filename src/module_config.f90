@@ -30,7 +30,7 @@ module module_config
 
   type :: config_t
      ! Déclaration de variable locale / paramètre de calcul
-     character(len=64) :: case_name = "covof2d_case"
+     character(len=128) :: case_name = "covof2d_case"
      character(len=64) :: test_case = "CAS_3_1"
      ! Déclaration de variable locale / paramètre de calcul
      character(len=32) :: mode = "NAVIER_STOKES"
@@ -138,7 +138,7 @@ module module_config
      ! Déclaration de variable locale / paramètre de calcul
      real(dp) :: ic_box_x0 = 0.0_dp, ic_box_y0 = 0.0_dp, ic_box_x1 = 0.5_dp, ic_box_y1 = 0.5_dp
      ! Déclaration de variable locale / paramètre de calcul
-     real(dp) :: ic_pert_amp = 0.05_dp, ic_pert_k = 1.0_dp
+     real(dp) :: ic_pert_amp = 0.0_dp, ic_pert_k = 1.0_dp
      ! Déclaration de l'épaisseur initiale de nappe liquide (Cas 3.2 Fluids 2021)
      real(dp) :: ic_thickness = 0.0003_dp
      ! Déclaration de la largeur initiale de jet liquide (Cas 3.3 Fluids 2021)
@@ -174,7 +174,7 @@ module module_config
      real(dp) :: source_term = 1.0_dp
 
      ! Outputs
-     character(len=128) :: output_dir = "output"
+     character(len=512) :: output_dir = "output"
      ! Déclaration de variable locale / paramètre de calcul
      integer  :: vtk_interval = 50
      ! Déclaration de variable locale / paramètre de calcul
@@ -530,6 +530,14 @@ contains
     call json_get_real(buf, "initial_conditions.axis_a", cfg%ic_axis_a, cfg%ic_axis_a)
     call json_get_real(buf, "initial_condition.axis_b", cfg%ic_axis_b, 0.0_dp)
     call json_get_real(buf, "initial_conditions.axis_b", cfg%ic_axis_b, cfg%ic_axis_b)
+    if (cfg%ic_type == IC_RAYLEIGH_TAYLOR) then
+       call json_get_real(buf, "initial_condition.pert_amp", cfg%ic_pert_amp, 0.05_dp)
+    else
+       call json_get_real(buf, "initial_condition.pert_amp", cfg%ic_pert_amp, 0.0_dp)
+    end if
+    call json_get_real(buf, "initial_conditions.pert_amp", cfg%ic_pert_amp, cfg%ic_pert_amp)
+    call json_get_real(buf, "initial_condition.pert_k", cfg%ic_pert_k, 1.0_dp)
+    call json_get_real(buf, "initial_conditions.pert_k", cfg%ic_pert_k, cfg%ic_pert_k)
     if (cfg%ic_axis_a <= 0.0_dp .and. cfg%ic_pert_amp > 0.0_dp .and. cfg%ic_radius > 0.0_dp .and. &
         (cfg%ic_type == IC_BUBBLE .or. cfg%ic_type == IC_DROPLET)) then
        cfg%ic_axis_a = cfg%ic_radius * (1.0_dp + cfg%ic_pert_amp)
@@ -543,10 +551,6 @@ contains
     call json_get_real(buf, "initial_conditions.box_x1", cfg%ic_box_x1, cfg%ic_box_x1)
     call json_get_real(buf, "initial_condition.box_y1", cfg%ic_box_y1, 0.5_dp)
     call json_get_real(buf, "initial_conditions.box_y1", cfg%ic_box_y1, cfg%ic_box_y1)
-    call json_get_real(buf, "initial_condition.pert_amp", cfg%ic_pert_amp, 0.05_dp)
-    call json_get_real(buf, "initial_conditions.pert_amp", cfg%ic_pert_amp, cfg%ic_pert_amp)
-    call json_get_real(buf, "initial_condition.pert_k", cfg%ic_pert_k, 1.0_dp)
-    call json_get_real(buf, "initial_conditions.pert_k", cfg%ic_pert_k, cfg%ic_pert_k)
     call json_get_real(buf, "initial_condition.thickness", cfg%ic_thickness, 0.0003_dp)
     call json_get_real(buf, "initial_conditions.thickness", cfg%ic_thickness, cfg%ic_thickness)
     call json_get_real(buf, "initial_condition.jet_width", cfg%ic_jet_width, 0.08_dp)
@@ -588,6 +592,9 @@ contains
        cfg%solver_type = SOLVER_AAL
        cfg%adaptative_al = .true.
        cfg%linear_solver = LINEAR_BICGSTAB2
+    else if (trim(str_val) == "DIRECT" .or. trim(str_val) == "MUMPS") then
+       cfg%solver_type = SOLVER_AUGMENTED_LAGRANGIAN
+       cfg%linear_solver = LINEAR_DIRECT
     ! Branche par défaut si condition non satisfaite
     else
        ! Affectation et calcul numérique
@@ -597,7 +604,11 @@ contains
     end if
 
     ! Appel de sous-programme modulaire
-    call json_get_string(buf, "solver.linear_solver", str_val, "BICGSTAB2")
+    if (cfg%linear_solver == LINEAR_DIRECT) then
+       call json_get_string(buf, "solver.linear_solver", str_val, "DIRECT")
+    else
+       call json_get_string(buf, "solver.linear_solver", str_val, "BICGSTAB2")
+    end if
     ! Évaluation de la condition logique
     if (trim(str_val) == "BICGSTAB") then
        ! Affectation et calcul numérique

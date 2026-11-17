@@ -1,75 +1,67 @@
-# Tutoriel 8 : Chute Libre d'un Cylindre Dense dans le Vide (Pénalisation de Brinkman)
+# Tutoriel 8 : Chute Libre d'un Cylindre Dense dans le Vide (Forts Contrastes)
 
-Ce tutoriel valide le couplage fluide-solide par pénalisation de Brinkman avec un contraste de masse volumique extrême (rapport rho_s / rho_f = 85 000). Il démontre que l'inclusion solide suit rigoureusement la cinématique galiléenne de chute libre dans le vide sans dispersion ni amortissement numérique parasite.
+Ce tutoriel valide le couplage fluide-solide par approche 1-fluide à fort contraste de masse volumique et de viscosité ($\rho_2 / \rho_1 \approx 85\,000$, $\mu_2 / \mu_1 \approx 5.4\times 10^9$). Il démontre que l'inclusion cylindrique dense suit rigoureusement la cinématique galiléenne de chute libre dans le vide sans dispersion ni amortissement numérique parasite.
 
 ---
 
 ## 1. Objectifs Pédagogiques et Modules Logiciels Activés
 
 ### 1.1 Compétences Acquises
-- Comprendre les fondements physiques et les équations aux dérivées partielles gouvernant l'écoulement.
-- Configurer les paramètres numériques et conditions aux limites sur grille cartésienne décalée MAC.
-- Exécuter le cas test avec les exécutables C++17 et Fortran 2018 (séquentiel et OpenMP).
-- Quantifier avec rigueur la précision par rapport à la solution analytique exacte ($L_2$, $L_\infty$).
-- Produire et exploiter les visualisations scientifiques volumiques sous ParaView.
+- Maîtriser le comportement du couplage 1-fluide Navier-Stokes/VOF face à des sauts extrêmes de densité et de viscosité.
+- Configurer le schéma temporel `GEAR` (BDF2), la linéarisation `ADAMS_BASHFORTH` et le lissage SVOF de Helmholtz (`enable_svof_smoothing`).
+- Comparer les formulations de couplage `MONOLITHIC` (FC), `AUGMENTED_LAGRANGIAN` (AL), `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (AAL) et `STANDARD_PROJECTION` (SP).
+- Exécuter le cas test en parallèle MPI pur avec `covof2d_cpp` et `covof2d_fortran`.
+- Évaluer dynamiquement les erreurs $L_2$ temporelles sur $U_c(t)$ et $Y_c(t)$ depuis `*_history.csv`.
 
 ### 1.2 Modules Logiciels Sollicités
-- **Moteur C++17 :** `Mesh2D`, `FlowFields`, `BrinkmanPenalization`, `NavierStokesSolver`, `BiCGSTAB2Solver`, `SSORPreconditioner`.
-- **Moteur Fortran 2018 :** `module_mesh`, `module_flow_fields`, `module_brinkman`, `module_navier_stokes`, `module_linear_solvers`, `module_preconditioners`.
+- **Moteur C++17 (`COVOF_2D-C++`) :** `Config`, `Mesh2D`, `FlowFields`, `MpiComm`, `InterfaceTracker`, `InterfaceReconstruction`, `NavierStokesSolver`, `BiCGSTAB2Solver`, `BlockTriangularPreconditioner`, `VTKWriter`, `Simulation`.
+- **Moteur Fortran 2018 (`COVOF_2D-FORTRAN`) :** `module_config`, `module_json`, `module_mesh`, `module_fields`, `module_mpi_comm`, `module_interface_vof`, `module_interface_reconstruction`, `module_navier_stokes`, `module_linear_solvers`, `module_vtk_writer`, `module_simulation`.
 
 ---
 
 ## 2. Formulation Physique et Solution Analytique Exacte
 
-Équations Physiques et Configuration
+### 2.1 Équations Physiques et Configuration
+Ce cas diphasique sévère simule la chute libre sous gravité d'un cylindre circulaire ultra-dense et ultra-visqueux dans l'air au repos. Il met à l'épreuve les solveurs de couplage vitesse-pression et le préconditionneur `BLOCK_TRIANGULAR` à densité variable face à des sauts $r_\rho = \rho_2/\rho_1 \approx 84\,976$ et $r_\mu = \mu_2/\mu_1 \approx 5.405\times 10^9$.
 
-Ce cas diphasique sévère simule la chute libre sous gravité d'un cylindre circulaire ultra-dense et ultra-visqueux dans l'air au repos. Il met à l'épreuve la robustesse des solveurs de couplage vitesse-pression et des préconditionneurs face à des sauts extrêmes de masse volumique $r_\rho = \rho_2/\rho_1 \approx 84\,976$ et de viscosité dynamique $r_\mu = \mu_2/\mu_1 \approx 5.405\times 10^9$.
+Dans une cavité rectangulaire $\Omega = [0, 0.1] \times [0, 0.2]\,\mathrm{m}^2$ soumise à la pesanteur $\mathbf{g} = (0, -9.81)\,\mathrm{m/s}^2$, un cylindre de rayon $R = 0.0125\,\mathrm{m}$ est initialement centré en $(x_c, Y_0) = (0.05, 0.15)\,\mathrm{m}$ sans vitesse initiale (`"type": "CYLINDER"`, qui affecte $C = 0$ à l'intérieur du cylindre et $C = 1$ à l'extérieur) :
+- **Fluide 1 (Air ambiant, $C=1$)** : $\rho_1 = 1.1768\,\mathrm{kg/m}^3$, $\mu_1 = 1.85\times 10^{-5}\,\mathrm{Pa\cdot s}$.
+- **Fluide 2 (Cylindre dense, $C=0$)** : $\rho_2 = 100\,000\,\mathrm{kg/m}^3$, $\mu_2 = 100\,000\,\mathrm{Pa\cdot s}$, $\sigma = 0$.
 
-Dans une cavité rectangulaire $\Omega = [0, 0.1] \times [0, 0.2]\,\mathrm{m}^2$ soumise à la pesanteur $\mathbf{g} = (0, -9.81)\,\mathrm{m/s}^2$, un cylindre de rayon $R = 0.0125\,\mathrm{m}$ est initialement centré en $(x_c, Y_0) = (0.05, 0.15)\,\mathrm{m}$ sans vitesse initiale :
-- **Fluide 1 (Air ambiant, $C=0$)** : $\rho_1 = 1.1768\,\mathrm{kg/m}^3$, $\mu_1 = 1.85\times 10^{-5}\,\mathrm{Pa\cdot s}$.
-- **Fluide 2 (Cylindre dense, $C=1$)** : $\rho_2 = 100\,000\,\mathrm{kg/m}^3$, $\mu_2 = 100\,000\,\mathrm{Pa\cdot s}$, $\sigma = 0$.
-
-Compte tenu du rapport d'inertie $r_\rho \gg 1$, la traînée aérodynamique et la poussée d'Archimède exercées par l'air sont négligeables devant le poids du cylindre. La vitesse verticale $U_c(t)$ et l'ordonnée du centre de gravité $Y_c(t)$ suivent la loi de chute libre galiléenne exacte dans le vide :
-$$U_c^{\mathrm{ex}}(t) = -g t, \qquad Y_c^{\mathrm{ex}}(t) = Y_0 - \frac{1}{2} g t^2.$$
-À l'instant final $t_{\mathrm{final}} = 0.144\,\mathrm{s}$ :
+### 2.2 Solution Analytique Galiléenne et Formulations Numériques
+Compte tenu du rapport d'inertie $r_\rho \gg 1$, la traînée aérodynamique et la poussée d'Archimède exercées par l'air sont négligeables devant le poids du cylindre. La vitesse verticale $U_c(t)$ et l'ordonnée du centre de masse $Y_c(t)$ obéissent à la chute libre galiléenne :
+$$U_c^{\mathrm{ex}}(t) = g_y t = -9.81\,t, \qquad Y_c^{\mathrm{ex}}(t) = Y_0 + \frac{1}{2} g_y t^2 = 0.15 - 4.905\,t^2.$$
+À l'instant final $t_{\mathrm{final}} = 0.144\,\mathrm{s}$, la cinématique théorique vaut :
 $$U_c^{\mathrm{ex}}(0.144\,\mathrm{s}) = -1.41264\,\mathrm{m/s}, \qquad Y_c^{\mathrm{ex}}(0.144\,\mathrm{s}) = 0.048288\,\mathrm{m}.$$
 
-### Formulations numériques spécifiques mises en œuvre
-1. **Schéma temporel Gear / BDF2 d'ordre 2** : $\frac{1.5\rho^{n+1}\mathbf{u}^{n+1} - 2\rho^n\mathbf{u}^n + 0.5\rho^{n-1}\mathbf{u}^{n-1}}{\Delta t}$ (`"time_scheme": "GEAR"`).
-2. **Linéarisation convective d'Adams-Bashforth** : vitesse advectrice extrapolée $\mathbf{u}^* = 2\mathbf{u}^n - \mathbf{u}^{n-1}$ (`"convective_linearization": "ADAMS_BASHFORTH"`).
-3. **Lissage SVOF de Helmholtz** : $(I - D\Delta)C_s = C$ avec $D = k\Delta x\Delta y$ ($k=1.0$) et moyenne harmonique nodale de la viscosité de cisaillement $\mu_{\mathrm{node}} = \frac{\mu_1\mu_2}{\mu_2\widetilde{C}_{s,\mathrm{node}} + \mu_1(1-\widetilde{C}_{s,\mathrm{node}})}$.
-4. **Quatre méthodes de couplage vitesse-pression comparées** :
-   - `MONOLITHIC` (**FC**, $r_{\mathrm{al}} = 0$) : résolution couplée directe du système selle par BiCGSTAB(2) + préconditionneur `BLOCK_TRIANGULAR`.
-   - `AUGMENTED_LAGRANGIAN` (**AL**, $r_{\mathrm{al}} = 10\,000$ fixe).
-   - `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (**AAL**) : paramètre local par cellule $r(t,M)$ adapté selon les gradients d'interface et la divergence locale avec facteur $K_{\mathrm{aal}}$ (`k_aal`) et critère d'arrêt d'Uzawa `uzawa_tol`.
-   - `STANDARD_PROJECTION` (**SP**) : méthode de projection à pas fractionnaire.
-
----
+Les briques numériques clés activées pour ce cas sont :
+1. **Schéma temporel Gear / BDF2** (`"time_scheme": "GEAR"`) et linéarisation convective d'Adams-Bashforth (`"convective_linearization": "ADAMS_BASHFORTH"`).
+2. **Lissage SVOF de Helmholtz** (`(I - k\Delta x\Delta y \Delta)C_s = C`) avec moyenne harmonique nodale de la viscosité de cisaillement.
+3. **Couplages comparés :** `MONOLITHIC` (FC), `AUGMENTED_LAGRANGIAN` (AL), `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (AAL avec facteur `k_aal` et critère `uzawa_tol`) et `STANDARD_PROJECTION` (SP).
 
 ---
 
 ## 3. Paramètres Physiques, Numériques et Discrétisation
 
-Physiques, Numériques et Matrice des Jeux de Paramètres
+### 3.1 Matrice des Jeux de Paramètres
 
 | Catégorie | Paramètre | Valeur / Spécification |
 | :----------------------- | :----------------------- | :------------------------------------------------------- |
-| Domaine et Cylindre | $\Omega$, $(x_c, Y_0)$, $R$ | $[0, 0.1]\times[0, 0.2]\,\mathrm{m}^2$, $(0.05, 0.15)\,\mathrm{m}$, $R = 0.0125\,\mathrm{m}$ |
+| Domaine et Cylindre | $\Omega$, $(x_c, Y_0)$, $R$ | $[0, 0.1]\times[0, 0.2]\,\mathrm{m}^2$, $(0.05, 0.15)\,\mathrm{m}$, $R = 0.0125\,\mathrm{m}$ (`axis_a = axis_b = 0.0125`, `pert_amp = 0.0`) |
 | Maillages et Pas de temps | $(N_x \times N_y)$, $\Delta t$, $t_{\mathrm{final}}$ | $100\times 200$ et $200\times 400$, $\Delta t = 6.25\times 10^{-5}\,\mathrm{s}$, $t_{\mathrm{final}} = 0.144\,\mathrm{s}$ (2304 pas) |
 | Conditions aux limites | Gauche/Droite ; Bas/Haut | `FREE_SLIP` sur $x=0, 0.1$ ; `DIRICHLET` ($u=v=0$) sur $y=0, 0.2$ |
-| Solveurs et Préconditionneurs | Couplage, Krylov, Précond. | `MONOLITHIC` (FC), `AUGMENTED_LAGRANGIAN` (AL), `AAL` (`k_aal` $\in \{10, 100, 1000\}$), `STANDARD_PROJECTION` (SP) ; `BICGSTAB2`, `GMRES`, `BICGSTAB` avec `BLOCK_TRIANGULAR`, `JACOBI`, `SSOR`, `ILU0` |
-
----
+| Solveurs et Préconditionneurs | Couplage, Krylov, Précond. | `MONOLITHIC` (FC), `AUGMENTED_LAGRANGIAN` (AL), `AAL` (`k_aal` $\in \{10, 100, 1000\}$), `STANDARD_PROJECTION` ; `BICGSTAB2`, `GMRES`, `BICGSTAB` ; `BLOCK_TRIANGULAR`, `JACOBI`, `SSOR`, `ILU0` |
 
 ---
 
 ## 4. Fichier de Configuration JSON Pas à Pas
 
-de Fichiers `.json` (C++17 et Fortran 2018)
+### 4.1 Prototype `case/cpp/cas_8_fc_100x200.json`
+*(Pour Fortran 2018, placer une copie dans `case/fortran/` avec `"output_dir": "output/fortran/fc_100x200"`.)*
 
-### Prototype `case/cpp/cas_8_fc_100x200.json`
 ```json
 {
+  "case_name": "cas_8_fc_100x200",
   "mode": "NAVIER_STOKES",
   "mesh": {
     "nx": 100,
@@ -81,6 +73,7 @@ de Fichiers `.json` (C++17 et Fortran 2018)
     "enable_two_phase": true,
     "enable_surface_tension": false,
     "enable_convection": true,
+    "convective_scheme": "UPWIND",
     "convective_linearization": "ADAMS_BASHFORTH",
     "enable_svof_smoothing": true,
     "svof_filter_width": 1.0,
@@ -95,7 +88,10 @@ de Fichiers `.json` (C++17 et Fortran 2018)
     "type": "CYLINDER",
     "center_x": 0.05,
     "center_y": 0.15,
-    "radius": 0.0125
+    "radius": 0.0125,
+    "axis_a": 0.0125,
+    "axis_b": 0.0125,
+    "pert_amp": 0.0
   },
   "time": {
     "time_scheme": "GEAR",
@@ -127,17 +123,17 @@ de Fichiers `.json` (C++17 et Fortran 2018)
     "cfl_vof": 0.5
   },
   "output": {
-    "output_dir": "VALIDATION_TOTALE/validation_cas_8_dense_cylinder/output/cpp/fc_100x200",
+    "output_dir": "output/cpp/fc_100x200",
     "case_name": "cas_8_fc_100x200",
     "vtk_interval": 100,
     "log_interval": 100,
     "write_csv_history": true
   }
 }
-
 ```
 
-Pour activer le Lagrangien Augmenté Adaptatif (**AAL**), utiliser le bloc `"solver"` suivant :
+Pour activer le Lagrangien Augmenté Adaptatif (`AAL`), remplacer le bloc `"solver"` par :
+
 ```json
   "solver": {
     "type": "ADAPTATIVE_AUGMENTED_LAGRANGIAN",
@@ -152,55 +148,75 @@ Pour activer le Lagrangien Augmenté Adaptatif (**AAL**), utiliser le bloc `"sol
     "use_precond": true,
     "precond_type": "BLOCK_TRIANGULAR"
   }
-
 ```
-
----
 
 ---
 
 ## 5. Procédure d'Exécution (Moteurs C++17 et Fortran 2018)
 
-L'exécution s'effectue indifféremment à l'aide du binaire C++17 (`covof2d_cpp`) ou du binaire Fortran 2018 (`covof2d_fortran`), garantissant une stricte équivalence des résultats numériques.
+L'exécution utilise **MPI pur** (`mpirun -np 4` pour `MONOLITHIC`, `AL` et `AAL` avec solveurs Krylov ; `mpirun -np 1` si `STANDARD_PROJECTION` est sélectionné).
 
 ```bash
-# 1. Se placer dans le répertoire du cas
-cd VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_8_dense_cylinder
+# 1. Créer les répertoires de sortie relatifs courts
+mkdir -p output/cpp/fc_100x200 output/fortran/fc_100x200
 
-# 2. Exécution avec le moteur C++17 (Séquentiel)
-../../../COVOF_2D-C++/bin/covof2d_cpp case/cpp/cas_8_config.json
+# 2. Exécution parallèle MPI avec le moteur C++17
+mpirun -np 4 /chemin/vers/COVOF_2D-C++/bin/covof2d_cpp case/cpp/cas_8_fc_100x200.json
 
-# 3. Exécution avec le moteur C++17 (Parallèle OpenMP)
-export OMP_NUM_THREADS=4
-../../../COVOF_2D-C++/bin/covof2d_cpp case/cpp/cas_8_config.json
-
-# 4. Exécution avec le moteur Fortran 2018 (Séquentiel)
-../../../COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_8_config.json
-
-# 5. Exécution avec le moteur Fortran 2018 (Parallèle OpenMP)
-export OMP_NUM_THREADS=4
-../../../COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_8_config.json
-
+# 3. Exécution parallèle MPI avec le moteur Fortran 2018
+mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_8_fc_100x200.json
 ```
 
 ---
 
 ## 6. Analyse Quantitative, Script Python et Visualisation ParaView
 
-### 6.1 Critères de Vérification et Tolérances
-à Mener (Précision, Intégrité et Performance)
+### 6.1 Critères de Vérification, Formules Exactes et Tolérances
+1. **Erreurs relatives $L_2$ temporelles sur $U_c(t)$ et $Y_c(t)$ :**
+   À partir des colonnes `time`, `center_of_mass_y` ($Y_c$) et `rise_velocity` ($U_c$) de `<case_name>_history.csv` (car pour `IC_CYLINDER`, $1 - C$ représente le cylindre dense), calculer dynamiquement :
+   $$\mathrm{Err}_{\mathrm{rel},2}(U_c) = \sqrt{\frac{\sum_{n=1}^{N_t} \big(U_c(t^n) - U_c^{\mathrm{ex}}(t^n)\big)^2}{\sum_{n=1}^{N_t} \big(U_c^{\mathrm{ex}}(t^n)\big)^2}}, \qquad \mathrm{Err}_{\mathrm{rel},2}(Y_c) = \sqrt{\frac{\sum_{n=1}^{N_t} \big(Y_c(t^n) - Y_c^{\mathrm{ex}}(t^n)\big)^2}{\sum_{n=1}^{N_t} \big(Y_c^{\mathrm{ex}}(t^n)\big)^2}}.$$
+   Critères cibles : $\mathrm{Err}_{\mathrm{rel},2}(U_c) < 10^{-2}$, $\mathrm{Err}_{\mathrm{rel},2}(Y_c) < 10^{-2}$, et variation relative de volume $|V(t_{\mathrm{final}}) - V(0)| / V(0) < 10^{-4}$ mesurée depuis `PhaseIndicator` dans les `.vtr`.
+2. **Comparaison des couplages (`FC`, `AL`, `AAL`, `SP`) et du filtre SVOF :**
+   Comparer la préservation de la circularité du cylindre, l'absence de traînée parasite et le nombre moyen d'itérations Krylov relevé dans les journaux d'exécution.
+3. **Parité C++17 / Fortran 2018 :**
+   Vérifier la superposition des trajectoires $Y_c(t)$ et des vitesses $U_c(t)$ entre `covof2d_cpp` et `covof2d_fortran` ainsi que le maintien de $\|\nabla\cdot\mathbf{u}\|_\infty$ (`max_div`).
 
-1. **Erreurs relatives $L_2$ temporelles sur la vitesse et la position :**
-   $$\mathrm{Err}_{\mathrm{rel},2}(U_c) = \sqrt{\frac{\sum_{n=1}^{N_t} \left(U_c(t^n) - U_c^{\mathrm{ex}}(t^n)\right)^2}{\sum_{n=1}^{N_t} \left(U_c^{\mathrm{ex}}(t^n)\right)^2}}, \qquad \mathrm{Err}_{\mathrm{rel},2}(Y_c) = \sqrt{\frac{\sum_{n=1}^{N_t} \left(Y_c(t^n) - Y_c^{\mathrm{ex}}(t^n)\right)^2}{\sum_{n=1}^{N_t} \left(Y_c^{\mathrm{ex}}(t^n)\right)^2}}.$$
-   Sur grille $100\times 200$, vérifier que `FC` atteint $\mathrm{Err}_{\mathrm{rel},2}(U_c) \approx 8.71\times 10^{-5}$ et $\mathrm{Err}_{\mathrm{rel},2}(Y_c) \approx 1.57\times 10^{-4}$, avec une variation relative de volume $\Delta V/V_0 < 0.001\,\%$.
-2. **Intégrité des méthodes de couplage et du filtre SVOF face aux forts contrastes ($r_\rho \approx 85\,000, r_\mu \approx 5.4\times 10^9$) :**
-   - Comparer `MONOLITHIC` (FC), `AUGMENTED_LAGRANGIAN` ($r_{\mathrm{al}} = 10^4$), `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (`AAL` avec $K_{\mathrm{aal}} \in \{10, 100, 1000\}$) et `STANDARD_PROJECTION` (SP) sur la préservation de la circularité du cylindre et l'absence de traînée numérique parasite.
-   - Vérifier l'impact du filtre elliptique de Helmholtz (`enable_svof_smoothing: true` vs `false`, `svof_filter_width` $k \in \{0.5, 1.0, 2.0\}$) et de la moyenne harmonique nodale de $\mu$ sur l'élimination des pics de vorticité non physiques à l'interface.
-3. **Performance des préconditionneurs à saut de densité et parité C++/Fortran :**
-   - Vérifier que le complément de Schur à densité variable $a_W = \Delta y^2 / D_u$, $a_E = \Delta y^2 / D_u$, $a_S = \Delta x^2 / D_v$, $a_N = \Delta x^2 / D_v$ dans `BlockTriangularPreconditioner` (utilisant $\alpha_{\mathrm{time}} = 1.5$ en mode `GEAR`) maintient la convergence de `BICGSTAB2` en $< 120$ itérations malgré le saut de densité $1:85\,000$.
-   - Comparer le temps CPU total et la divergence résiduelle $\|\nabla\cdot\mathbf{u}\|_\infty$ entre C++17 et Fortran 2018.
+### 6.2 Fichiers Réellement Générés dans `output_dir`
+- `<case_name>_history.csv` : `step,time,dt,center_of_mass_y,rise_velocity,bubble_volume,kinetic_energy,max_u,max_div` (`9` colonnes C++ / `11` colonnes Fortran avec `avg_rho_gas,avg_p_gas`).
+- `<case_name>_<step:06d>.pvtr` et `<case_name>_p<rank>_<step:06d>.vtr` : `PhaseIndicator`, `PhaseIndicator_Smoothed`, `Pressure`, `Density`, `Viscosity`, `Divergence`, `Temperature`, `Velocity`.
 
----
+### 6.3 Script Python de Vérification Dynamique
 
-### 6.2 Résultats Attendus et Visualisation ParaView
+```python
+#!/usr/bin/env python3
+"""Vérification dynamique du Tutoriel 8 (Chute libre cylindre dense) depuis *_history.csv."""
+import csv
+import math
+from pathlib import Path
 
+def verify_free_fall(csv_path: str, y0: float = 0.15, gy: float = -9.81) -> None:
+    times, yc, uc = [], [], []
+    with Path(csv_path).open(newline="") as f:
+        for r in csv.DictReader(f):
+            t = float(r["time"])
+            if t > 0.0:
+                times.append(t)
+                yc.append(float(r["center_of_mass_y"]))
+                uc.append(float(r["rise_velocity"]))
+
+    u_ex = [gy * t for t in times]
+    y_ex = [y0 + 0.5 * gy * t * t for t in times]
+    err_u = math.sqrt(sum((a - b) ** 2 for a, b in zip(uc, u_ex)) / sum(b ** 2 for b in u_ex))
+    err_y = math.sqrt(sum((a - b) ** 2 for a, b in zip(yc, y_ex)) / sum(b ** 2 for b in y_ex))
+    print(f"[{csv_path}] t_end={times[-1]:.4f} s | Uc={uc[-1]:.6f} (ex={u_ex[-1]:.6f}) "
+          f"| Yc={yc[-1]:.6f} (ex={y_ex[-1]:.6f}) | Err_L2(U)={err_u:.3e} | Err_L2(Y)={err_y:.3e}")
+
+if __name__ == "__main__":
+    verify_free_fall("output/cpp/fc_100x200/cas_8_fc_100x200_history.csv")
+    verify_free_fall("output/fortran/fc_100x200/cas_8_fc_100x200_history.csv")
+```
+
+### 6.4 Visualisation sous ParaView
+1. Ouvrir la série temporelle `<case_name>_..pvtr` dans ParaView (**File -> Open**).
+2. Afficher le champ `Density` en échelle logarithmique pour distinguer le cylindre dense ($\rho_2 = 10^5\,\mathrm{kg/m}^3$) de l'air ambiant ($\rho_1 = 1.1768\,\mathrm{kg/m}^3$), et tracer l'isocontour `PhaseIndicator = 0.5` afin de vérifier l'absence de déformation du solide rigide durant sa chute.
+3. Utiliser le filtre **Glyph** sur `Velocity` pour visualiser l'écoulement d'air déplacé autour du cylindre.

@@ -1,214 +1,126 @@
 # Structures de Données, Mémoire et Parallélisme HPC
 
-La conception des structures de données internes d'un solveur CFD destiné aux supercalculateurs modernes requiert un compromis rigoureux entre l'expressivité algorithmique et l'efficacité matérielle. À l'échelle d'un nœud de calcul doté de plusieurs dizaines de cœurs CPU et de mémoires hiérarchiques (caches L1, L2, L3 et contrôleurs DDR/HBM NUMA), la performance brute est gouvernée par le débit mémoire (*memory bandwidth bound*), la localité spatiale et temporelle des caches, et l'alignement des données pour les registres vectoriels SIMD (AVX-512, ARM SVE).
+## 3.1. Représentation Interne du Maillage MAC et des Champs
 
-Ce chapitre détaille l'organisation mémoire interne, la gestion des cellules fantômes, la décomposition de domaine distribuée MPI et les optimisations sans allocation (*zero-allocation*) mises en œuvre dans COVOF 2D.
+### 3.1.1. Dimensions Locales et Couche Unique de Cellules Fantômes
+
+Dans les deux implémentations (**C++17** et **Fortran 2018**), chaque processus MPI gère un sous-domaine rectangulaire de dimensions intérieures `nx_local` $\times$ `ny_local`, entouré exactement d'**une unique couche périphérique de cellules fantômes** (*halo* d'épaisseur $1$ de chaque côté).
+
+- **Côté C++ (`Mesh.hpp`) :**
+  `nx_ghost = nx_local + 2`, `ny_ghost = ny_local + 2`. Les mailles intérieures occupent $i \in [1, \text{nx\_local}]$, $j \in [1, \text{ny\_local}]$ ; les cellules fantômes occupent les bords $i = 0$, $i = \text{nx\_local}+1$, $j = 0$ et $j = \text{ny\_local}+1$.
+  Les tailles exactes allouées dans `FlowFields::allocate(const Mesh2D& mesh)` sont :
+  - Champs centrés ($p, C, C_s, \widetilde{C}, T, \rho, \mu, \kappa, \chi_T, r_{\text{aal}}, \dots$) : `n_cells = nx_ghost * ny_ghost`
+  - Faces verticales $u$ ($\rho_u, F_{\sigma, x}, (\rho u)^*$) : `n_u = (nx_ghost + 1) * ny_ghost` (soit `(nx_local + 3) * (ny_local + 2)`)
+  - Faces horizontales $v$ ($\rho_v, F_{\sigma, y}, (\rho v)^*$) : `n_v = nx_ghost * (ny_ghost + 1)`
+  - Sommets / nœuds ($\mu_{\text{node}}$) : `n_nodes = (nx_ghost + 1) * (ny_ghost + 1)`
+
+- **Côté Fortran (`module_fields.f90`) :**
+  Tous les tableaux 2D de `flow_fields_t` sont alloués uniformément avec les bornes explicites `(0:nx+1, 0:ny+1)` (`allocate_fields(fields, mesh%nx_local, mesh%ny_local)`), garantissant la compatibilité d'indexation directe sur les faces $(i, j)$ et les centres $(i, j)$.
+
+:::note
+L'épaisseur de halo de largeur 1 (`0..nx+1, 0..ny+1`) suffit à l'ensemble des opérateurs du code : pochoir visqueux à 9 points (incluant les nœuds $\mu_{\text{node}}$), reconstruction PLIC/ELVIRA $3\times 3$, filtre de Helmholtz SVOF, advection Weymouth-Yue et **interpolation CVI Variante B** (qui n'accède qu'à $j_u \in \{j-1, j\} \subset [0, N_y]$ et $i_v \in \{i-1, i\} \subset [0, N_x]$).
+:::
+
+### 3.1.2. Architecture SoA (*Structure of Arrays*) des Champs d'Écoulement
+
+COVOF 2D adopte strictement le modèle **SoA** (*Structure of Arrays*) afin de maximiser le taux de succès des lignes de cache L1/L2 et la vectorisation SIMD lors des parcours de grille : chaque variable physique est stockée dans son propre tableau contigu.
+
+Dans `FlowFields` (`Field.hpp`) et `flow_fields_t` (`module_fields.f90`), les champs sont regroupés en cinq familles :
+1. **Champs primaires :** `u`, `v`, `p`, `C`, `T`.
+2. **Propriétés matérielles effectives :** `rho`, `rho_u`, `rho_v`, `mu`, `mu_node`.
+3. **Géométrie d'interface & CSF :** `kappa` (`curvature` en Fortran), `norm_x`/`norm_y` (C++), `F_sigma_x`/`F_sigma_y` (`fx_sigma`/`fy_sigma` en Fortran), `C_s` (SVOF), `C_tilde` (diffusion capillaire).
+4. **Historique temporel, All-Mach & AAL :** `div_u` (`div`), `r_aal`, `chi_T`, `p_old`, `T_old`, `u_old`, `v_old`, `u_nm1`, `v_nm1`, `rho_old`, `rho_u_old`, `rho_v_old`, `rho_u_nm1`, `rho_v_nm1`, `has_nm1`, `energy`, `rho_e`, `rhou_star`, `rhov_star`, `rhoe_star`.
+5. **Champs géométriques issus des marqueurs CVI :** `marker_nx`, `marker_ny`, `marker_kappa`, `has_marker_normal`, `has_marker_kappa` (et `solid_mask` en Fortran).
+
+### 3.1.3. Politique *Zero-Allocation* dans la Boucle Temporelle
+
+Pour éviter les allocations dynamiques coûteuses dans la boucle de Krylov :
+- C++ préalloue `state_vector`, `rhs`, `u_prev` dans `Simulation::run()`, ainsi que les tampons temporaires `mutable FlowFields tf_scratch` et `mutable std::vector<double> div_cell_scratch` dans `NavierStokesSolver`, réutilisés sans réallocation à chaque appel de `apply_system_matrix()`.
+- Fortran préalloue `state_vector`, `rhs`, `u_prev` dans `sim_run`, ainsi que les stencils `diag_u`, `diag_v`, `diag_p`, `schur_a*`, `u_a*`, `v_a*` dans `ns_init`.
 
 ---
 
-## 3.1. Représentation Interne du Maillage et des Champs
+## 3.2. Structures de Données du Nuage de Marqueurs CVI Non Connectés
 
-### 3.1.1. Topologie de Grille MAC Décalée (*Marker-And-Cell*)
+Contrairement aux méthodes *Front-Tracking* classiques qui maintiennent des chaînes d'arêtes ou des triangles surfaciques (nécessitant une chirurgie topologique complexe lors des coalescences ou ruptures), COVOF 2D stocke les marqueurs dans un **nuage plat non connecté** :
 
-La grille MAC décalée répartit les variables hydrodynamiques sur différentes entités géométriques de la maille afin d'éviter tout découplage en damier (*checkerboard effect*) de la pression :
-- **Centres de maille $(i, j)$ :** Stockent les variables scalaires : pression $p_{i,j}$, fraction volumique $C_{i,j}$, température $T_{i,j}$, masse volumique $\rho_{i,j}$, viscosité dynamique $\mu_{i,j}$, porosité $\chi_{T,i,j}$, et résidu de compressibilité $r_{\text{aal},i,j}$.
-- **Faces verticales $(i \pm \frac{1}{2}, j)$ :** Stockent la composante horizontale de vitesse $u_{i-\frac{1}{2}, j}$ et les flux de masse horizontaux.
-- **Faces horizontales $(i, j \pm \frac{1}{2})$ :** Stockent la composante verticale de vitesse $v_{i, j-\frac{1}{2}}$ et les flux de masse verticaux.
-- **Nœuds / Sommets $(i \pm \frac{1}{2}, j \pm \frac{1}{2})$ :** Stockent la viscosité dynamique moyennée harmoniquement $\mu_{xy, i+\frac{1}{2}, j+\frac{1}{2}}$, le gradient croisé de vitesse et la vorticité $\omega_{z}$.
-
-```
-                 (i, j+1/2) : v(i, j+1/2)
-            +-------------------------------+
-            |                               |
-            |                               |
- (i-1/2, j) |             (i, j)            | (i+1/2, j)
-   u(i-1/2) |        p, C, T, rho, mu       |   u(i+1/2)
-            |                               |
-            |                               |
-            +-------------------------------+
-                 (i, j-1/2) : v(i, j-1/2)
-   (i-1/2, j-1/2) : mu_xy, omega
-```
-
-### 3.1.2. Choix de Conception : Structure de Tableaux (SoA) vs Tableau de Structures (AoS)
-
-Pour le stockage des champs discrets, deux paradigmes s'opposent :
-1. **AoS (*Array of Structures*) :** Une structure unique `Cell` contenant tous les scalaires et composantes vectorielles, regroupée dans un tableau global `std::vector<Cell> cells`. Ce modèle favorise l'encapsulation orientée objet mais détruit la performance vectorielle lors de l'application des pochoirs de diffusion (les octets consécutifs en mémoire appartiennent à des variables différentes, saturant inutilement les lignes de cache L1).
-2. **SoA (*Structure of Arrays*) :** Chaque grandeur physique est stockée dans son propre tableau contigu 1D indépendant en mémoire vive.
-
-**Dans COVOF 2D, l'architecture SoA est strictement adoptée** pour les performances HPC :
-- Côté C++17 : la structure `FlowFields` rassemble des vecteurs contigus `std::vector<double> u, v, p, rho, mu, c, T, chi_T, r_aal`.
-- Côté Fortran 2018 : le type dérivé `flow_fields_t` encapsule des tableaux allouables 2D contigus `real(c_double), allocatable :: u(:, :), v(:, :), p(:, :)`.
-
-### 3.1.3. Alignement Mémoire et Vectorisation SIMD (AVX2 / AVX-512)
-
-Les processeurs x86_64 actuels exploitent des registres vectoriels SIMD de 256 bits (AVX2, traitant 4 réels 64 bits par cycle) ou 512 bits (AVX-512, traitant 8 réels 64 bits par cycle). Lorsque l'adresse de début d'un tableau est un multiple de 64 octets, les instructions de chargement vectoriel aligné (`_mm512_load_pd` / `vmovapd`) s'exécutent avec une latence minimale, évitant le franchissement de frontières de lignes de cache (*cache-line splits*).
-
-- En C++17 :
+- **Côté C++ (`InterfaceMarkers.hpp`) :**
   ```cpp
-  // Allocateur aligné sur 64 octets
-  template <typename T>
-  struct AlignedAllocator {
-      using value_type = T;
-      T* allocate(std::size_t n) {
-          void* ptr = nullptr;
-          if (posix_memalign(&ptr, 64, n * sizeof(T)) != 0) throw std::bad_alloc();
-          return static_cast<T*>(ptr);
-      }
-      void deallocate(T* p, std::size_t) noexcept { free(p); }
+  struct Marker {
+      double x = 0.0, y = 0.0;       // Coordonnées globales [m]
+      double nx = 0.0, ny = 0.0;     // Normale unitaire (+grad C / |grad C|)
+      double kappa = 0.0;            // Courbure locale [1/m]
+      int cell_i = 1, cell_j = 1;    // Cellule hôte locale (1..nx_local, 1..ny_local)
+      bool active = true;
   };
-  using AlignedVectorDouble = std::vector<double, AlignedAllocator<double>>;
+  // Conteneur dynamique dans InterfaceMarkers : std::vector<Marker> cloud;
   ```
-
-- En Fortran 2018 :
-  L'utilisation des directives du compilateur garantit l'alignement et force la vectorisation :
+- **Côté Fortran (`module_markers.f90`) :**
   ```fortran
-  !DIR$ ATTRIBUTES ALIGN : 64 :: u, v, p
-  !DIR$ ASSUME_ALIGNED u: 64, v: 64, p: 64
-  !$omp simd aligned(u, v, p : 64)
-  do i = 1, nx
-      p(i, j) = p(i, j) - dt * rho(i, j) * div(i, j)
-  end do
+  type :: marker_t
+     real(dp) :: x = 0.0_dp, y = 0.0_dp
+     real(dp) :: nx = 0.0_dp, ny = 0.0_dp
+     real(dp) :: kappa = 0.0_dp
+     integer  :: i_cell = 1, j_cell = 1
+     logical  :: active = .true.
+  end type marker_t
+
+  type :: marker_cloud_t
+     type(marker_t), allocatable :: list(:)
+     integer :: count = 0
+     integer :: capacity = 0
+     integer, allocatable :: count_in_cell(:, :)
+  end type marker_cloud_t
   ```
+  Le redimensionnement dynamique de `cloud%list` en Fortran utilise la sous-routine `ensure_capacity` avec doublement géométrique (`max(min_cap, 2 * cloud%capacity)`) et `move_alloc`, garantissant un coût amorti $\mathcal{O}(1)$ par insertion.
 
 ---
 
-## 3.2. Gestion des Cellules Fantômes (*Halo / Ghost Cells*)
+## 3.3. Parallélisme Distribué MPI Pur (Cartésien 2D)
 
-Afin de permettre l'évaluation locale des opérateurs différentiels spatiaux (gradients, divergences, laplaciens) sans test conditionnel de bordure dans les boucles de calcul critiques, chaque sous-domaine local est bordé d'une couche périphérique de cellules fictives appelées **cellules fantômes** (*ghost cells* ou *halos*).
+COVOF 2D repose **exclusivement sur MPI pur** (OpenMPI / MPICH / Intel MPI) sans parallélisme partagé OpenMP.
 
-### 3.2.1. Épaisseur des Couches Fantômes ($N_{\text{ghost}}$)
+### 3.3.1. Décomposition Cartésienne et Échanges de Halos en 2 Passes
 
-L'épaisseur requise $N_{\text{ghost}}$ dépend directement de la largeur du pochoir numérique (*stencil*) le plus étendu utilisé dans la simulation :
+Lors de l'initialisation (`Mesh2D::init` / `init_mesh`), `MPI_Dims_create` et `MPI_Cart_create` construisent le communicateur cartésien 2D avec périodicité éventuelle `periods = {periodic_x, periodic_y}`.
 
-| Opérateur Numérique | Pochoir Spatial | Épaisseur Requise $N_{\text{ghost}}$ | Remarques |
-| :--- | :--- | :---: | :--- |
-| **Diffusion Visqueuse d'ordre 2** | Pochoir 5 points compact | 1 couche | Évaluation standard de $\Delta u$ et $\Delta v$. |
-| **Convection Centrée / Upwind ordre 1** | Pochoir 3 points | 1 couche | Calcul standard des flux aux faces. |
-| **Convection QUICK / Adams-Bashforth 2** | Pochoir décentré amont 3 points | 2 couches | Nécessite la valeur de deux mailles en amont. |
-| **VOF PLIC (Youngs / ELVIRA)** | Pochoir $3 \times 3$ mailles | 2 couches | Calcul des gradients de fraction volumique $\nabla C$. |
-| **Tension de Surface CSF ($\kappa$)** | Pochoir $5 \times 5$ mailles | 2 couches | Dérivation seconde pour la courbure de surface $\kappa = -\nabla \cdot \mathbf{n}$. |
+Les fonctions `MpiComm::sync_cell_scalar`, `sync_u`, `sync_v` (`exchange_halos_scalar`, `exchange_halos_velocity` en Fortran) procèdent toujours en **deux passes séquentielles** avec requêtes non bloquantes `MPI_Isend`/`MPI_Irecv` et barrière de complétion `MPI_Waitall` :
+- **Pour les scalaires centrés et $u$ :** Passe 1 sur l'axe $X$ (`1..ny_local`), puis Passe 2 sur l'axe $Y$ sur toute la largeur incluant les colonnes fantômes (`0..nx_local+1`), ce qui propage automatiquement les **4 cellules de coins diagonaux**.
+- **Pour $v$ :** Passe 1 sur l'axe $Y$ (`1..ny_local`), puis Passe 2 sur l'axe $X$ (`0..ny_local+1`) pour assurer la même propagation exacte des 4 coins.
+- **Cas séquentiel (`num_procs == 1`) avec périodicité :** Copie directe des bords opposés sans appel MPI.
 
-Dans COVOF 2D, l'épaisseur standard par défaut est configurée à **$N_{\text{ghost}} = 2$ couches** de mailles tout autour du domaine local, ce qui autorise sans réallocation l'exécution de l'ensemble des schémas d'ordre élevé et des traceurs d'interface.
+### 3.3.2. Communications MPI Spécifiques aux Marqueurs CVI
 
-### 3.2.2. Topologie d'Indexation Locale
+Le suivi lagrangien en environnement distribué utilise trois schémas de communication sans voisinage diagonal explicite :
 
-Pour un sous-domaine de dimension utile $N_x^{\text{loc}} \times N_y^{\text{loc}}$ mailles, la dimension totale mémoire du tableau alloué est :
-$$N_{x,\text{total}} = N_x^{\text{loc}} + 2 N_{\text{ghost}}, \quad N_{y,\text{total}} = N_y^{\text{loc}} + 2 N_{\text{ghost}}$$
+1. **Routage aller-retour à 4 passes dans `advect_rk2` (`advect_markers_rk2`) :**
+   Lorsqu'un marqueur situé près d'une frontière inter-processus a sa position prédite $\mathbf{x}_p^* = \mathbf{x}_p^n + \Delta t \, \mathbf{u}_{\text{CVI}}(\mathbf{x}_p^n; \mathbf{u}^n)$ hors du sous-domaine local, sa coordonnée et son identifiant de requête `(q_id, dir_x, x*, y*)` sont envoyés via `MPI_Sendrecv` en **Passe X aller** puis **Passe Y aller** vers le rang propriétaire. Ce dernier évalue $\mathbf{u}_{\text{CVI}}(\mathbf{x}_p^*; \mathbf{u}^{n+1})$ sur sa propre grille MAC et renvoie `(u2, v2)` par **Passe Y retour** puis **Passe X retour**.
+2. **Migration dimensionnelle en 2 passes (`migrate_mpi` / `migrate_markers_mpi`) :**
+   Après mise à jour finale $\mathbf{x}_p^{n+1}$, la **Passe X** transfère (via `MPI_Sendrecv`) les marqueurs sortis à gauche ou à droite (avec décalage périodique $\pm L_x$ si `periodic_x`), puis la **Passe Y** balaie le nuage mis à jour et transfère ceux sortis en bas ou en haut (avec décalage $\pm L_y$ si `periodic_y`). Un marqueur traversant un coin de sous-domaine est ainsi automatiquement relayé en 2 étapes sans jamais nécessiter de communicateur à 8 voisins.
+3. **Échange de marqueurs fantômes dans une bande $2.5 h$ (`compute_curvature_from_markers`) :**
+   Pour que l'ajustement parabolique $3\times 3$ autour d'une cellule de bordure de sous-domaine donne exactement le même résultat qu'en séquentiel (`np=1` vs `np=4`), les rangs échangent en 2 passes (X puis Y) une copie temporaire de leurs marqueurs situés dans une bande frontalière de largeur $2.5 \max(\Delta x, \Delta y)$.
 
-L'espace indiciel se décompose ainsi :
-- **Zone utile (cœur de calcul) :**
-  - C++ (0-based) : $i \in [N_{\text{ghost}}, N_{\text{ghost}} + N_x^{\text{loc}} - 1]$, $j \in [N_{\text{ghost}}, N_{\text{ghost}} + N_y^{\text{loc}} - 1]$.
-  - Fortran (1-based) : $i \in [N_{\text{ghost}} + 1, N_{\text{ghost}} + N_x^{\text{loc}}]$, $j \in [N_{\text{ghost}} + 1, N_{\text{ghost}} + N_y^{\text{loc}}]$.
-- **Cellules fantômes Ouest / Est :** $i \in [0, N_{\text{ghost}} - 1]$ et $i \in [N_{\text{ghost}} + N_x^{\text{loc}}, N_{x,\text{total}} - 1]$ (en C++).
-- **Cellules fantômes Sud / Nord :** $j \in [0, N_{\text{ghost}} - 1]$ et $j \in [N_{\text{ghost}} + N_y^{\text{loc}}, N_{y,\text{total}} - 1]$ (en C++).
+### 3.3.3. Réductions Globales et Gestion des DDLs Possédés
 
----
+Dans le système linéaire distribué, chaque rang MPI possède sans duplication :
+- `n_owned_u = u_nx * ny_local` avec `u_nx = nx_local + (is_boundary_right ? 1 : 0)` (la face frontière partagée entre deux rangs appartient au rang de droite).
+- `n_owned_v = nx_local * v_ny` avec `v_ny = ny_local + (is_boundary_top ? 1 : 0)`.
+- `n_owned_p = nx_local * ny_local` (uniquement lorsque `is_monolithic()` est vrai ; sinon `n_owned_p = 0`).
 
-## 3.3. Parallélisme Distribué MPI : Topologie Cartésienne et Halos
-
-Le passage à l'échelle massive sur supercalculateur repose sur le découpage du domaine spatial global $\Omega$ en une grille bidimensionnelle de $P_x \times P_y = P$ sous-domaines réguliers.
-
-### 3.3.1. Création de la Topologie Virtuelle (`MPI_Cart_create`)
-
-COVOF 2D utilise les topologies cartésiennes communicantes standard MPI. La fonction `MPI_Cart_create` permet au gestionnaire MPI matériel (sur réseaux InfiniBand, Omni-Path ou Slingshot) d'optimiser le placement des processus sur les processeurs physiques afin de minimiser les sauts réseau (*network hops*) :
-
-```cpp
-// C++17 : Initialisation cartésienne dans src/MpiComm.cpp
-int dims[2] = {px, py};
-int periods[2] = {periodic_x ? 1 : 0, periodic_y ? 1 : 0};
-int reorder = 1;
-
-MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &cart_comm_);
-MPI_Comm_rank(cart_comm_, &cart_rank_);
-MPI_Cart_coords(cart_comm_, cart_rank_, 2, coords_);
-
-// Recherche des 4 voisins immédiats
-MPI_Cart_shift(cart_comm_, 0, 1, &rank_west_, &rank_east_);
-MPI_Cart_shift(cart_comm_, 1, 1, &rank_south_, &rank_north_);
-```
-
-### 3.3.2. Communications Point-à-Point Non Bloquantes et Recouvrement
-
-Pour transférer les mailles fantômes entre sous-domaines adjacents sans bloquer les cœurs de calcul, COVOF 2D utilise des requêtes non bloquantes `MPI_Isend` et `MPI_Irecv`.
-
-Afin d'éviter la copie intermédiaire manuelle des colonnes de mailles (non contiguës en mémoire C++), un type dérivé de vecteur MPI (`MPI_Type_vector`) est créé pour les frontières Est et Ouest :
-
-```cpp
-// Création du type colonne pour le halo vertical
-MPI_Datatype col_type;
-MPI_Type_vector(ny_loc, nghost, nxt, MPI_DOUBLE, &col_type);
-MPI_Type_commit(&col_type);
-```
-
-Le protocole d'échange synchrone sécurisé se déroule en deux étapes :
-1. **Échange horizontal (Ouest $\leftrightarrow$ Est) :** Envoi des bordures utiles aux voisins et réception dans les halos correspondants.
-2. **Échange vertical (Sud $\leftrightarrow$ Nord) :** Envoi des bordures utiles incluant les halos Ouest/Est déjà mis à jour. Cette séquence sérielle garantit le remplissage automatique et exact des quatre coins (*corner cells*) sans requêtes diagonales supplémentaires.
-
-```
- Étape 1 : Halos Verticaux              Étape 2 : Halos Horizontaux
-      (Ouest <--> Est)                      (Sud <--> Nord)
-    +---+-----------+---+                 +---+-----------+---+
-    | H |           | H |                 | H |     H     | H | <-- Coins reçus
-    | a |  Domaine  | a |                 +---+-----------+---+
-    | l |   Utile   | l |                 |   |  Domaine  |   |
-    | o |   Local   | o |    ------>      |   |   Utile   |   |
-    |   |           |   |                 +---+-----------+---+
-    | W |           | E |                 | H |     H     | H | <-- Coins reçus
-    +---+-----------+---+                 +---+-----------+---+
-```
+Les produits scalaires et normes de Krylov (`global_dot_product`, `global_norm2`) ainsi que les extrema (`global_max`, `global_sum`) utilisent `MPI_Allreduce` sur `mesh.comm`.
 
 ---
 
-## 3.4. Élimination des Allocations Dynamiques dans les Boucles de Krylov
+## 3.4. Stockage Creux CSR en C++ (`CSRMatrix`) et Blocs Locaux Fortran
 
-L'une des causes majeures de chute de performance dans les codes C++ orientés objet réside dans l'appel intempestif à l'allocateur mémoire du système (`malloc` / `free`, `new` / `delete`) à l'intérieur de la boucle temporelle ou au fil des itérations d'un solveur de Krylov. Chaque réallocation déclenche des verrous système (*kernel locks*) et fragmente le tas (*heap*).
+Contrairement à l'opérateur complet $A \mathbf{x}$ qui est **100 % *matrix-free*** dans les deux langages, les blocs diagonaux de préconditionnement locaux ($F_{uu}$, $F_{vv}$, $S_p$) utilisent :
 
-### 3.4.1. Protocole de Préallocation Statique (*Zero-Allocation Guarantee*)
-
-Dans COVOF 2D :
-1. **Toutes les structures de travail sont allouées une seule fois lors de la phase d'initialisation (`Simulation::init()`).**
-2. Les solveurs itératifs (BiCGSTAB2, BiCGSTAB, GMRES, MINRES, CG) disposent d'un ensemble de vecteurs de travail temporaires pré-dimensionnés membres de classe :
-   - `std::vector<double> r0_, r_, p_, v_, s_, t_, z_, y_;` (pour BiCGSTAB)
-   - `std::vector<double> v_p1_, v_p2_, w_, p1_, p2_;` (pour MINRES)
-3. La routine d'application de l'opérateur couplé `ns_apply_system_matrix` reçoit impérativement les buffers de sortie préalloués en paramètres de référence :
-   ```cpp
-   void NavierStokesSolver::applySystemMatrix(const double* __restrict__ x_in,
-                                              double* __restrict__ Ax_out);
-   ```
-4. L'utilisation du mot-clé `__restrict__` informe le compilateur C++ ou Fortran que les pointeurs ne se chevauchent pas en mémoire (*no aliasing*), autorisant la réorganisation optimale des instructions de chargement et de stockage vectoriel.
-
----
-
-## 3.5. Structure de Stockage Creux CSR (*Compressed Sparse Row*)
-
-Bien que les opérateurs de Navier-Stokes soient principalement évalués sans matrice (*matrix-free*), certaines étapes (telles que le solveur direct LU LAPACK ou les préconditionneurs algébriques ILU0) requièrent l'assemblage explicite de la matrice d'advection-diffusion-pression sous format creux CSR.
-
-### 3.5.1. Représentation CSR à Trois Tableaux
-
-Une matrice creuse $A \in \mathbb{R}^{M \times N}$ comportant $N_{nz}$ éléments non nuls est représentée par trois tableaux contigus :
-1. `values` (taille $N_{nz}$, type `double`) : Stocke la valeur numérique de chaque entrée non nulle parcourue ligne par ligne.
-2. `col_indices` (taille $N_{nz}$, type `int`) : Stocke l'indice de colonne $j \in [0, N-1]$ correspondant à chaque valeur.
-3. `row_offsets` (taille $M+1$, type `int`) : Stocke l'indice de départ dans les tableaux `values` et `col_indices` de la première entrée non nulle de chaque ligne $i$. Le nombre d'éléments non nuls sur la ligne $i$ est donné par $\text{row\_offsets}[i+1] - \text{row\_offsets}[i]$.
-
-### 3.5.2. Produit Matrice-Vecteur Creux SpMV Parallèle
-
-Le produit matrice creuse - vecteur plein $\mathbf{y} = A \cdot \mathbf{x}$ s'écrit de manière compacte et hautement parallélisable en OpenMP :
-
-```cpp
-void CSRMatrix::spmv(const double* __restrict__ x, double* __restrict__ y) const {
-    #pragma omp parallel for schedule(guided)
-    for (int i = 0; i < num_rows_; ++i) {
-        double sum = 0.0;
-        const int row_start = row_offsets_[i];
-        const int row_end   = row_offsets_[i + 1];
-        #pragma omp simd reduction(+:sum)
-        for (int k = row_start; k < row_end; ++k) {
-            sum += values_[k] * x[col_indices_[k]];
-        }
-        y[i] = sum;
-    }
-}
-```
-
-La gémellité stricte de cette routine est assurée en Fortran 2018 au sein du module `module_csr_matrix.f90` via la sous-routine `csr_spmv_apply`, garantissant l'équivalence parfaite des calculs de résidus sur les maillages non structurés ou les matrices couplées assemblées.
+- **En C++ (`include/covof/CSRMatrix.hpp` & `src/CSRMatrix.cpp`) :**
+  La classe `CSRMatrix` stocke une matrice creuse locale au format *Compressed Sparse Row* via quatre vecteurs contigus :
+  - `row_ptr` (`std::vector<int>`, taille `nrows + 1`)
+  - `col_idx` (`std::vector<int>`)
+  - `values` (`std::vector<double>`)
+  - `diag` (`std::vector<double>`, diagonale extraite explicitement pour Jacobi / Gauss-Seidel)
+  Elle fournit `set_from_triplets(r, c, rows, cols, vals)` (tri et fusion des doublons), `matvec(x, y)` (produit $y = Ax$ séquentiel par sous-domaine) et `solve_jacobi(b, x, num_iters)`. Dans `NavierStokesSolver::assemble_preconditioner_blocks`, elle assemble `Fuu`, `Fvv` et `SchurLaplace`.
+- **En Fortran (`module_navier_stokes.f90`) :**
+  Il n'existe pas de module `module_csr_matrix.f90` séparé : `navier_stokes_t` stocke directement les stencils structurés à 5 points sous forme de tableaux 1D/2D contigus (`u_aE, u_aW, u_aN, u_aS, u_aP`, `v_aE, ..., v_aP`, `schur_aE, ..., schur_aP`), optimisés pour les balayages SSOR vectorisés dans `apply_preconditioner`.

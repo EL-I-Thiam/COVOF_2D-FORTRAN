@@ -2,225 +2,241 @@
 
 ## Présentation et Philosophie de COVOF 2D
 
-Le code **COVOF 2D** (*Coupled Volume-Of-Fluid 2D*) est un environnement logiciel de recherche et d'ingénierie avancée dédié à la simulation numérique directe (DNS) et à la modélisation à haute fidélité des écoulements de fluides complexes, incompressibles ou faiblement compressibles, monophasiques ou diphasiques à surface libre. Issu des développements méthodologiques conduits dans le lignage des codes académiques de référence du laboratoire **I2M (UMR CNRS 5295, Université de Bordeaux)** — en particulier les plateformes **Thétis** et **Fugu** — et enrichi par les avancées récentes sur les méthodes monolithiques totalement couplées et les formulations adaptatives de Lagrangien augmenté, COVOF 2D constitue un banc d'essai et un outil de production scientifique de premier plan.
+Le code **COVOF 2D** (*Coupled Volume-Of-Fluid 2D*) est un environnement logiciel de recherche et d'ingénierie avancée dédié à la simulation numérique directe (DNS) et à la modélisation à haute fidélité des écoulements de fluides complexes, incompressibles ou faiblement compressibles (*All-Mach*), monophasiques ou diphasiques à interface nette. Issu des développements méthodologiques conduits dans le lignage des codes académiques de référence du laboratoire **I2M (UMR CNRS 5295, Université de Bordeaux)** — en particulier les formulations monolithiques couplées, le Lagrangien augmenté adaptatif (**AAL / C-AAL**), le lissage rhéologique **SVOF** (*Smoothed VOF*) et la méthode hybride **FC-WY-CVI-Marker** — COVOF 2D constitue simultanément un banc d'essai algorithmique rigoureux et un outil de production scientifique.
 
 ### Paradigme de Conception : L'Architecture Duale Jumelle C++17 / Fortran 2018
 
-Contrairement aux logiciels CFD traditionnels reposant sur un seul langage ou intégrant du code hérité (*legacy code*) au sein d'un emballage hétérogène, COVOF 2D est structuré selon un principe novateur de **double implémentation miroir intégrale** :
+Contrairement aux logiciels CFD traditionnels reposant sur un seul langage ou encapsulant du code hérité via des passerelles opaques, COVOF 2D est structuré selon un principe de **double implémentation miroir intégrale et indépendante** :
 
-1. **La branche `COVOF_2D-C++`** : Écrite en C++ moderne conforme au standard **ISO C++17**, elle privilégie une conception modulaire orientée objet avec gestion stricte des ressources par RAII (*Resource Acquisition Is Initialization*), polymorphisme dynamique pour les solveurs de Krylov et préconditionneurs, et encapsulation des structures de données topologiques et physiques.
-2. **La branche `COVOF_2D-FORTRAN`** : Écrite en **Fortran 2018**, elle implémente rigoureusement les mêmes algorithmes au sein de modules fortement typés (`implicit none` systématique, précision double standardisée `real(c_double)` issue de `iso_c_binding`), exploitant la disposition mémoire native par colonnes (*column-major*) et la vectorisation optimale des boucles imbriquées.
+1. **La branche `COVOF_2D-C++` (15 en-têtes `.hpp`, 13 sources `.cpp`) :** Écrite en C++ moderne conforme au standard **ISO C++17**, elle privilégie une conception modulaire orientée objet au sein de l'espace de nommage `covof`, avec gestion RAII des tampons (`std::vector<double>`), polymorphisme dynamique pour les solveurs de Krylov (`LinearSolverBase`, `SolverFactory`) et les préconditionneurs (`PreconditionerBase`, `PreconditionerFactory`), et matrice creuse locale CSR (`CSRMatrix`) pour les blocs de préconditionnement. Elle produit l'exécutable `bin/covof2d_cpp` (et le lien symbolique `bin/covof2d`).
+2. **La branche `COVOF_2D-FORTRAN` (16 fichiers sources `.f90`) :** Écrite en **ISO Fortran 2018**, elle implémente rigoureusement les mêmes opérateurs discrets au sein de 15 modules fortement typés (`implicit none`, encapsulation `private` par défaut, double précision IEEE 754 `dp = selected_real_kind(15, 307)`) et du programme principal `covof2d_main.f90`. Elle exploite l'ordonnancement mémoire natif *column-major* `(0:nx+1, 0:ny+1)` pour la vectorisation SIMD des boucles internes. Elle produit l'exécutable `bin/covof2d_fortran`.
 
-Cette architecture duale n'a pas pour but de faire cohabiter des fragments de code non vérifiés, mais de garantir une **parité numérique stricte (bit-à-bit)** entre deux représentations logicielles indépendantes. Les deux exécutables :
-- Partagent la même spécification du format d'entrée JSON (`template_parametres_covof2d.json`).
-- Génèrent des résultats spatio-temporels identiques exportés au format standardisé XML VTK Rectilinear Grid (`.vtr` pour les sous-domaines locaux et `.pvtr` pour la vue globale assemblée sous ParaView).
-- Utilisent une décomposition cartésienne 2D équivalente via la bibliothèque standard **MPI** (*Message Passing Interface*).
-- Permettent aux chercheurs et aux ingénieurs de confronter les performances, l'empreinte mémoire et la portabilité des deux écosystèmes logiciels majeurs du calcul scientifique haute performance (HPC).
+Cette architecture duale vise la **parité numérique stricte** entre deux implémentations autonomes :
+- Les deux exécutables lisent le **même fichier de configuration JSON** (tolérant les commentaires `//` en ligne).
+- Les deux branches partagent la **même décomposition de domaine cartésienne 2D en MPI pur** (`MPI_Cart_create`, sans OpenMP), avec une couche unique de cellules fantômes (*halo*) de largeur 1 (`0:nx_local+1`, `0:ny_local+1`).
+- Les deux solveurs exportent les **mêmes formats de sortie normalisés** : maillages rectilignes XML VTK parallèles (`<case_name>_p<rank>_<step:06d>.vtr` et fichier maître `<case_name>_<step:06d>.pvtr`), nuage de marqueurs VTK PolyData (`<case_name>_markers_<step:06d>.vtk`) et historique temporel CSV (`<case_name>_history.csv`).
 
-```
-              +-------------------------------------+
-              |    Fichier de Configuration JSON    |
-              | (template_parametres_covof2d.json)  |
-              +-------------------------------------+
-                                 |
-                 +---------------+---------------+
-                 |                               |
-                 v                               v
-  +-------------------------------+ +-------------------------------+
-  | Exécutable C++17              | | Exécutable Fortran 2018       |
-  | bin/covof2d_cpp               | | bin/covof2d_fortran           |
-  +-------------------------------+ +-------------------------------+
-  | - Orchestration OO            | | - Orchestration Modulaire     |
-  | - Grille MAC (Mesh.hpp)       | | - Grille MAC (module_mesh)    |
-  | - Opérateur NS (NavierStokes) | | - Opérateur NS (module_ns)    |
-  | - VOF-PLIC (InterfaceTracker) | | - VOF-PLIC (module_vof)       |
-  | - Krylov & Schur (LinSolver)  | | - Krylov & Schur (module_solv)|
-  | - MPI Cartésien 2D (MpiComm)  | | - MPI Cartésien (module_mpi)  |
-  +-------------------------------+ +-------------------------------+
-                 |                               |
-                 +---------------+---------------+
-                                 |
-                                 v
-              +-------------------------------------+
-              | Sorties Numériques Unifiées         |
-              | - Fichiers XML VTK (.vtr, .pvtr)    |
-              | - Journaux de Convergence (.csv)    |
-              | - Diagnostics Visuels ParaView      |
-              +-------------------------------------+
+```text
+              +---------------------------------------------+
+              |        Fichier de Configuration JSON        |
+              |     (mon_cas.json, commentaires // admis)   |
+              +---------------------------------------------+
+                                     |
+                     +---------------+---------------+
+                     |                               |
+                     v                               v
+  +-------------------------------------+ +-------------------------------------+
+  | Exécutable C++17 (MPI pur)          | | Exécutable Fortran 2018 (MPI pur)   |
+  | COVOF_2D-C++/bin/covof2d_cpp        | | COVOF_2D-FORTRAN/bin/covof2d_fortran|
+  +-------------------------------------+ +-------------------------------------+
+  | - Config, Mesh2D, FlowFields, EOS   | | - module_config, module_mesh,       |
+  | - NavierStokesSolver + CSRMatrix    | |   module_fields, module_eos         |
+  | - InterfaceTracker +                | | - module_navier_stokes            |
+  |   InterfaceReconstruction           | | - module_interface_vof +            |
+  | - InterfaceMarkers (CVI-RK2)        | |   module_interface_reconstruction   |
+  | - LinearSolver & Preconditioner     | | - module_markers (CVI-RK2)          |
+  | - MpiComm & VTKWriter               | | - module_linear_solvers             |
+  |                                     | | - module_mpi_comm & module_vtk_writer|
+  +-------------------------------------+ +-------------------------------------+
+                     |                               |
+                     +---------------+---------------+
+                                     |
+                                     v
+              +---------------------------------------------+
+              | Sorties Numériques Unifiées                 |
+              | - Champs volumiques : <case>_<step>.pvtr    |
+              |   + sous-domaines   : <case>_p<r>_<step>.vtr|
+              | - Marqueurs CVI     : <case>_markers_*.vtk  |
+              | - Métriques         : <case>_history.csv    |
+              | - Erreurs analytiques (laplacian/poiseuille/|
+              |   vortex_error.csv, profiles CSV)           |
+              +---------------------------------------------+
 ```
 
 ### Domaines d'Application Visés
 
-COVOF 2D est conçu pour traiter un spectre étendu de configurations de mécanique des fluides et de thermique appliquée :
-- **Hydrodynamique à surface libre et écoulements diphasiques :** Rupture de barrage (*dam break*), ballottement de réservoirs (*sloshing*), impact et étalement de gouttes, dynamique capillaire et coalescence de bulles, instabilités interfaciales de Rayleigh-Taylor, Kelvin-Helmholtz et Plateau-Rayleigh.
-- **Microfluidique et dynamique capillaire :** Écoulements dominés par les forces de tension superficielle, formation de jets, instabilité de rupture de filets fluides, oscillation de gouttes selon le mode propre de Rayleigh-Lamb.
-- **Convection thermique et transferts couplés :** Convection naturelle dans des cavités fermées différentiellement chauffées, convection de Rayleigh-Bénard, panaches thermiques instationnaires sous approximation de Boussinesq.
-- **Écoulements en milieux poreux et corps immergés :** Écoulements autour d'obstacles solides rigides ou poreux modélisés sans remaillage par pénalisation de Brinkman-Navier-Stokes (cylindre circulaire, plaque mince, marche descendante).
-- **Acoustique numérique et régimes All-Mach :** Ondes de pression acoustiques à bas nombre de Mach, compression de bulles sous saut thermodynamique, régulation par méthode C-AAL barotrope.
+COVOF 2D couvre un large spectre de configurations académiques et industrielles en mécanique des fluides 2D et transferts couplés :
+
+- **Hydrodynamique diphasique à forts contrastes ($\rho_1/\rho_2 \sim 10^3$, $\mu_1/\mu_2 \sim 10^5$) :** Rupture de barrage (*dam break*), chute libre d'un cylindre dense, instabilités de Rayleigh-Taylor et de Kelvin-Helmholtz sur nappe liquide mince, ascension de bulles déformables à jupes fines, flambement de jets visqueux injectés (`JET_INLET`).
+- **Dynamique capillaire et microfluidique :** Équilibre de Young-Laplace sur goutte statique, oscillations capillaires amorties de Lamb, réduction drastique des courants parasites et suivi sous-maille des ligaments par la méthode hybride **FC-WY-CVI-Marker**.
+- **Écoulements faiblement compressibles et acoustique *All-Mach* :** Propagation d'ondes acoustiques et compression de bulles ou poches de gaz sous loi d'état linéaire, gaz parfait ou *Noble-Abel Stiffened Gas* (**NASG**) avec couplage **C-AAL** et transport inertiel **SSP-RK3**.
+- **Convection thermique et approximation de Boussinesq :** Cavités différentiellement chauffées, panaches thermiques et instabilités de Rayleigh-Bénard avec calcul automatique du nombre de Nusselt moyen à la paroi chaude.
+- **Écoulements en milieux poreux et obstacles immergés :** Modélisation d'obstacles rectangulaires (`BOX`) ou cylindriques (`CYLINDER`) fixes sans remaillage par pénalisation volumique de Darcy-Brinkman (marche descendante, sillage de cylindre, plaque mince, milieu poreux).
 
 ---
 
 ## Matrice Complète des Capacités Physiques et Numériques
 
-Le tableau suivant récapitule l'ensemble des modules physiques, algorithmes spatio-temporels, solveurs linéaires et modèles constitutifs implémentés et validés dans COVOF 2D.
+Le tableau ci-dessous recense l'ensemble des modèles, discrétisations, solveurs et options réellement implémentés et vérifiés dans les sources C++17 et Fortran 2018 de COVOF 2D.
 
-| Catégorie | Fonctionnalité / Modèle | Options Disponibles | Description et Références |
+| Catégorie | Fonctionnalité / Modèle | Mots-Clés / Options Exactes | Description Technique et Références |
 | :--- | :--- | :--- | :--- |
-| **Topologie & Maillage** | Type de grille | Grille Cartésienne Structurée Uniforme 2D | Maillage décalé MAC (*Marker-and-Cell*, Harlow & Welch 1965) |
-| | Gestion des bords | Cellules fantômes (*Ghost cells*) | Couche de 1 à 2 mailles fantômes pour les CL d'ordre 2 |
-| | Parallélisme spatial | Décomposition de domaine MPI 2D | Topologie cartésienne virtuelle `MPI_Cart_create` avec voisins E, W, N, S |
-| **Régimes Physiques** | Incompressible | Monophasique & Diphasique | $\nabla \cdot \mathbf{u} = 0$, conservation exacte de la masse |
-| | Faiblement compressible | Bas-Mach / All-Mach | Modèle barotrope $\chi_T \frac{\partial p}{\partial t} + \nabla \cdot \mathbf{u} = 0$ (El Ouafa et al. 2024) |
-| | Thermique | Boussinesq / Rayleigh-Bénard | Terme de flottabilité $\rho \mathbf{g} \beta (T - T_{\text{ref}})$ |
-| | Milieux poreux | Modèle de Darcy-Brinkman | Terme de traînée poreuse $-\frac{\mu}{K}\mathbf{u}$ pénalisé à $K \to 0$ pour corps solide |
-| **Suivi d'Interface** | Modèle cinématique | VOF-PLIC Géométrique | Reconstruction linéaire par morceaux (*Piecewise Linear Interface Calculation*) |
-| | Calcul des normales | Youngs (1982) / Elvira | Dérivées spatiales 2D de la fraction volumique $C$ |
-| | Advection VOF | Weymouth & Yue (2010) | Schéma eulerien conservatif à séparation d'opérateurs 1D sans accumulation |
-| | Tension superficielle | Modèle CSF (Brackbill et al. 1992) | Force volumique $\mathbf{f}_\sigma = \sigma \kappa \nabla C$, courbure $\kappa = -\nabla \cdot \mathbf{n}$ |
-| **Couplage Vitesse-Pression** | Lagrangien Augmenté Standard | `AUGMENTED_LAGRANGIAN` | Pénalité $r \nabla(\nabla \cdot \mathbf{u})$ et boucle d'Uzawa $p^{k+1} = p^k - r \nabla \cdot \mathbf{u}$ |
-| | Lagrangien Adaptatif Incompressible | `AAL` | Choix spatial adaptatif $r(t, M)$ basé sur les temps caractéristiques (Vincent 2004) |
-| | Lagrangien Compressible Bas-Mach | `C-AAL` | Extension acoustique $r_{\text{eff}} = \frac{r}{1 + r \chi_T / \Delta t}$ (El Ouafa 2024) |
-| | Résolution Monolithique | `MONOLITHIC` / `FULLY_COUPLED` | Système couplé point-selle global $\begin{pmatrix} A & B^T \\ B & -C_p \end{pmatrix} \begin{pmatrix} \mathbf{u} \\ p \end{pmatrix} = \begin{pmatrix} \mathbf{f} \\ g \end{pmatrix}$ |
-| | Projection Standard | `STANDARD_PROJECTION` | Schéma à pas fractionnaire de Chorin-Temam (équation de Poisson en pression) |
-| **Schémas Convectifs** | Advection de quantité de mouvement | `UPWIND` (Ordre 1) | Monotone, inconditionnellement stable mais diffusif |
-| | | `CENTERED` (Ordre 2) | Précision spatiale $\mathcal{O}(\Delta x^2)$, non diffusif mais sujet aux oscillations de Peclet |
-| | | `NEWTON` | Linéarisation complète de Newton pour convergence robuste en monolithique |
-| | | `ADAMS_BASHFORTH` (AB2) | Extrapolation temporelle d'ordre 2 des vitesses convectives |
-| **Intégration Temporelle** | Schémas temporels | `EULER_EXPLICIT` (Ordre 1) | Schéma basique pour l'analyse des petits pas de temps |
-| | | `GEAR` / `BDF2` (Ordre 2) | Schéma à trois niveaux temporels implicite stable pour Navier-Stokes |
-| | | `SSP_RK3` (Ordre 3) | Runge-Kutta à préservation de stabilité forte pour les fronts raides |
-| **Solveurs Linéaires** | Algorithmes de Krylov Matrix-Free | `BICGSTAB2` | BiCGSTAB d'ordre 2 (Sleijpen & van der Vorst 1993) |
-| | | `BICGSTAB` | BiCGSTAB standard (van der Vorst 1992) |
-| | | `CG` / `CONJUGATE_GRADIENT` | Gradient Conjugué symétrique (Hestenes & Stiefel 1952) |
-| | | `GMRES` | Generalized Minimal Residual redémarré (Saad & Schultz 1986) |
-| | | `MINRES` | Minimum Residual pour opérateurs symétriques indéfinis (Paige & Saunders 1975) |
-| | Solveur Direct Exact | `DIRECT` / `MUMPS` / `LAPACK` | Factorisation LU dense `dgetrf` / `dgetrs` avec mise en cache optimisée |
-| **Préconditionneurs** | Méthodes parallèles | `JACOBI` / `DIAGONAL` | Inversion locale de la diagonale enrichie (visqueuse + AL + Brinkman + Newton) |
-| | | `SSOR` / `GAUSS_SEIDEL` | Balayage avant/arrière symétrique avec facteur de relaxation $\omega = 1.0$ |
-| | | `ILU0` | Factorisation incomplète Incomplete LU sans remplissage |
-| | | `BLOCK_TRIANGULAR` / `BT_SBP` | Préconditionneur par blocs avec complément de Schur approché (El Ouafa 2023) |
-| | | `CUSTOM` | Hook développeur permettant l'injection dynamique d'un opérateur externe |
+| **Topologie & Maillage** | Grille de calcul | Grille Cartésienne Structurée Uniforme 2D | Maillage décalé MAC (*Marker-and-Cell*, Harlow & Welch 1965) sur $[0, L_x] \times [0, L_y]$ |
+| | Cellules fantômes | 1 couche périphérique (`0..nx+1`, `0..ny+1`) | `nx_ghost = nx_local + 2`, `ny_ghost = ny_local + 2` |
+| | Parallélisme distribué | MPI pur 2D (`MPI_Cart_create`) | Partitionnement automatique $(P_x, P_y)$ via `MPI_Dims_create` ; 4 voisins cardinaux (`MPI_Isend`/`MPI_Irecv`) |
+| **Modes d'Exécution** | Navier-Stokes complet | `mode = "NAVIER_STOKES"` | Boucle instationnaire couplée (monophasique, diphasique, thermique, compressible) |
+| | Vérification elliptique | `mode = "LAPLACIAN"` | Résolution analytique $-\Delta \psi = f$ (Dirichlet `CAS_3_1` et Neumann `CAS_3_2_NEUMANN`) |
+| | Cinématique d'interface | `mode = "VORTEX_ADVECTION"` | Tourbillon cisaillé réversible de Rider-Kothe sans résolution dynamique |
+| **Régimes & Thermodynamique** | Incompressible | `compressible = false` | Contrainte solénoïdale $\nabla \cdot \mathbf{u} = 0$ |
+| | Compressible *All-Mach* | `compressible = true` ou `flow_regime = "ALL_MACH"` | Continuité barotrope $\chi_T \partial_t p + \nabla \cdot \mathbf{u} = 0$ + énergie totale $\rho e$ (El Ouafa et al., *Fluids* 2024) |
+| | Lois d'état (`eos`) | `INCOMPRESSIBLE`, `LINEAR`, `IDEAL_GAS`, `NASG` | Compressibilité isotherme $\chi_T$, $\rho(p,T)$ et vitesse du son $c_s$ (`EOS.hpp` / `module_eos.f90`) |
+| | Thermique (Boussinesq) | `enable_energy = true` | Équation en température $T$ avec flottabilité $-\rho_0 \beta (T - T_{\text{ref}})\mathbf{g}$ (ou énergie totale si compressible) |
+| | Obstacles & Milieux poreux | `obstacles = [{type: "BOX" | "CYLINDER"}]` | Pénalisation de Darcy-Brinkman $-\frac{\mu}{K}\mathbf{u}$ ($K \le 10^{-12}$ : solide rigide adhérent) |
+| **Suivi d'Interface VOF & Marqueurs** | Reconstruction géométrique | `PLIC`, `ELVIRA`, `LVIRA`, `SLIC`, `NONE` | Reconstruction affine $n_x x + n_y y + \alpha = 0$ sur pochoir $3\times 3$ |
+| | Advection VOF | `WEYMOUTH_YUE`, `CIAM`, `VOF_TVD` | Splitting alterné de Strang ; correction exacte de dilatation $C_{d,i,j}$ (Weymouth & Yue 2010) |
+| | Limiteurs TVD/NVD | `SUPERBEE`, `VAN_LEER`, `MUSCL`, `HRIC`, `NONE` | Actifs uniquement avec `advection_method = "VOF_TVD"` |
+| | Lissage rhéologique SVOF | `enable_svof_smoothing`, `svof_filter_width` | Filtre de Helmholtz $(I - D\Delta) C_s = C$ ($D = k \Delta x \Delta y$) pour $\rho(C_s), \mu(C_s), \mu_{\text{node}}(C_s)$ |
+| | Lissage capillaire diffusif | `enable_diffusion_smoothing`, `diffusion_smoothing_steps` | Diffusion parabolique explicite $\widetilde{C}$ pour la courbure CSF |
+| | Marqueurs CVI non connectés | `vof.use_markers`, `CVI_RK2`, `BILINEAR_RK2` | Nuage lagrangien non connecté ; CVI Variante B ($\nabla \cdot \mathbf{u}_{\text{CVI}} \equiv D_{i,j}$), RK2-Heun, migration MPI 2 passes, courbure parabolique $(\tau, \eta)$ |
+| | Tension superficielle | `enable_surface_tension`, `sigma` | Force volumique CSF équilibrée (*Balanced-Force*) $\mathbf{f}_\sigma = \sigma \kappa \nabla C$ |
+| **Couplage Vitesse-Pression** | Lagrangien Augmenté Standard | `AUGMENTED_LAGRANGIAN` | Pénalité scalaire $r_{\text{al}} \nabla(\nabla \cdot \mathbf{u})$ et boucle d'Uzawa |
+| | Lagrangien Adaptatif | `AAL` / `ADAPTATIVE_AUGMENTED_LAGRANGIAN` | Champ local $r(t, M)$ selon les 7 échelles physiques (Vincent et al. 2004, Éq. 14) |
+| | Lagrangien Compressible | `C-AAL` | Pénalité acoustique régularisée $r_{\text{eff}} = \frac{r}{1 + r \chi_T / \Delta t}$ (El Ouafa et al. 2024) |
+| | Monolithique | `MONOLITHIC` / `FULLY_COUPLED` / `FC` | Système point-selle couplé vitesse-pression sans pénalité |
+| | Projection Standard | `STANDARD_PROJECTION` / `PROJECTION` | Schéma fractionnaire de Chorin-Temam (prédiction + Poisson en pression + projection) |
+| **Convection & Temps** | Schémas convectifs | `UPWIND`, `CENTERED`, `TVD_SUPERBEE` | Discrétisation spatiale des flux de quantité de mouvement |
+| | Linéarisation convective | `PICARD`, `ADAMS_BASHFORTH` (`AB2`), `NEWTON` | Traitement du terme $(\mathbf{u}\cdot\nabla)\mathbf{u}$ dans le système implicite |
+| | Schémas temporels | `EULER`, `GEAR` / `BDF2` + `enable_ssp_rk3_momentum` | Euler implicite (ordre 1), BDF2/Gear (ordre 2, $\alpha_{\text{time}}=1.5$), transport inertiel SSP-RK3 |
+| **Solveurs & Préconditionneurs** | Solveurs linéaires | `BICGSTAB2`, `BICGSTAB`, `CG`, `GMRES`, `MINRES`, `DIRECT` | Implémentations Krylov *matrix-free* + LU directe LAPACK `dgetrf`/`dgetrs` (passerelles `MUMPS`/`PETSC`/`HYPRE` en C++) |
+| | Préconditionneurs | `JACOBI`, `SSOR`, `ILU0`, `BLOCK_TRIANGULAR` (`BT_SBP`), `CUSTOM`, `NONE` | Préconditionnement diagonal enrichi, SSOR, ILU(0) et bloc triangulaire à complément de Schur |
 
 ---
 
 ## Architecture Fonctionnelle Vue par l'Utilisateur
 
-L'utilisation de COVOF 2D s'articule autour d'un flux de travail unifié et standardisé en quatre étapes séquentielles :
+L'exploitation de COVOF 2D suit un flux de travail unifié, identique pour les exécutables C++17 et Fortran 2018 :
 
+```text
++-------------------------------------------------------------------------+
+| 1. PRÉ-TRAITEMENT ET CONFIGURATION                                      |
+| - Définition du domaine [0, Lx] x [0, Ly] et de la grille (nx, ny)      |
+| - Choix du régime (incompressible, compressible All-Mach, Boussinesq)   |
+| - Propriétés fluid1 / fluid2 (rho, mu, Cp, k_thermal, eos, chi_T...)    |
+| - Paramétrage VOF (WEYMOUTH_YUE + PLIC/ELVIRA, SVOF, Marqueurs CVI-RK2) |
+| - Conditions initiales (initial_condition), CL (boundary_conditions)    |
+| - Solveur (MONOLITHIC / AAL / C-AAL / AL, BiCGSTAB2, BT_SBP / JACOBI)   |
++-------------------------------------------------------------------------+
+                                     |
+                                     v
++-------------------------------------------------------------------------+
+| 2. EXÉCUTION DU CALCUL (Séquentiel ou MPI pur)                          |
+| - C++17       : mpirun -np P ./COVOF_2D-C++/bin/covof2d_cpp cas.json    |
+| - Fortran 2018: mpirun -np P ./COVOF_2D-FORTRAN/bin/covof2d_fortran ... |
+| - Partitionnement cartésien MPI 2D, allocation des halos (0..nx+1)      |
+| - Boucle temporelle : [SSP-RK3] -> VOF+CVI-Markers -> AL/NS -> Énergie  |
++-------------------------------------------------------------------------+
+                                     |
+                                     v
++-------------------------------------------------------------------------+
+| 3. CONTRÔLE EN TEMPS RÉEL (Monitoring)                                  |
+| - Bannière synthétique Config::print() au démarrage (rang 0)            |
+| - Tableau console périodique (log_interval) : Pas, Temps, dt, Iter,     |
+|   Vitesse Max, Div Max, [Nu Moyen]                                      |
+| - Série temporelle CSV : <output_dir>/<case_name>_history.csv           |
++-------------------------------------------------------------------------+
+                                     |
+                                     v
++-------------------------------------------------------------------------+
+| 4. POST-TRAITEMENT ET VISUALISATION PARAVIEW / PYTHON                   |
+| - Champs volumiques : <case_name>_<step:06d>.pvtr + *_p<rank>_*.vtr     |
+| - Nuage de marqueurs : <case_name>_markers_<step:06d>.vtk (POLYDATA)    |
+| - Diagnostics analytiques (modes dédiés) : laplacian_error.csv,         |
+|   poiseuille_error.csv, vortex_error.csv, profile_*.csv                 |
++-------------------------------------------------------------------------+
 ```
-+--------------------------------------------------------------------+
-| 1. PRÉ-TRAITEMENT ET CONFIGURATION                                 |
-| - Définition de la physique (viscosités, masses volumiques, sigma) |
-| - Spécification de la grille MAC (nx, ny, dimensions lx, ly)       |
-| - Définition des conditions initiales (interfaces VOF, vitesses)   |
-| - Paramétrage des conditions aux limites (parois, entrées, sorties)|
-| - Édition du fichier maître JSON : config.json                     |
-+--------------------------------------------------------------------+
-                                   |
-                                   v
-+--------------------------------------------------------------------+
-| 2. EXÉCUTION DU CALCUL (Séquentiel ou Parallèle MPI)               |
-| - Commande séquentielle : ./bin/covof2d_cpp config.json            |
-| - Commande parallèle   : mpirun -np 4 ./bin/covof2d_fortran config |
-| - Initialisation des structures et topologie cartésienne MPI       |
-| - Boucle temporelle Navier-Stokes + VOF + Énergie + Uzawa          |
-+--------------------------------------------------------------------+
-                                   |
-                                   v
-+--------------------------------------------------------------------+
-| 3. CONTRÔLE EN TEMPS RÉEL (Monitoring)                             |
-| - Affichage console (pas de temps, temps physique, résidus L2)     |
-| - Enregistrement de l'historique de convergence (convergence.csv)  |
-| - Surveillance des critères de stabilité CFL convectif et diffusif |
-+--------------------------------------------------------------------+
-                                   |
-                                   v
-+--------------------------------------------------------------------+
-| 4. POST-TRAITEMENT ET VALORISATION                                 |
-| - Fichiers de champs volumiques XML VTK Rectilinear (.vtr, .pvtr)  |
-| - Visualisation sous ParaView (vitesse, pression, fraction VOF)    |
-| - Scripts d'analyse Python (profils de vitesse, bilans de masse)   |
-+--------------------------------------------------------------------+
-```
 
-### Organisation des Fichiers et Conventions d'Exécution
+### Organisation Réelle du Dépôt `PROJET_COVOF-2D`
 
-À la racine de l'espace de travail, les répertoires et fichiers principaux sont structurés comme suit :
+À la racine `/Users/elhadjiibrahimathiam/Documents/PROJET_COVOF-2D/`, l'arborescence de travail est organisée comme suit :
 
-- `COVOF_2D-C++/` : Répertoire source du code C++17 (fichiers d'en-tête dans `include/covof/`, sources dans `src/`, exécutable dans `bin/covof2d_cpp`).
-- `COVOF_2D-FORTRAN/` : Répertoire source du code Fortran 2018 (sources dans `src/`, exécutable dans `bin/covof2d_fortran`).
-- `VALIDATION_TOTALE/` : Répertoire exhaustif regroupant les 24 cas-tests académiques de validation, avec leurs spécifications détaillées (`.md`), leurs fichiers JSON de configuration prêts à l'emploi et leurs scripts Python d'analyse comparative.
-- `output/` : Répertoire généré automatiquement lors de l'exécution, recevant les fichiers `.vtr`, `.pvtr`, les fichiers `.pvd` de série temporelle et les fichiers `.csv` de convergence.
+- `COVOF_2D-C++/` : Code source C++17 (`include/covof/` : 15 fichiers `.hpp` ; `src/` : 13 fichiers `.cpp`), `CMakeLists.txt`, et binaires compilés dans `bin/` (`covof2d_cpp` et lien `covof2d`).
+- `COVOF_2D-FORTRAN/` : Code source Fortran 2018 (`src/` : 16 fichiers `.f90`), `CMakeLists.txt`, et binaire compilé dans `bin/covof2d_fortran`.
+- `VALIDATION_TOTALE/` : Dossier maître de vérification et validation regroupant :
+  - `Run_Valide-CASES/` : 14 cas de validation analytique et canonique pilotés par `run_all_validations.sh` (`validation_cas_1_laplacian` à `validation_cas_14_instabilite_interface_gravitaire`).
+  - `Run_CASES/` : Campagnes avancées (`validation_cas_9_50x100_newton_dual_code`, `validation_cas_10_liquid_sheet`, `validation_cas_14_marche_descendante` à `validation_cas_19_convection_poreux_darcy_brinkman`, `validation_cas_21_ascension_bulle_2d`, `validation_cas_24_viscous_jet_buckling`) ainsi que le sous-dossier `Run_FC-WY-CVI-Marker/` dédié aux 8 campagnes hybrides CVI-Marqueurs et au script `verify_cvi_markers.py`.
+  - `Theoritical_Description/` : Descriptions théoriques des 24 cas de validation et rapport consolidé `Validation_Description.pdf`.
+- `Guides_Tutos/` : Suite documentaire complète (Volumes I, II et III, script `verify_cvi_markers.py` dans `Run_FC-WY-CVI-Marker/`, synthèses théoriques `SYNTHESE_METHODE_FC_WY_CVI_MARQUEURS.pdf` et `FEUILLE_DE_ROUTE_IMPLEMENTATION_COVOF_CVI_MARQUEURS.pdf`).
+- `output/` : Répertoire de sortie par défaut généré lors des simulations si `output.output_dir` vaut `"output"`.
 # Installation, Compilation et Déploiement HPC
 
 ## Prérequis Logiciels et Matrice de Compatibilité
 
-Le déploiement de **COVOF 2D** sur stations de travail, serveurs de calcul ou supercalculateurs massivement parallèles requiert un ensemble d'outils et de bibliothèques standards de l'écosystème scientifique. Les deux branches jumelles (C++ et Fortran) ont été conçues pour minimiser les dépendances externes tout en garantissant des performances optimales.
+Le déploiement de **COVOF 2D** sur stations de travail, serveurs de calcul ou supercalculateurs massivement parallèles requiert uniquement des outils standards de l'écosystème scientifique. Les deux branches jumelles (`COVOF_2D-C++` et `COVOF_2D-FORTRAN`) ont été conçues sans dépendance JSON externe (analyseurs JSON natifs intégrés dans `Config.cpp` et `module_json.f90`) et reposent exclusivement sur **MPI pur** (*Message Passing Interface*) et une implémentation LAPACK/BLAS pour le solveur direct LU optionnel.
 
 ### Matrice de Compatibilité des Compilateurs
 
-Les deux versions du solveur s'appuient sur les standards internationaux **ISO C++17** et **ISO Fortran 2018**. Le tableau suivant dresse la liste des suites de compilateurs testées et validées en production :
+Les deux versions adhèrent strictement aux standards internationaux **ISO C++17** et **ISO Fortran 2018** :
 
-| Famille de Compilateurs | Version Minimale | Compilateur C++ | Compilateur Fortran | Drapeaux Recommandés |
+| Famille de Compilateurs | Version Minimale | Compilateur C++ | Compilateur Fortran | Drapeaux CMake / Compilation |
 | :--- | :--- | :--- | :--- | :--- |
-| **GNU Compiler Collection (GCC)** | $\ge 9.3$ (recommandé $\ge 11.2$) | `g++` | `gfortran` | `-O3 -march=native -Wall -Wextra` |
-| **LLVM / Clang + Flang** | $\ge 14.0$ | `clang++` | `flang` / `gfortran` | `-O3 -march=native -Wall` |
-| **Intel oneAPI** | $\ge 2022.1$ | `icpx` | `ifx` / `ifort` | `-O3 -xHost -fp-model fast=2` |
-| **Apple Clang (macOS)** | $\ge 14.0$ (Xcode CLT) | `clang++` | `gfortran` (Homebrew) | `-O3 -Wall -framework Accelerate` |
+| **GNU Compiler Collection (GCC)** | $\ge 9.3$ (recommandé $\ge 11.2$) | `g++` | `gfortran` | C++ : `-O3 -Wall -Wextra -Wno-unused-parameter` <br> Fortran : `-O3 -march=native` |
+| **LLVM / Clang + Flang/GFortran** | $\ge 14.0$ | `clang++` | `gfortran` / `flang` | `-O3 -march=native` |
+| **Intel oneAPI** | $\ge 2022.1$ | `icpx` | `ifx` | `-O3 -xHost` |
+| **Apple Clang + Homebrew GCC (macOS)** | Xcode CLT $\ge 14$ | `clang++` | `gfortran` (Homebrew) | Liaison automatique `-framework Accelerate` |
 
-### Bibliothèques Mathématiques et de Communication Requises
+### Bibliothèques Requises et Modèle de Parallélisme
 
-1. **MPI (*Message Passing Interface*) :**
-   - Implémentations compatibles : **OpenMPI** ($\ge 4.0$), **MPICH** ($\ge 3.4$), **Intel MPI** ($\ge 2021$), **MVAPICH2** ($\ge 2.3$).
-   - Requis pour l'échange non bloquant des mailles fantômes (`MPI_Isend`, `MPI_Irecv`) et les réductions globales de convergence (`MPI_Allreduce`).
-2. **Algèbre Linéaire Dense (BLAS / LAPACK) :**
-   - Sous macOS : le framework natif vectorisé **Accelerate** (`-framework Accelerate`) est détecté et lié automatiquement.
-   - Sous Linux / Clusters : **OpenBLAS**, **Intel MKL** (*Math Kernel Library*), ou les bibliothèques système de référence `liblapack-dev` et `libblas-dev`.
-   - Requis pour le solveur direct exact par factorisation LU (`dgetrf`, `dgetrs`).
-3. **Moteur de Compilation CMake :**
-   - Version minimale requise : **CMake $\ge 3.16$** (pour C++) et **$\ge 3.18$** (pour Fortran 2018).
+1. **MPI pur (OpenMPI / MPICH / Intel MPI) :**
+   - COVOF 2D utilise un **parallélisme distribué MPI pur** (`MPI::MPI_CXX` en C++, `MPI::MPI_Fortran` en Fortran), basé sur une topologie cartésienne 2D (`MPI_Cart_create`).
+   - **Aucun thread OpenMP n'est utilisé par le solveur** : les fichiers `CMakeLists.txt` n'activent pas `-fopenmp`, et il n'existe aucune région parallèle `#pragma omp` ou `!$omp parallel` dans les noyaux de calcul. Chaque processus MPI gère un sous-domaine mémoire indépendant.
+   - Implémentations validées : **OpenMPI** ($\ge 4.0$, référence principale du projet), **MPICH** ($\ge 3.4$), **Intel MPI** ($\ge 2021$).
+2. **Algèbre Linéaire Dense (LAPACK) :**
+   - Requise uniquement lorsque le solveur direct exact (`solver.linear_solver = "DIRECT"` ou `"MUMPS"` en repli autonome) invoque la factorisation LU dense `dgetrf_` / `dgetrs_`.
+   - Sous **macOS (`APPLE`)** : `CMakeLists.txt` lie automatiquement le framework natif `-framework Accelerate`.
+   - Sous **Linux / Clusters HPC** : lier `OpenBLAS` / `LAPACK` (`liblapack-dev`, `libopenblas-dev`) ou Intel MKL selon l'environnement système.
+3. **CMake et Python (post-traitement / vérification) :**
+   - **CMake $\ge 3.16$** pour `COVOF_2D-C++` et **$\ge 3.18$** pour `COVOF_2D-FORTRAN`.
+   - **Python 3** avec `numpy`, `matplotlib`, `pyvista` (optionnel, pour le post-traitement et `verify_cvi_markers.py`).
 
 ---
 
 ## Compilation Pas à Pas avec CMake
 
-Les deux projets disposent chacun de leur fichier `CMakeLists.txt` autonome situé à la racine de leur répertoire respectif (`COVOF_2D-C++/CMakeLists.txt` et `COVOF_2D-FORTRAN/CMakeLists.txt`).
+Les deux dépôts disposent chacun de leur fichier `CMakeLists.txt` autonome à leur racine respective.
 
-### Compilation de la Branche C++ (`COVOF_2D-C++`)
+### Compilation de la Branche C++17 (`COVOF_2D-C++`)
 
-L'arborescence utilise le mode de compilation hors-source (*out-of-source build*) standard :
+Le fichier `COVOF_2D-C++/CMakeLists.txt` impose `CMAKE_CXX_STANDARD 17` (`REQUIRED ON`), active `CMAKE_EXPORT_COMPILE_COMMANDS ON`, recherche `MPI REQUIRED` et compile les 13 unités `.cpp` vers l'exécutable `COVOF_2D-C++/bin/covof2d_cpp` tout en créant automatiquement un lien symbolique de commodité `COVOF_2D-C++/bin/covof2d` :
 
 ```bash
 # 1. Se positionner dans le répertoire C++
-cd /chemin/vers/PROJET_ANTIGRAVITY/COVOF_2D-C++
+cd /Users/elhadjiibrahimathiam/Documents/PROJET_COVOF-2D/COVOF_2D-C++
 
-# 2. Créer et entrer dans le dossier de construction
+# 2. Créer et entrer dans le dossier de construction hors-source
 mkdir -p build && cd build
 
-# 3. Configurer avec CMake en mode Release (optimisations maximales)
+# 3. Configurer avec CMake en mode Release
 cmake -DCMAKE_BUILD_TYPE=Release ..
 
 # 4. Compiler en parallèle sur les cœurs disponibles
 make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 ```
 
-À l'issue de la compilation, l'exécutable binaire est automatiquement placé dans `COVOF_2D-C++/bin/covof2d_cpp`, et un lien symbolique de commodité `COVOF_2D-C++/bin/covof2d` est créé.
+À l'issue de l'édition de liens, vérifier la présence des binaires :
 
-#### Options CMake Avancées pour C++
+```bash
+ls -la ../bin/
+# Doit afficher :
+#   covof2d_cpp
+#   covof2d -> .../bin/covof2d_cpp
+```
 
-| Option CMake | Valeur par Défaut | Description |
+#### Options CMake et Drapeaux Utiles pour C++
+
+| Option CMake | Valeur / Comportement | Rôle |
 | :--- | :--- | :--- |
-| `CMAKE_BUILD_TYPE` | `Release` | `Release` (active `-O3`), `Debug` (active `-g -O0 -fsanitize=address`), `RelWithDebInfo` |
-| `CMAKE_CXX_STANDARD` | `17` | Standard de langage imposé (17 requis au minimum) |
-| `CMAKE_EXPORT_COMPILE_COMMANDS`| `ON` | Génère `compile_commands.json` pour les analyseurs de code LSP / clangd |
+| `CMAKE_BUILD_TYPE` | `Release`, `Debug`, `RelWithDebInfo` | `Release` active `-O3` ; `Debug` permet l'ajout de `-g -O0 -fsanitize=address,undefined` |
+| `CMAKE_CXX_STANDARD` | `17` (`REQUIRED ON`) | Standard ISO C++17 requis pour `std::filesystem`, `std::clamp`, etc. |
+| `CMAKE_CXX_COMPILER` | ex. `mpicxx` ou `g++` | Surcharge explicite du compilateur C++ si plusieurs suites coexistent |
+| `CMAKE_EXPORT_COMPILE_COMMANDS` | `ON` | Génère `build/compile_commands.json` pour les analyseurs LSP (`clangd`) |
 
-### Compilation de la Branche Fortran (`COVOF_2D-FORTRAN`)
+### Compilation de la Branche Fortran 2018 (`COVOF_2D-FORTRAN`)
 
-La procédure est strictement symétrique :
+Le fichier `COVOF_2D-FORTRAN/CMakeLists.txt` impose `CMAKE_Fortran_STANDARD 2018` (`REQUIRED ON`), ajoute les drapeaux `-O3 -march=native`, recherche `MPI REQUIRED` et compile les 16 fichiers `.f90` dans l'ordre exact des dépendances modulaires vers l'exécutable `COVOF_2D-FORTRAN/bin/covof2d_fortran` :
 
 ```bash
 # 1. Se positionner dans le répertoire Fortran
-cd /chemin/vers/PROJET_ANTIGRAVITY/COVOF_2D-FORTRAN
+cd /Users/elhadjiibrahimathiam/Documents/PROJET_COVOF-2D/COVOF_2D-FORTRAN
 
 # 2. Créer et entrer dans le dossier de construction
 mkdir -p build && cd build
@@ -232,37 +248,34 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 ```
 
-Le fichier exécutable binaire produit est situé dans `COVOF_2D-FORTRAN/bin/covof2d_fortran`.
+:::warning
+Sur cluster hétérogène (nœuds de compilation frontaux d'architecture différente des nœuds de calcul), le drapeau `-march=native` de `COVOF_2D-FORTRAN/CMakeLists.txt` doit être remplacé par l'architecture cible des nœuds de calcul (par exemple `-march=skylake-avx512` ou `-xCORE-AVX512`) afin d'éviter une erreur `Illegal Instruction (SIGILL)` à l'exécution.
+:::
 
-### Drapeaux d'Optimisation et Vectorisation SIMD
+### Drapeaux d'Optimisation SIMD et Résolution de LAPACK sous Linux
 
-Pour exploiter les registres vectoriels étendus (AVX2, AVX-512) des processeurs modernes sur supercalculateurs, il est vivement recommandé d'ajouter les options d'architecture matérielle ciblée :
+Sur architecture Linux x86_64 pour nœuds Xeon ou EPYC, si `dgetrf_`/`dgetrs_` nécessite une liaison explicite avec OpenBLAS ou LAPACK :
 
 ```bash
-# Exemple pour nœuds de calcul Intel Xeon Skylake/Icelake :
+# Exemple C++ et Fortran avec drapeaux AVX-512 ciblés et LAPACK explicite :
 cmake -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_CXX_FLAGS="-O3 -mavx512f -mavx512dq -mavx512cd -mavx512bw -mavx512vl" \
-      -DCMAKE_Fortran_FLAGS="-O3 -mavx512f -mavx512dq -mavx512cd -mavx512bw -mavx512vl" ..
-
-# Exemple générique auto-adaptatif pour le nœud courant :
-cmake -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_CXX_FLAGS="-O3 -march=native -mtune=native" \
-      -DCMAKE_Fortran_FLAGS="-O3 -march=native -mtune=native" ..
+      -DCMAKE_CXX_FLAGS="-O3 -march=skylake-avx512" \
+      -DCMAKE_EXE_LINKER_FLAGS="-llapack -lblas" ..
 ```
 
 ---
 
 ## Déploiement sur Supercalculateurs (Clusters HPC)
 
-Dans un environnement de calcul partagé piloté par un gestionnaire de travaux (*workload manager*), COVOF 2D doit être exécuté en allouant précisément les cœurs de calcul, la mémoire et le réseau d'interconnexion rapide (InfiniBand / Omni-Path).
+Dans un environnement distribué piloté par un ordonnanceur (*workload manager*), **COVOF 2D étant un code MPI pur**, chaque tâche Slurm ou PBS correspond à **1 processus MPI sur 1 cœur physique** (`--cpus-per-task=1`). L'utilisation de ressources multi-cœurs par rang n'apporte aucun gain, car le code ne crée pas de threads applicatifs OpenMP (seule l'éventuelle bibliothèque BLAS liée lors de l'appel à `DIRECT` doit être contrainte à un thread si elle est multi-threadée, par exemple `OPENBLAS_NUM_THREADS=1` ou `VECLIB_MAXIMUM_THREADS=1` sous macOS).
 
 ### Script de Soumission pour Gestionnaire Slurm
 
-Voici un script de soumission complet et commenté pour **Slurm** (`run_covof_slurm.sh`), configuré pour une simulation parallèle distribuée sur 2 nœuds de calcul (64 cœurs par nœud, soit 128 cœurs au total) :
+Voici un script de soumission complet pour **Slurm** (`run_covof_slurm.sh`), allouant 2 nœuds de 64 cœurs (soit 128 processus MPI purs) :
 
 ```bash
 #!/bin/bash
-#SBATCH --job-name=COVOF2D_PRODUCTION
+#SBATCH --job-name=COVOF2D_PROD
 #SBATCH --output=covof2d_%j.log
 #SBATCH --error=covof2d_%j.err
 #SBATCH --nodes=2
@@ -272,43 +285,43 @@ Voici un script de soumission complet et commenté pour **Slurm** (`run_covof_sl
 #SBATCH --partition=standard
 #SBATCH --exclusive
 
-# Chargement de l'environnement logiciel modulé (Modules Environment)
+# Chargement de l'environnement logiciel
 module purge
 module load gcc/12.2.0
-module load openmpi/4.1.4
+module load openmpi/4.1.5
 module load openblas/0.3.21
 
-# Affichage des informations sur les ressources allouées
 echo "=========================================================="
-echo "Démarrage du calcul COVOF 2D sur Slurm"
-echo "Job ID              : $SLURM_JOB_ID"
-echo "Nombre de nœuds     : $SLURM_NNODES"
-echo "Nombre total de tâches MPI : $SLURM_NTASKS"
-echo "Liste des nœuds     : $SLURM_JOB_NODELIST"
+echo "Démarrage COVOF 2D (MPI pur) sur Slurm"
+echo "Job ID                     : $SLURM_JOB_ID"
+echo "Nombre de nœuds            : $SLURM_NNODES"
+echo "Nombre total de rangs MPI  : $SLURM_NTASKS"
+echo "Liste des nœuds            : $SLURM_JOB_NODELIST"
 echo "=========================================================="
 
-# Définition des variables d'environnement MPI et OpenMP
-export OMP_NUM_THREADS=1
+# Neutralisation d'un éventuel multi-threading implicite des bibliothèques BLAS
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+# Transport réseau haute vitesse UCX (InfiniBand)
 export UCX_TLS=rc,mm,sm
 export OMPI_MCA_pml=ucx
 
-# Répertoire de travail et fichier d'entrée
 WORKDIR=$SLURM_SUBMIT_DIR
 CASE_CONFIG="$WORKDIR/case_config.json"
+cd "$WORKDIR"
 
-cd $WORKDIR
-
-# Exécution de la version C++ (ou remplacer par covof2d_fortran)
-srun --mpi=pmix ./bin/covof2d_cpp $CASE_CONFIG
+# Lancement parallèle MPI pur (C++17 ou Fortran 2018)
+srun --mpi=pmix --cpu-bind=cores ./COVOF_2D-C++/bin/covof2d_cpp "$CASE_CONFIG"
 
 echo "=========================================================="
-echo "Fin normale du calcul COVOF 2D - Statut: $?"
+echo "Fin du calcul COVOF 2D - Code retour : $?"
 echo "=========================================================="
 ```
 
 ### Script de Soumission pour Gestionnaire PBS / Torque
 
-Pour les centres de calcul s'appuyant sur **PBS Professional** ou **Torque**, le script équivalent `run_covof_pbs.sh` est structuré comme suit :
+Pour les infrastructures s'appuyant sur **PBS Professional** ou **Torque** :
 
 ```bash
 #!/bin/bash
@@ -319,44 +332,41 @@ Pour les centres de calcul s'appuyant sur **PBS Professional** ou **Torque**, le
 #PBS -j oe
 #PBS -o covof2d_pbs.log
 
-cd $PBS_O_WORKDIR
+cd "$PBS_O_WORKDIR"
 
-# Chargement des modules Intel oneAPI
 module purge
 module load intel-oneapi-compilers/2023.1.0
 module load intel-oneapi-mpi/2021.9.0
 module load intel-oneapi-mkl/2023.1.0
 
-# Contrôle de l'affinité des processus sur les sockets NUMA
+export MKL_NUM_THREADS=1
 export I_MPI_PIN=1
 export I_MPI_PIN_DOMAIN=core
 export I_MPI_FABRICS=shm:ofi
 
-# Lancement MPI
-mpirun -np 128 ./bin/covof2d_fortran case_config.json
+mpirun -np 128 ./COVOF_2D-FORTRAN/bin/covof2d_fortran case_config.json
 ```
 
-### Gestion de l'Affinité Mémoire et Topologie NUMA
+### Gestion de l'Affinité Mémoire et Équilibre de Charge Cartésien
 
-Pour les maillages fins ($N_x \times N_y \ge 1024^2$), la vitesse d'accès mémoire (*bandwidth-bound*) dicte la performance du produit matrice-vecteur creux et des balayages VOF. Il est fondamental d'éviter que les processus MPI ne migrent d'un cœur ou d'un socket à l'autre en cours de calcul :
+Lors du partitionnement par `MPI_Cart_create` / `MPI_Dims_create`, il est crucial de choisir un nombre de processus $P = P_x \times P_y$ compatible avec la résolution $(N_x, N_y)$ du maillage :
 
-```bash
-# OpenMPI : Verrouillage strict processus par cœur CPU
-mpirun -np 32 --bind-to core --map-by core ./bin/covof2d_cpp input.json
-
-# Intel MPI : Placement NUMA optimisé
-mpirun -np 32 -genv I_MPI_PIN_PROCESSOR_LIST=allcores ./bin/covof2d_fortran input.json
-```
+1. **Verrouillage cœur par cœur (*CPU pinning*) :**
+   ```bash
+   # OpenMPI : 1 rang MPI épinglé sur 1 cœur physique, pas de migration cache
+   mpirun -np 8 --bind-to core --map-by core ./COVOF_2D-C++/bin/covof2d_cpp input.json
+   ```
+2. **Contraintes sur $P_x$ et $P_y$ :**
+   - Chaque sous-domaine local doit posséder au moins $N_{x,\text{local}} \ge 2$ et $N_{y,\text{local}} \ge 2$ mailles (idéalement $\ge 8$ à $16$ mailles par côté pour limiter le ratio communication/calcul des halos et des marqueurs CVI).
+   - Éviter un nombre premier $P$ élevé (ex. $P = 17$) sur un domaine carré : `MPI_Dims_create` produirait des tranches 1D très allongées $(17 \times 1)$ augmentant la surface d'échange et le nombre de marqueurs migrant entre rangs. Privilégier des facteurs équilibrés ($P \in \{2, 4, 6, 8, 12, 16, 32, 64\}$).
 
 ---
 
-## Conteneurisation et Vérification de l'Installation
-
-Pour garantir la reproductibilité absolue des résultats numériques sur n'importe quel système d'exploitation sans conflit de bibliothèques, COVOF 2D peut être encapsulé dans une image de conteneur standardisée.
+## Conteneurisation et Vérification Post-Installation
 
 ### Définition Singularity / Apptainer (`Apptainer.def`)
 
-Singularity est l'outil privilégié sur les supercalculateurs car il s'exécute sans privilèges administrateur (*rootless*) :
+Sur supercalculateurs où la compilation native est délicate, une image **Apptainer/Singularity** (*rootless*) garantit la portabilité complète :
 
 ```dockerfile
 Bootstrap: docker
@@ -371,1092 +381,1118 @@ From: ubuntu:22.04
         openmpi-bin \
         libopenblas-dev \
         liblapack-dev \
-        git \
+        python3 \
+        python3-numpy \
         ca-certificates
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 %environment
     export LC_ALL=C
-    export OMPI_MCA_btl_vader_single_copy_mechanism=none
+    export OPENBLAS_NUM_THREADS=1
 
 %runscript
     exec "$@"
 ```
 
-Pour compiler et exécuter l'image Singularity :
+Construction et exécution :
 
 ```bash
-# 1. Construire l'image Singularity
 apptainer build covof2d.sif Apptainer.def
-
-# 2. Exécuter un calcul MPI à travers le conteneur
-mpirun -np 8 apptainer exec covof2d.sif ./COVOF_2D-C++/bin/covof2d_cpp case.json
+mpirun -np 4 apptainer exec covof2d.sif ./COVOF_2D-C++/bin/covof2d_cpp cas.json
 ```
 
 ### Protocole de Vérification Immédiate Post-Installation
 
-Afin de valider l'intégrité de la chaîne de compilation et du runtime MPI, il convient de lancer le cas de test de référence analytique (Cas 1 - Laplacian 2D) :
+Après compilation des deux branches dans `/Users/elhadjiibrahimathiam/Documents/PROJET_COVOF-2D`, exécuter les vérifications suivantes depuis la racine du projet :
 
-```bash
-# Vérification rapide sur 1 processus
-./COVOF_2D-C++/bin/covof2d_cpp VALIDATION_TOTALE/validation_cas_1_laplacian/cas1_laplacian.json
+1. **Test d'aide en ligne de commande (`--help`) :**
+   ```bash
+   ./COVOF_2D-C++/bin/covof2d_cpp --help
+   ./COVOF_2D-FORTRAN/bin/covof2d_fortran --help
+   ```
 
-# Vérification sur 4 processus MPI
-mpirun -np 4 ./COVOF_2D-FORTRAN/bin/covof2d_fortran VALIDATION_TOTALE/validation_cas_1_laplacian/cas1_laplacian.json
-```
+2. **Test de vérification analytique rapide (Laplacien 2D en séquentiel et MPI) :**
+   ```bash
+   ./COVOF_2D-C++/bin/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/cas_1_laplacian_32x32.json
+   mpirun -np 4 ./COVOF_2D-FORTRAN/bin/covof2d_fortran VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/cas_1_laplacian_32x32.json
+   ```
+   *(Adapter le nom du fichier `.json` présent dans le dossier du cas de validation selon la grille souhaitée).*
 
-Si le message final `>>> SIMULATION COVOF 2D TERMINEE AVEC SUCCES <<<` s'affiche sans avertissement de fuite mémoire ou d'erreur MPI, le solveur est opérationnel pour la production scientifique.
+3. **Suite de vérification automatique FC-WY-CVI-Marker (C++ & Fortran, `np=1` et `np=4`) :**
+   ```bash
+   python3 Guides_Tutos/Run_FC-WY-CVI-Marker/verify_cvi_markers.py
+   ```
+   Ce script exécute automatiquement les 3 paliers de vérification mathématique et physique (divergence analytique nulle de l'interpolation CVI Variante B, équilibre capillaire de Young-Laplace à $32\times 32$ et $64\times 64$, et parité stricte `np=1` vs `np=4` sur le tourbillon de Rider-Kothe et la goutte statique) pour les deux binaires `covof2d_cpp` et `covof2d_fortran`.
+
+Lorsque la simulation Navier-Stokes se termine normalement, la console affiche :
+`>>> SIMULATION COVOF 2D TERMINEE AVEC SUCCES A t = ... s <<<`
+suivi du chemin du répertoire de sortie contenant les fichiers `.pvtr`, `.vtr` et `_history.csv`.
 # Formulation Mathématique et Modèles Physiques
 
 ## Système d'Équations Gouvernantes
 
-Le solveur **COVOF 2D** résout les équations fondamentales de la mécanique des milieux continus régissant les écoulements de fluides visqueux, newtoniens, monophasiques ou diphasiques, sous diverses approximations physiques (incompressible, faiblement compressible à bas nombre de Mach, avec ou sans transfert thermique, et en présence d'obstacles solides ou poreux).
+Le solveur **COVOF 2D** résout les équations fondamentales de la mécanique des milieux continus régissant les écoulements 2D de fluides visqueux, newtoniens, monophasiques ou diphasiques, incompressibles ou faiblement compressibles (*All-Mach*), avec ou sans transfert thermique et en présence éventuelle d'obstacles solides ou poreux immergés.
 
-### Équations de Navier-Stokes sous Forme Continue
+### Équations de Navier-Stokes sous Forme Continue (*One-Fluid*)
 
-Dans un domaine spatial ouvert et borné $\Omega \subset \mathbb{R}^2$ de frontière $\partial \Omega$ et pour un intervalle de temps $t \in [0, t_{\text{end}}]$, les équations de conservation de la masse et de la quantité de mouvement s'écrivent :
+Dans un domaine rectangulaire ouvert et borné $\Omega = [0, L_x] \times [0, L_y] \subset \mathbb{R}^2$ de frontière $\partial\Omega$ et pour $t \in [0, t_{\text{final}}]$, la formulation *One-Fluid* regroupe les deux phases en un milieu continu unique de masse volumique $\rho(\mathbf{x}, t)$ et de viscosité dynamique $\mu(\mathbf{x}, t)$ :
 
 $$\frac{\partial \rho}{\partial t} + \nabla \cdot (\rho \mathbf{u}) = 0$$
 
 $$\frac{\partial (\rho \mathbf{u})}{\partial t} + \nabla \cdot (\rho \mathbf{u} \otimes \mathbf{u}) = -\nabla p + \nabla \cdot \boldsymbol{\tau} + \rho \mathbf{g} + \mathbf{f}_\sigma + \mathbf{f}_{\text{brinkman}} + \mathbf{f}_{\text{boussinesq}}$$
 
 où :
-- $\rho = \rho(\mathbf{x}, t)$ est la masse volumique locale du milieu $[\text{kg}\cdot\text{m}^{-3}]$.
+- $\rho = \rho(\mathbf{x}, t)$ est la masse volumique locale du mélange $[\text{kg}\cdot\text{m}^{-3}]$.
 - $\mathbf{u} = (u, v)^T$ est le vecteur vitesse eulérien $[\text{m}\cdot\text{s}^{-1}]$.
-- $p = p(\mathbf{x}, t)$ est le champ de pression hydrodynamique $[\text{Pa}]$.
-- $\boldsymbol{\tau}$ est le tenseur des contraintes visqueuses de déviation $[\text{Pa}]$.
-- $\mathbf{g} = (g_x, g_y)^T$ est le vecteur accélération de la pesanteur $[\text{m}\cdot\text{s}^{-2}]$.
-- $\mathbf{f}_\sigma$ est la force volumique de tension superficielle concentrée à l'interface $[\text{N}\cdot\text{m}^{-3}]$.
-- $\mathbf{f}_{\text{brinkman}}$ est la force de traînée volumique de pénalisation poreuse ou solide de Brinkman $[\text{N}\cdot\text{m}^{-3}]$.
-- $\mathbf{f}_{\text{boussinesq}}$ est la force volumique de flottabilité thermique sous approximation de Boussinesq $[\text{N}\cdot\text{m}^{-3}]$.
+- $p = p(\mathbf{x}, t)$ est la pression hydrodynamique ou thermodynamique $[\text{Pa}]$.
+- $\boldsymbol{\tau} = \mu \left( \nabla \mathbf{u} + (\nabla \mathbf{u})^T \right)$ est le tenseur des contraintes visqueuses newtoniennes en écoulement incompressible (avec contribution de dilatation $\lambda (\nabla \cdot \mathbf{u}) \mathbf{I}$ négligée en régime bas-Mach isotherme ou prise en compte dans les flux d'élongation).
+- $\mathbf{g} = (g_x, g_y)^T$ est le vecteur accélération de la pesanteur $[\text{m}\cdot\text{s}^{-2}]$ (`physics.gx`, `physics.gy`).
+- $\mathbf{f}_\sigma$ est la force volumique de tension superficielle interfaciale $[\text{N}\cdot\text{m}^{-3}]$.
+- $\mathbf{f}_{\text{brinkman}}$ est la force de traînée de pénalisation de Darcy-Brinkman dans les obstacles ou milieux poreux $[\text{N}\cdot\text{m}^{-3}]$.
+- $\mathbf{f}_{\text{boussinesq}}$ est la force de flottabilité thermique sous approximation de Boussinesq $[\text{N}\cdot\text{m}^{-3}]$.
 
-### Formulation Advective Non Conservative
+### Formulation Advective Utilisée sur la Grille Décalée MAC
 
-En exploitant l'équation de continuité, la dérivée matérielle de la vitesse s'exprime sous forme advective (forme utilisée pour la discrétisation par volumes finis décalés dans COVOF 2D) :
+En exploitant la conservation de la masse, la forme advective non conservative résolue par le noyau implicite de COVOF 2D s'écrit, projetée selon $x$ et $y$ :
 
-$$\rho \left( \frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla) \mathbf{u} \right) = -\nabla p + \nabla \cdot \boldsymbol{\tau} + \rho \mathbf{g} + \mathbf{f}_\sigma + \mathbf{f}_{\text{brinkman}} + \mathbf{f}_{\text{boussinesq}}$$
+$$\rho \left( \frac{\partial u}{\partial t} + u \frac{\partial u}{\partial x} + v \frac{\partial u}{\partial y} \right) = -\frac{\partial p}{\partial x} + \frac{\partial}{\partial x}\left( 2\mu \frac{\partial u}{\partial x} \right) + \frac{\partial}{\partial y}\left[ \mu \left( \frac{\partial u}{\partial y} + \frac{\partial v}{\partial x} \right) \right] + \rho g_x + f_{\sigma, x} + f_{\text{brinkman}, x}$$
 
-Soit, projetée selon les composantes cartésiennes horizontales $x$ et verticales $y$ :
+$$\rho \left( \frac{\partial v}{\partial t} + u \frac{\partial v}{\partial x} + v \frac{\partial v}{\partial y} \right) = -\frac{\partial p}{\partial y} + \frac{\partial}{\partial x}\left[ \mu \left( \frac{\partial u}{\partial y} + \frac{\partial v}{\partial x} \right) \right] + \frac{\partial}{\partial y}\left( 2\mu \frac{\partial v}{\partial y} \right) + \rho g_y + f_{\sigma, y} + f_{\text{brinkman}, y} + f_{\text{boussinesq}, y}$$
 
-$$\rho \left( \frac{\partial u}{\partial t} + u \frac{\partial u}{\partial x} + v \frac{\partial u}{\partial y} \right) = -\frac{\partial p}{\partial x} + \frac{\partial \tau_{xx}}{\partial x} + \frac{\partial \tau_{xy}}{\partial y} + \rho g_x + f_{\sigma, x} + f_{\text{brinkman}, x}$$
-
-$$\rho \left( \frac{\partial v}{\partial t} + u \frac{\partial v}{\partial x} + v \frac{\partial v}{\partial y} \right) = -\frac{\partial p}{\partial y} + \frac{\partial \tau_{yx}}{\partial x} + \frac{\partial \tau_{yy}}{\partial y} + \rho g_y + f_{\sigma, y} + f_{\text{brinkman}, y} + f_{\text{boussinesq}, y}$$
+Lorsque l'option `physics.enable_ssp_rk3_momentum = true` est activée (automatique par défaut en régime `compressible = true`), une étape préliminaire explicite **SSP-RK3** assure le transport inertiel conservatif de $(\rho u, \rho v)$ avant le couplage implicite vitesse-pression.
 
 ---
 
-## Modèle 1-Fluide Diphasique et Suivi d'Interface VOF
+## Modèle Diphasique VOF, Lissage SVOF et Marqueurs Hybrides
 
-Dans la formulation 1-fluide de Kataoka (1986), le milieu diphasique est modélisé comme un fluide unique continu équivalent dont les propriétés thermodynamiques et de transport varient de manière discontinue à la traversée de l'interface séparant la phase 1 (fluide porteur ou liquide) de la phase 2 (goutte, bulle ou gaz).
+### Fonction Indicatrice de Phase (Fraction Volumique $C$)
 
-### Fonction Indicatrice de Couleur (Fraction Volumique VOF)
+Dans la formulation *One-Fluid*, les deux fluides immiscibles — **Fluide 1** (`physics.fluid1`, généralement le fluide lourd/porteur ou ambiant) et **Fluide 2** (`physics.fluid2`, généralement la goutte, bulle, cylindre dense ou gaz selon le cas initial) — sont repérés par la fonction indicatrice de couleur $C(\mathbf{x}, t) \in [0, 1]$ (`fields.C` en C++, `fields%C` en Fortran) :
 
-La distribution spatiale des deux phases est représentée par la fonction indicatrice de couleur $C(\mathbf{x}, t) \in [0, 1]$ :
+$$C(\mathbf{x}, t) = \begin{cases} 1 & \text{dans la Phase 1 (`fluid1`)} \\ 0 & \text{dans la Phase 2 (`fluid2`)} \\ ]0, 1[ & \text{dans les mailles mixtes coupées par l'interface } \Gamma(t) \end{cases}$$
 
-$$C(\mathbf{x}, t) = \begin{cases} 1 & \text{si } \mathbf{x} \in \text{Phase 1} \\ 0 & \text{si } \mathbf{x} \in \text{Phase 2} \\ ]0, 1[ & \text{dans les mailles traversées par l'interface} \end{cases}$$
+Sans changement de phase, le transport lagrangien de $C$ obéit à :
 
-L'équation cinématique de transport de l'interface sans changement de phase s'énonce :
+$$\frac{\partial C}{\partial t} + \mathbf{u} \cdot \nabla C = 0 \quad \Longleftrightarrow \quad \frac{\partial C}{\partial t} + \nabla \cdot (C \mathbf{u}) = C (\nabla \cdot \mathbf{u})$$
 
-$$\frac{\partial C}{\partial t} + \mathbf{u} \cdot \nabla C = 0$$
+### Régularisation Rhéologique SVOF par Filtre de Helmholtz
 
-Sous forme conservative pour un écoulement à divergence nulle :
+Conformément à El Ouafa, Vincent & Le Chenadec (*Fluids* 2021), lorsque le contraste de masse volumique ($\rho_1 / \rho_2 \gg 1$) ou de viscosité ($\mu_1 / \mu_2 \gg 1$) est élevé, COVOF 2D distingue rigoureusement :
 
-$$\frac{\partial C}{\partial t} + \nabla \cdot (C \mathbf{u}) = 0$$
+1. **La fraction volumique advectée $C$** (`fields.C` / `fields%C`), qui demeure **parfaitement raide** (épaisseur d'une maille) afin de préserver la netteté géométrique de l'interface.
+2. **La fonction couleur lissée rhéologique $C_s$** (`fields.C_s` / `fields%C_s`), activée par `physics.enable_svof_smoothing = true` et calculée de manière purement diagnostique après l'advection en résolvant l'équation elliptique de Helmholtz avec conditions aux limites de Neumann homogènes ($\partial_n C_s = 0$ sur $\partial\Omega$) :
+   $$C_s - D \nabla^2 C_s = C, \qquad D = k \, \Delta x \Delta y$$
+   où $k$ est le paramètre `physics.svof_filter_width` (défaut `1.0`). Ce système diagonalement dominant est résolu par 25 itérations de Gauss-Seidel symétrique parallèle avec bornage strict $C_s \in [0, 1]$.
+3. **La fonction couleur filtrée capillaire $\widetilde{C}$** (`fields.C_tilde` / `fields%C_tilde`), activée par `physics.enable_diffusion_smoothing = true` (`diffusion_smoothing_steps`, défaut `3`), obtenue par $N_{\text{diff}}$ pas explicites de diffusion laplacienne ($\Delta \tau = 0.2 \min(\Delta x^2, \Delta y^2)$) pour régulariser le calcul classique de la courbure CSF lorsque les marqueurs ne sont pas activés.
 
-### Lois de Mélange des Propriétés Matérielles
+### Lois de Mélange des Propriétés Matérielles sur Grille MAC
 
-Dans chaque cellule de calcul, la masse volumique effective $\rho$ et la viscosité dynamique $\mu$ sont reconstruites à partir de la fraction volumique locale $C$ :
+En notant $C_{\text{src}} = C_s$ si `enable_svof_smoothing = true` (sinon $C_{\text{src}} = C$) :
 
-1. **Masse volumique cellulaire (Moyenne arithmétique) :**
-   $$\rho(C) = C \rho_1 + (1 - C) \rho_2$$
-   où $\rho_1$ est la masse volumique de la phase 1 (`cfg%rho1` / `config.rho1`) et $\rho_2$ celle de la phase 2 (`cfg%rho2` / `config.rho2`).
+1. **Centres des cellules de pression $(i, j)$** — moyenne arithmétique :
+   $$\rho_{i,j} = C_{\text{src}, i,j} \rho_1 + (1 - C_{\text{src}, i,j}) \rho_2, \qquad \mu_{i,j} = C_{\text{src}, i,j} \mu_1 + (1 - C_{\text{src}, i,j}) \mu_2$$
+2. **Faces décalées de vitesse $(i - 1/2, j)$ et $(i, j - 1/2)$** — moyenne arithmétique des cellules adjacentes :
+   $$\rho_{u, i, j} = \frac{1}{2}\left(\rho_{i-1, j} + \rho_{i, j}\right), \qquad \rho_{v, i, j} = \frac{1}{2}\left(\rho_{i, j-1} + \rho_{i, j}\right)$$
+3. **Sommets / Nœuds de cisaillement $(i - 1/2, j - 1/2)$** — **moyenne harmonique** (`fields.mu_node` / `fields%mu_node`), indispensable pour assurer la continuité de la contrainte tangentielle à travers les interfaces à grand saut de viscosité :
+   - En mode VOF standard (`enable_svof_smoothing = false`) :
+     $$\mu_{\text{node}, i, j} = \frac{4}{\frac{1}{\mu_{i-1, j-1}} + \frac{1}{\mu_{i, j-1}} + \frac{1}{\mu_{i-1, j}} + \frac{1}{\mu_{i, j}}}$$
+   - En mode SVOF (`enable_svof_smoothing = true`, Éqs. 8–9 *Fluids* 2021) :
+     $$\mu_{\text{node}, i, j} = \frac{\mu_1 \mu_2}{\mu_2 \, C_{s,\text{node}} + \mu_1 (1 - C_{s,\text{node}})}, \qquad C_{s,\text{node}} = \frac{1}{4}\left( C_{s,i-1,j-1} + C_{s,i,j-1} + C_{s,i-1,j} + C_{s,i,j} \right)$$
 
-2. **Viscosité dynamique cellulaire et nodale :**
-   Dans le centre de la maille :
-   $$\mu(C) = C \mu_1 + (1 - C) \mu_2$$
-   Pour le calcul des termes de cisaillement aux sommets du maillage décalé MAC ($\mu_{xy}$ aux nœuds $(i+\frac{1}{2}, j+\frac{1}{2})$), COVOF 2D utilise la **moyenne harmonique** des quatre mailles adjacentes, qui est la seule formulation rigoureusement conservative et stable pour les rapports de viscosité élevés ($\mu_1/\mu_2 \gg 1$) :
-   $$\mu_{i+1/2, j+1/2} = \left[ \frac{1}{4} \left( \frac{1}{\mu_{i, j}} + \frac{1}{\mu_{i+1, j}} + \frac{1}{\mu_{i, j+1}} + \frac{1}{\mu_{i+1, j+1}} \right) \right]^{-1}$$
+En régime **monophasique** (`enable_two_phase = false`), COVOF 2D propose en outre les modèles de viscosité spatiale `physics.viscosity_model` :
+- `"CONSTANT"` : $\mu = \mu_1$.
+- `"EXPONENTIAL"` : $\mu(y) = \mu_0 \exp\left( a \left( \frac{y - e}{e} \right)^2 \right)$ (avec `visc_mu0`, `visc_a`, `visc_e`).
+- `"ASYMMETRIC_EXPONENTIAL"` (en C++) : $\mu(y) = \mu_0 \exp\left( -a \frac{y - e}{e} \right)$.
 
-### Modèle de Tension Superficielle CSF (Continuum Surface Force)
+### Modèle de Tension Superficielle CSF et Couplage Marqueurs Lagrangiens CVI
 
-La tension superficielle agissant sur l'interface est convertie en un terme source volumique équivalent selon la méthode CSF de Brackbill, Kothe et Zemach (1992) :
+La tension superficielle est modélisée par la formulation volumique *Balanced-Force CSF* (Brackbill et al., 1992) discrétisée directement aux faces décalées MAC :
 
-$$\mathbf{f}_\sigma = \sigma \kappa \nabla C$$
+$$F_{\sigma, x, i-1/2, j} = \sigma \, \bar{\kappa}_{i-1/2, j} \, \frac{C_{i, j} - C_{i-1, j}}{\Delta x}, \qquad F_{\sigma, y, i, j-1/2} = \sigma \, \bar{\kappa}_{i, j-1/2} \, \frac{C_{i, j} - C_{i, j-1}}{\Delta y}$$
 
-où :
-- $\sigma$ est le coefficient de tension superficielle interfaciale $[\text{N}\cdot\text{m}^{-1}]$ (`cfg%sigma` / `config.sigma`).
-- $\kappa$ est la courbure moyenne locale de l'interface $[\text{m}^{-1}]$.
-- $\nabla C$ est le gradient spatial de la fraction volumique, orienté selon la normale unitaire à l'interface.
+où $\sigma$ est la tension superficielle (`physics.sigma` $[\text{N}\cdot\text{m}^{-1}]$) et $\kappa$ la courbure algébrique plane $[\text{m}^{-1}]$. Deux modes de calcul de $(\mathbf{n}, \kappa)$ sont disponibles :
 
-La normale locale unitaire $\mathbf{n}$ et la courbure $\kappa$ sont calculées par dérivation numérique du champ de fraction volumique régularisé :
-
-$$\mathbf{n} = \frac{\nabla C}{\|\nabla C\| + \epsilon}, \quad \kappa = -\nabla \cdot \mathbf{n} = -\left( \frac{\partial n_x}{\partial x} + \frac{\partial n_y}{\partial y} \right)$$
-
-où $\epsilon = 10^{-30}$ est un seuil de régularisation infinitésimal évitant les divisions par zéro dans les phases pures uniformes.
-
----
-
-## Modèle Faiblement Compressible et Régime All-Mach
-
-Pour les écoulements diphasiques présentant une compressibilité acoustique ou thermodynamique (notamment la compression d'inclusions gazeuses ou la propagation d'ondes de pression à bas nombre de Mach), COVOF 2D intègre la formulation **All-Mach C-AAL** (El Ouafa et al., *Fluids* 2024).
-
-### Équation de Continuité Généralisée
-
-L'équation de conservation de la masse est réécrite en introduisant le coefficient de compressibilité isotherme $\chi_T$ :
-
-$$\chi_T = \frac{1}{\rho}\left( \frac{\partial \rho}{\partial p} \right)_T = \frac{1}{\rho c_s^2}$$
-
-où $c_s$ désigne la célérité du son dans le fluide considéré $[\text{m}\cdot\text{s}^{-1}]$. L'équation de continuité prend alors la forme :
-
-$$\chi_T \left( \frac{\partial p}{\partial t} + \mathbf{u} \cdot \nabla p \right) + \nabla \cdot \mathbf{u} = 0$$
-
-À bas nombre de Mach ($Ma = \|\mathbf{u}\|/c_s \ll 1$), le terme convectif $\mathbf{u} \cdot \nabla p$ est d'ordre $\mathcal{O}(Ma^2)$ devant la dérivée instationnaire et est négligé, ce qui conduit à la relation de contrainte barotrope discrète :
-
-$$\chi_T \frac{\partial p}{\partial t} + \nabla \cdot \mathbf{u} = 0 \quad \iff \quad \nabla \cdot \mathbf{u}^{n+1} + \frac{\chi_T}{\Delta t} (p^{n+1} - p^n) = 0$$
-
-Cette relation modifie directement l'étape de mise à jour d'Uzawa dans la méthode du Lagrangien augmenté adaptatif compressible (C-AAL), régularisant le paramètre de pénalité local :
-
-$$r_{\text{eff}}(\mathbf{x}) = \frac{r_{\text{AAL}}(\mathbf{x})}{1 + r_{\text{AAL}}(\mathbf{x}) \frac{\chi_T(\mathbf{x})}{\Delta t}}$$
+1. **Mode VOF eulérien standard :**
+   À partir du champ couleur $C_{\text{curv}}$ ($\widetilde{C}$ si `enable_diffusion_smoothing`, sinon $C_s$ si `enable_svof_smoothing`, sinon $C$) :
+   $$\mathbf{n}_{i,j} = \frac{\nabla_h C_{\text{curv}, i,j}}{\|\nabla_h C_{\text{curv}, i,j}\|}, \qquad \kappa_{i,j} = -\nabla_h \cdot \mathbf{n}_{i,j}$$
+2. **Mode hybride FC-WY-CVI-Marker (`vof.use_markers = true` et `vof.marker_curvature = true`) :**
+   Un nuage de marqueurs lagrangiens non connectés $(x_p, y_p, n_{x,p}, n_{y,p}, \kappa_p)$ est advecté à l'ordre 2 par le schéma RK2-Heun à l'aide de l'**Interpolation Conservative de la Vitesse (CVI — Variante B exacte sur boîtes décalées MAC)** garantissant $\nabla \cdot \mathbf{u}_{\text{CVI}} \equiv D_{i,j}$ en tout point. Dans chaque cellule mixte, la normale et la courbure $\kappa_{i,j}^{\text{marker}}$ sont obtenues par régression parabolique pondérée dans le repère local tangent-normal $(\tau, \eta)$ avec filtrage angulaire $\mathbf{n}_p \cdot \mathbf{n}^{\text{ref}} \ge 0.5$ pour protéger les ligaments minces. Cette approche élimine la majeure partie des courants parasites et préserve la courbure avec une convergence d'ordre 2.
 
 ---
 
-## Modèle de Milieu Poreux et Pénalisation de Brinkman
+## Modèle Faiblement Compressible, Régime All-Mach et Équations d'État (EOS)
 
-Pour représenter des obstacles rigides immergés (pylônes, cylindres, marches, vannes) sans faire appel à un remaillage non structuré conforme, COVOF 2D implémente la méthode de pénalisation volumique de Brinkman (Angot, Bruneau & Fabrie, 1999).
+Pour les écoulements diphasiques compressibles ou acoustiques à bas nombre de Mach (compression d'une bulle sous saut de pression, onde de choc acoustique faible, piston isotherme), COVOF 2D implémente la formulation **All-Mach C-AAL** (El Ouafa et al., *Fluids* 2024).
 
-### Équation de Brinkman-Navier-Stokes
+### Équation de Continuité Barotrope et Compressibilité Isotherme
 
-Un terme de traînée de Darcy-Brinkman est ajouté au membre de droite de l'équation de quantité de mouvement :
+En introduisant la compressibilité isotherme $\chi_T = \frac{1}{\rho}\left(\frac{\partial \rho}{\partial p}\right)_T = \frac{1}{\rho c_s^2}$ (`fields.chi_T` $[\text{Pa}^{-1}]$), la contrainte de continuité discrète s'écrit :
+
+$$\chi_{T, i,j} \frac{p_{i,j}^{n+1} - p_{i,j}^n}{\Delta t} + (\nabla_h \cdot \mathbf{u}^{n+1})_{i,j} = 0$$
+
+La masse volumique cellulaire est actualisée en fonction de la pression et de la température via l'équation d'état propre à chaque phase (`physics.fluid1.eos`, `physics.fluid2.eos`), puis moyennée par $C_{\text{src}}$ : $\rho = C_{\text{src}} \rho_1(p, T) + (1 - C_{\text{src}}) \rho_2(p, T)$ et $\chi_T = C_{\text{src}} \chi_{T,1} + (1 - C_{\text{src}}) \chi_{T,2}$.
+
+### Catalogue des Quatre Lois d'État Implémentées (`EOS.hpp` / `module_eos.f90`)
+
+| Mot-Clé `eos` (et Alias) | Loi de Masse Volumique $\rho(p, T)$ | Compressibilité Isotherme $\chi_T$ | Célérité du Son $c_s$ | Paramètres JSON Associés |
+| :--- | :--- | :--- | :--- | :--- |
+| `"INCOMPRESSIBLE"` | $\rho = \rho_0$ | $\chi_T = 0$ | $10^5\,\text{m}\cdot\text{s}^{-1}$ | `rho` |
+| `"LINEAR"` / `"ACOUSTIC"` | $\rho = \rho_0 \left[ 1 + \chi_{T,0}(p - p_{\text{ref}}) \right]$ | $\chi_T = \chi_{T,0}$ | $1 / \sqrt{\rho \chi_{T,0}}$ | `rho`, `chi_T` ($p_{\text{ref}} = 1.01325\times 10^5\,\text{Pa}$) |
+| `"IDEAL_GAS"` / `"PERFECT_GAS"` | $\rho = \frac{p}{r_{\text{gas}} T}$ | $\chi_T = \frac{1}{\max(1, p)}$ | $\sqrt{\gamma \, r_{\text{gas}} T}$ | `r_gas`, `gamma`, `cv` |
+| `"NASG"` / `"STIFFENED_GAS"` | $\rho = \frac{p + \gamma p_\infty}{(\gamma - 1) c_v T + b_{\text{nasg}}(p + \gamma p_\infty)}$ | $\chi_T = \frac{1 - \rho b_{\text{nasg}}}{\rho \max(1, p + p_\infty)}$ | $1500\,\text{m}\cdot\text{s}^{-1}$ (repli liquide) | `gamma`, `cv`, `p_inf`, `b_nasg`, `q_nasg` |
+
+En régime compressible non isotherme (`compressible = true` et `enable_energy = true`), la routine `solve_total_energy` résout l'équation de l'énergie totale spécifique $e = u_{\text{int}} + \frac{1}{2}\|\mathbf{u}\|^2$ (`fields.energy`, `fields.rho_e`), puis reconstruit la température via $T = \frac{\gamma - 1}{r_{\text{gas}}}\left(e - \frac{1}{2}\|\mathbf{u}\|^2\right)$.
+
+---
+
+## Modèle de Milieu Poreux et Pénalisation de Darcy-Brinkman
+
+Pour modéliser des obstacles solides ou des matrices poreuses sans déformer la grille cartésienne MAC, COVOF 2D implémente la pénalisation volumique de Darcy-Brinkman (`obstacles` dans le fichier JSON) :
 
 $$\mathbf{f}_{\text{brinkman}} = -\frac{\mu}{\mathcal{K}(\mathbf{x})} \mathbf{u}$$
 
-où $\mathcal{K}(\mathbf{x})$ est le champ spatial de perméabilité intrinsèque de Darcy $[\text{m}^2]$ :
-- **Dans le fluide libre ($\mathbf{x} \in \Omega_f$) :** $\mathcal{K} \to +\infty \implies \mathbf{f}_{\text{brinkman}} = \mathbf{0}$, les équations de Navier-Stokes standard sont recouvrées exactement.
-- **Dans un milieu poreux perméable ($\mathbf{x} \in \Omega_p$) :** $\mathcal{K} = K_{\text{poreux}} \in [10^{-6}, 10^{-2}]\,\text{m}^2$, la loi de Darcy avec cisaillement de Brinkman régit la filtration.
-- **Dans un obstacle solide rigide imperméable ($\mathbf{x} \in \Omega_s$) :** $\mathcal{K} = \eta \to 0$ ($\eta \le 10^{-12}\,\text{m}^2$, paramètre `obs_perm` / `PERMEABILITY_SOLID_DEFAULT`). Par pénalisation asymptotique, l'équation impose mathématiquement :
-  $$\mathbf{u} = \mathbf{0} + \mathcal{O}(\sqrt{\eta}) \quad \text{dans } \Omega_s$$
-  garantissant le respect de la condition d'adhérence sans coût géométrique supplémentaire.
+Deux comportements distincts sont automatiquement sélectionnés selon la valeur de `permeability` ($\mathcal{K}$) de chaque obstacle (`BOX` ou `CYLINDER`) :
+- **Solide rigide imperméable ($\mathcal{K} \le 10^{-12}\,\text{m}^2$, défaut $10^{-14}$ en C++ / $10^{-40}$ en Fortran) :** Les faces de vitesse $u$ et $v$ situées dans l'obstacle reçoivent directement la condition de Dirichlet nulle ($u = 0, v = 0$) dans l'opérateur linéaire et le second membre.
+- **Milieu poreux perméable ($\mathcal{K} > 10^{-12}\,\text{m}^2$) :** Le terme de traînée implicite $+\frac{\mu}{\mathcal{K}} \Delta x \Delta y \, u$ est ajouté à la diagonale de la matrice de quantité de mouvement (et dans l'échelle $\tau_{\text{brinkman}} = \mu \frac{\Delta x \Delta y}{\mathcal{K}}$ du mode AAL).
 
 ---
 
 ## Transfert Thermique et Approximation de Boussinesq
 
-Pour les écoulements thermoconvectifs (cavité différentiellement chauffée, instabilités de Rayleigh-Bénard), le solveur couple l'équation de quantité de mouvement à une équation de transport-diffusion de l'énergie thermique.
+En régime incompressible avec `physics.enable_energy = true` (et `compressible = false`), COVOF 2D résout l'équation de transport-diffusion de la température $T$ (`solve_energy` / `ns_solve_energy`) :
 
-### Équation de l'Énergie en Température
+$$\rho C_p \left( \frac{\partial T}{\partial t} + \mathbf{u} \cdot \nabla T \right) = \nabla \cdot (k_{\text{th}} \nabla T)$$
 
-En négligeant la dissipation visqueuse et les variations de pression :
+Le couplage avec l'équation de quantité de mouvement verticale s'effectue par le terme de flottabilité de Boussinesq utilisant le nombre de Rayleigh `physics.Ra`, le nombre de Prandtl `physics.Pr`, le coefficient de dilatation `physics.beta` et la température de référence `physics.T_ref` :
 
-$$\rho C_p \left( \frac{\partial T}{\partial t} + \mathbf{u} \cdot \nabla T \right) = \nabla \cdot (k_{\text{th}} \nabla T) + S_T$$
+$$\mathbf{f}_{\text{boussinesq}} = -\rho \, \beta \, (T - T_{\text{ref}}) \, \mathbf{g}$$
 
-où :
-- $T(\mathbf{x}, t)$ est le champ de température absolue $[\text{K}]$ (`fields.T` / `fields%T`).
-- $C_p$ est la capacité thermique isobare $[\text{J}\cdot\text{kg}^{-1}\cdot\text{K}^{-1}]$ (`cfg%cp1` / `config.cp1`).
-- $k_{\text{th}}$ est la conductivité thermique du fluide $[\text{W}\cdot\text{m}^{-1}\cdot\text{K}^{-1}]$ (`cfg%th_cond1` / `config.th_cond1`).
-- $S_T$ est un terme source volumique de chaleur $[\text{W}\cdot\text{m}^{-3}]$.
-
-### Couplage de Flottabilité de Boussinesq
-
-La variation de la masse volumique avec la température est linéarisée autour d'un état de référence $(T_{\text{ref}}, \rho_0)$ :
-
-$$\rho(T) \approx \rho_0 \left( 1 - \beta (T - T_{\text{ref}}) \right)$$
-
-où $\beta$ est le coefficient de dilatation volumique thermique $[\text{K}^{-1}]$ (`cfg%beta_th` / `config.beta_th`). Le terme source de gravité prend alors la forme :
-
-$$\mathbf{f}_{\text{boussinesq}} = -\rho_0 \beta (T - T_{\text{ref}}) \mathbf{g}$$
-
-Ce terme est orienté verticalement selon l'axe de la pesanteur, induisant la mise en mouvement naturelle du fluide chaud plus léger vers le haut et du fluide froid plus dense vers le bas.
+À chaque pas de temps, le solveur évalue et affiche le **nombre de Nusselt moyen sur la paroi chaude ($x = 0$)** via `compute_mean_nusselt_hot_wall`.
 
 ---
 
-## Nombres Adimensionnels et Régimes d'Écoulement
+## Nombres Adimensionnels et Table Générale de Nomenclature
 
-La physique des écoulements simulés dans COVOF 2D est caractérisée par les nombres sans dimension classiques, définis à partir d'une longueur de référence $L$, d'une vitesse de référence $U$, d'un écart de température $\Delta T = T_{\text{hot}} - T_{\text{cold}}$ et de la viscosité cinématique $\nu = \mu/\rho$ :
+| Nombre Adimensionnel | Définition | Signification Physique |
+| :--- | :--- | :--- |
+| **Reynolds ($Re$)** | $Re = \frac{\rho U L}{\mu}$ | Rapport forces d'inertie / forces visqueuses |
+| **Froude ($Fr$)** | $Fr = \frac{U}{\sqrt{g L}}$ | Rapport forces d'inertie / forces gravitationnelles |
+| **Weber ($We$)** | $We = \frac{\rho U^2 L}{\sigma}$ | Rapport forces d'inertie / forces capillaires |
+| **Bond / Eötvös ($Bo$)** | $Bo = \frac{\Delta \rho g L^2}{\sigma}$ | Rapport flottabilité gravitaire / tension de surface |
+| **Capillaire ($Ca$)** | $Ca = \frac{\mu U}{\sigma}$ | Rapport forces visqueuses / tension de surface |
+| **Ohnesorge ($Oh$)** | $Oh = \frac{\mu}{\sqrt{\rho \sigma L}}$ | Amortissement visqueux des ondes capillaires |
+| **Prandtl ($Pr$)** | $Pr = \frac{\mu C_p}{k_{\text{th}}}$ | Rapport diffusivité cinématique / diffusivité thermique |
+| **Rayleigh ($Ra$)** | $Ra = \frac{g \beta \Delta T L^3}{\nu \alpha}$ | Intensité motrice de la convection naturelle |
+| **Darcy ($Da$)** | $Da = \frac{\mathcal{K}}{L^2}$ | Perméabilité adimensionnelle du milieu poreux |
 
-| Nombre Sans Dimension | Expression Mathématique | Signification Physique | Modules COVOF 2D Concernés |
-| :--- | :--- | :--- | :--- |
-| **Reynolds ($Re$)** | $Re = \frac{\rho U L}{\mu} = \frac{U L}{\nu}$ | Rapport forces d'inertie / forces visqueuses | Tous (Cavité, Poiseuille, Cylindre) |
-| **Froude ($Fr$)** | $Fr = \frac{U}{\sqrt{g L}}$ | Rapport forces d'inertie / forces gravitationnelles | Surface libre, Rupture de barrage |
-| **Weber ($We$)** | $We = \frac{\rho U^2 L}{\sigma}$ | Rapport forces d'inertie / forces capillaires | Rupture de nappe, Goutte, Jet |
-| **Capillaire ($Ca$)** | $Ca = \frac{\mu U}{\sigma} = \frac{We}{Re}$ | Rapport forces visqueuses / forces capillaires | Microfluidique, Instabilité de jet |
-| **Bond / Eötvös ($Bo$)** | $Bo = \frac{\Delta \rho g L^2}{\sigma}$ | Rapport forces gravitationnelles / capillaires | Ascension de bulle, Sédimentation |
-| **Ohnesorge ($Oh$)** | $Oh = \frac{\mu}{\sqrt{\rho \sigma L}} = \frac{\sqrt{We}}{Re}$ | Dissipation visqueuse relative aux ondes capillaires | Oscillation de bulle, Atomisation |
-| **Prandtl ($Pr$)** | $Pr = \frac{\nu}{\alpha} = \frac{\mu C_p}{k_{\text{th}}}$ | Rapport diffusivité visqueuse / diffusivité thermique | Rayleigh-Bénard, Convection naturelle |
-| **Rayleigh ($Ra$)** | $Ra = \frac{g \beta \Delta T L^3}{\nu \alpha} = Gr \cdot Pr$ | Intensité motrice de la convection thermique | Cavité différentiellement chauffée |
-| **Darcy ($Da$)** | $Da = \frac{K}{L^2}$ | Perméabilité adimensionnelle du milieu poreux | Milieux poreux, Pénalisation Brinkman |
+### Table Générale de Nomenclature (Symboles $\leftrightarrow$ Variables C++ & Fortran)
 
----
-
-## Table Générale de Nomenclature
-
-Le tableau ci-dessous recense l'intégralité des grandeurs scalaires, vectorielles et tensorielles utilisées dans la formulation continue et leur dénomination exacte dans les codes sources C++ et Fortran :
-
-| Symbole | Signification Physique | Unités SI | Variable C++ (`COVOF_2D-C++`) | Variable Fortran (`COVOF_2D-FORTRAN`) |
+| Symbole | Signification Physique | Unités SI | Identifiant C++ (`COVOF_2D-C++`) | Identifiant Fortran (`COVOF_2D-FORTRAN`) |
 | :--- | :--- | :--- | :--- | :--- |
-| $\mathbf{u}$ | Vecteur vitesse eulérien | $\text{m}\cdot\text{s}^{-1}$ | `fields.u`, `fields.v` | `fields%u`, `fields%v` |
-| $p$ | Champ de pression scalaire | $\text{Pa} = \text{N}\cdot\text{m}^{-2}$ | `fields.p` | `fields%p` |
-| $p^n$ | Pression au pas de temps antérieur | $\text{Pa}$ | `fields.p_old` | `fields%p_old` |
-| $\rho$ | Masse volumique du fluide | $\text{kg}\cdot\text{m}^{-3}$ | `fields.rho` | `fields%rho` |
-| $\mu$ | Viscosité dynamique | $\text{Pa}\cdot\text{s} = \text{kg}\cdot\text{m}^{-1}\cdot\text{s}^{-1}$ | `fields.mu` | `fields%mu` |
-| $C$ | Fraction volumique de couleur (VOF) | Sans dimension | `fields.c` | `fields%c` |
-| $\mathbf{n}$ | Vecteur normal unitaire à l'interface | Sans dimension | `fields.nx`, `fields.ny` | `fields%nx`, `fields%ny` |
-| $\kappa$ | Courbure locale de l'interface | $\text{m}^{-1}$ | `fields.kappa` | `fields%kappa` |
-| $\sigma$ | Tension superficielle | $\text{N}\cdot\text{m}^{-1}$ | `config.sigma` | `cfg%sigma` |
-| $\mathbf{f}_\sigma$ | Force de tension superficielle CSF | $\text{N}\cdot\text{m}^{-3}$ | `fields.fx_surf`, `fields.fy_surf` | `fields%fx_surf`, `fields%fy_surf` |
-| $\chi_T$ | Compressibilité isotherme | $\text{Pa}^{-1} = \text{m}\cdot\text{s}^2\cdot\text{kg}^{-1}$ | `fields.chi_T` | `fields%chi_T` |
-| $r_{\text{al}}$ | Paramètre de pénalité Lagrangien | $\text{Pa}\cdot\text{s}\cdot\text{m}^{-1}$ | `config.r_al`, `fields.r_aal` | `cfg%r_al`, `fields%r_aal` |
-| $K$ | Perméabilité de Darcy | $\text{m}^2$ | `config.obs_perm` | `cfg%obs_perm` |
-| $T$ | Température absolue | $\text{K}$ | `fields.T` | `fields%T` |
-| $k_{\text{th}}$ | Conductivité thermique | $\text{W}\cdot\text{m}^{-1}\cdot\text{K}^{-1}$ | `fields.k_therm` | `fields%k_therm` |
-| $C_p$ | Capacité calorifique isobare | $\text{J}\cdot\text{kg}^{-1}\cdot\text{K}^{-1}$ | `fields.cp_therm` | `fields%cp_therm` |
-| $\beta$ | Dilatation thermique volumique | $\text{K}^{-1}$ | `config.beta_th` | `cfg%beta_th` |
-| $\mathbf{g}$ | Accélération de la pesanteur | $\text{m}\cdot\text{s}^{-2}$ | `config.gx`, `config.gy` | `cfg%gx`, `cfg%gy` |
-| $\Delta t$ | Pas de temps d'intégration | $\text{s}$ | `dt` | `dt` |
-| $\Delta x, \Delta y$ | Pas d'espace de la grille MAC | $\text{m}$ | `mesh.dx`, `mesh.dy` | `mesh%dx`, `mesh%dy` |
-| $N_x, N_y$ | Nombre de mailles de calcul locales | Entier | `mesh.nx_local`, `mesh.ny_local` | `mesh%nx_local`, `mesh%ny_local` |
+| $\mathbf{u} = (u,v)$ | Vitesse sur faces décalées MAC | $\text{m}\cdot\text{s}^{-1}$ | `fields.u`, `fields.v` | `fields%u`, `fields%v` |
+| $p, p^n$ | Pression cellulaire et état précédent | $\text{Pa}$ | `fields.p`, `fields.p_old` | `fields%p`, `fields%p_old` |
+| $C$ | Fraction volumique VOF raide | $-$ | `fields.C` | `fields%C` |
+| $C_s$ | Fraction volumique lissée SVOF (Helmholtz) | $-$ | `fields.C_s` | `fields%C_s` |
+| $\widetilde{C}$ | Fraction volumique diffusée pour CSF | $-$ | `fields.C_tilde` | `fields%C_tilde` |
+| $\rho, \rho_u, \rho_v$ | Masse volumique (centres et faces) | $\text{kg}\cdot\text{m}^{-3}$ | `fields.rho`, `fields.rho_u`, `fields.rho_v` | `fields%rho`, `fields%rho_u`, `fields%rho_v` |
+| $\mu, \mu_{\text{node}}$ | Viscosité dynamique (centres et nœuds) | $\text{Pa}\cdot\text{s}$ | `fields.mu`, `fields.mu_node` | `fields%mu`, `fields%mu_node` |
+| $\mathbf{n}, \kappa$ | Normale unitaire et courbure d'interface | $-, \text{m}^{-1}$ | `fields.norm_x`, `fields.norm_y`, `fields.kappa` | `fields%curvature` (et normales locales) |
+| $\mathbf{f}_\sigma$ | Force capillaire CSF aux faces | $\text{N}\cdot\text{m}^{-3}$ | `fields.F_sigma_x`, `fields.F_sigma_y` | `fields%fx_sigma`, `fields%fy_sigma` |
+| $(x_p, y_p, \mathbf{n}_p, \kappa_p)$ | Marqueur lagrangien non connecté | $\text{m}, -, \text{m}^{-1}$ | `tracker.markers.cloud[m]` (`Marker`) | `global_marker_cloud%list(m)` (`marker_t`) |
+| $\chi_T$ | Compressibilité isotherme | $\text{Pa}^{-1}$ | `fields.chi_T` | `fields%chi_T` |
+| $r_{\text{al}}, r(t, M)$ | Pénalité AL constante et champ local AAL | $\text{Pa}\cdot\text{s}$ | `config.solver.r_al`, `fields.r_aal` | `cfg%r_al`, `fields%r_aal` |
+| $T, C_p, k_{\text{th}}, \beta$ | Température et paramètres thermiques | $\text{K}, \text{J}/(\text{kg}\cdot\text{K}), \text{W}/(\text{m}\cdot\text{K}), \text{K}^{-1}$ | `fields.T`, `config.fluid1.Cp`, `config.fluid1.k_thermal`, `config.beta` | `fields%T`, `cfg%Cp`, `cfg%k_thermal`, `cfg%beta` |
+| $e, \rho e$ | Énergie totale spécifique et volumique | $\text{J}\cdot\text{kg}^{-1}, \text{J}\cdot\text{m}^{-3}$ | `fields.energy`, `fields.rho_e` | `fields%energy`, `fields%rho_e` |
+| $\mathcal{K}$ | Perméabilité de Darcy-Brinkman | $\text{m}^2$ | `config.obstacles[k].permeability` | `cfg%obs_perm` |
+| $\sigma, \mathbf{g}$ | Tension de surface et gravité | $\text{N}\cdot\text{m}^{-1}, \text{m}\cdot\text{s}^{-2}$ | `config.sigma`, `config.gx`, `config.gy` | `cfg%sigma`, `cfg%gx`, `cfg%gy` |
+| $\Delta x, \Delta y, \Delta t$ | Pas d'espace et pas de temps | $\text{m}, \text{s}$ | `mesh.dx`, `mesh.dy`, `dt` | `mesh%dx`, `mesh%dy`, `dt` |
 # Méthodes Numériques
 
 ## Discrétisation Spatiale sur Grille Cartésienne Décalée (MAC)
 
-Le solveur **COVOF 2D** utilise la discrétisation spatiale sur grille décalée dite *Marker-and-Cell* (MAC), introduite par Harlow et Welch (1965). Ce choix topologique fondamental est universellement reconnu en mécanique des fluides incompressibles pour ses propriétés mathématiques intrinsèques d'inf-sup stabilité (condition de Ladyzhenskaya-Babuška-Brezzi ou LBB discrète) et l'élimination naturelle des oscillations parasites en damier (*checkerboard oscillations*) de pression, sans requérir de dissipation artificielle ni de correction de Rhie-Chow.
+Le solveur **COVOF 2D** emploie la discrétisation par volumes finis sur grille cartésienne décalée dite *Marker-and-Cell* (MAC, Harlow & Welch 1965). Ce positionnement entrelacé des inconnues garantit la condition inf-sup (Ladyzhenskaya-Babuška-Brezzi discrète) et élimine intrinsèquement tout mode parasite en damier (*checkerboard*) sur la pression sans recourir à l'interpolation de Rhie-Chow ni à une stabilisation artificielle.
 
-### Positionnement Staggered des Variables Primordiales
+### Localisation des Variables Primordiales
 
-Le domaine de calcul bidimensionnel est pavé par un maillage régulier de pas $\Delta x$ et $\Delta y$. Les différentes grandeurs physiques sont localisées comme suit :
+Sur une grille uniforme de pas $\Delta x = L_x / N_x$ et $\Delta y = L_y / N_y$, les grandeurs sont stockées aux positions géométriques suivantes (indices locaux $i \in [1, N_{x,\text{loc}}]$, $j \in [1, N_{y,\text{loc}}]$ entourés d'une couche fantôme $0$ et $N+1$) :
 
 1. **Centres des cellules $(i, j)$ :**
-   - Pression hydrodynamique $p_{i, j}$
-   - Fraction volumique VOF $C_{i, j}$
-   - Masse volumique $\rho_{i, j}$ et viscosité dynamique cellulaire $\mu_{i, j}$
-   - Température scalaire $T_{i, j}$
-   - Paramètre adaptatif de pénalité de Lagrangien augmenté $r_{i, j}$
-   - Compressibilité isotherme $\chi_{T, i, j}$
+   Pression $p_{i,j}$, fraction volumique VOF $C_{i,j}$, versions régularisées $C_{s,i,j}$ et $\widetilde{C}_{i,j}$, masse volumique $\rho_{i,j}$, viscosité $\mu_{i,j}$, température $T_{i,j}$, énergie totale $e_{i,j}$ et $\rho e_{i,j}$, compressibilité $\chi_{T,i,j}$, paramètre AAL $r_{\text{aal},i,j}$, courbure $\kappa_{i,j}$ et normale $\mathbf{n}_{i,j}$.
+2. **Faces verticales $(i - \frac{1}{2}, j)$ (notées `u(i, j)` dans le code, face Ouest de la cellule $(i,j)$) :**
+   Vitesse horizontale $u_{i,j}$, masse volumique de face $\rho_{u,i,j}$, force capillaire horizontale $F_{\sigma, x, i, j}$, quantité de mouvement intermédiaire $(\rho u)^*_{i,j}$.
+3. **Faces horizontales $(i, j - \frac{1}{2})$ (notées `v(i, j)` dans le code, face Sud de la cellule $(i,j)$) :**
+   Vitesse verticale $v_{i,j}$, masse volumique de face $\rho_{v,i,j}$, force capillaire verticale $F_{\sigma, y, i, j}$, flottabilité de Boussinesq et quantité de mouvement intermédiaire $(\rho v)^*_{i,j}$.
+4. **Sommets / Nœuds $(i - \frac{1}{2}, j - \frac{1}{2})$ (notés `mu_node(i, j)` dans le code) :**
+   Viscosité harmonique nodale $\mu_{\text{node}, i, j}$ utilisée pour discrétiser les dérivées croisées de cisaillement $\mu(\partial_y u + \partial_x v)$.
 
-2. **Faces verticales (Normales à $x$) $(i + \frac{1}{2}, j)$ :**
-   - Composante horizontale de la vitesse $u_{i+1/2, j}$
-   - Masse volumique transportée aux faces $\rho_{u, i+1/2, j}$
-   - Force volumique superficielle horizontale $f_{\sigma, x, i+1/2, j}$
-
-3. **Faces horizontales (Normales à $y$) $(i, j + \frac{1}{2})$ :**
-   - Composante verticale de la vitesse $v_{i, j+1/2}$
-   - Masse volumique transportée aux faces $\rho_{v, i, j+1/2}$
-   - Force volumique superficielle verticale $f_{\sigma, y, i, j+1/2}$
-   - Terme de flottabilité thermique de Boussinesq $f_{\text{boussinesq}, y, i, j+1/2}$
-
-4. **Sommets / Nœuds de coin $(i + \frac{1}{2}, j + \frac{1}{2})$ :**
-   - Viscosité dynamique harmonique nodale $\mu_{i+1/2, j+1/2}$
-   - Taux de déformation croisé $\left( \frac{\partial u}{\partial y} + \frac{\partial v}{\partial x} \right)$
-   - Contrainte de cisaillement visqueuse $\tau_{xy, i+1/2, j+1/2}$
-
-```
-               (i, j+1)
-                  |
-        +---------v---------+
-        |                   |
-        |      p(i, j)      |
-   u    |      C(i, j)      |    u
-(i-1/2,j)----> T(i, j)     ----> (i+1/2, j)
-        |     rho(i, j)     |
-        |                   |
-        +---------^---------+
-                  |
-                (i, j)
-              v(i, j-1/2)
+```text
+                       v(i, j+1)  [face Nord de (i,j)]
+                 +---------^---------+
+                 |                   |
+                 |  p(i,j), C(i,j)   |
+      u(i, j)  ---->  rho, mu, T   ---->  u(i+1, j)
+   [face Ouest]  |  kappa, chi_T     |  [face Est]
+                 |                   |
+                 +---------^---------+
+                       v(i, j)    [face Sud de (i,j)]
+     mu_node(i, j) au coin Sud-Ouest (i-1/2, j-1/2)
 ```
 
-### Gradients Discrets et Conservation de la Divergence
+### Dualité Divergence-Gradient sur Grille MAC
 
-Sur la grille MAC, l'opérateur de divergence discrète de la vitesse $(\nabla \cdot \mathbf{u})_{i, j}$ au centre de la cellule $(i, j)$ s'écrit de manière compacte et exacte au second ordre :
+Avec cette convention d'indiçage exacte du code (`u(i,j)` à gauche et `u(i+1,j)` à droite de la cellule `(i,j)`), la divergence discrète $(\nabla_h \cdot \mathbf{u})_{i,j}$ et le gradient de pression s'écrivent :
 
-$$(\nabla \cdot \mathbf{u})_{i, j} = \frac{u_{i+1/2, j} - u_{i-1/2, j}}{\Delta x} + \frac{v_{i, j+1/2} - v_{i, j-1/2}}{\Delta y}$$
+$$(\nabla_h \cdot \mathbf{u})_{i,j} = \frac{u_{i+1,j} - u_{i,j}}{\Delta x} + \frac{v_{i,j+1} - v_{i,j}}{\Delta y}$$
 
-Réciproquement, les composantes du gradient de pression agissant respectivement sur les équations de quantité de mouvement en $u$ et en $v$ s'évaluent sans aucune interpolation :
+$$\left(\frac{\partial p}{\partial x}\right)_{i,j} = \frac{p_{i,j} - p_{i-1,j}}{\Delta x} \quad (\text{sur face } u_{i,j}), \qquad \left(\frac{\partial p}{\partial y}\right)_{i,j} = \frac{p_{i,j} - p_{i,j-1}}{\Delta y} \quad (\text{sur face } v_{i,j})$$
 
-$$\left( \frac{\partial p}{\partial x} \right)_{i+1/2, j} = \frac{p_{i+1, j} - p_{i, j}}{\Delta x}, \quad \left( \frac{\partial p}{\partial y} \right)_{i, j+1/2} = \frac{p_{i, j+1} - p_{i, j}}{\Delta y}$$
-
-Cette dualité adjointe parfaite assure que le gradient discret $B^T$ est l'opposé exact de l'adjoint de l'opérateur de divergence discrète $B$, conférant au système de Stokes une structure point-selle symétrique parfaite.
+Cette dualité adjointe ($\mathbf{D} = -\mathbf{G}^T$ à un facteur volumique $\Delta x \Delta y$ près) assure la symétrie parfaite de la matrice de Stokes et l'annulation exacte de la divergence dans les solveurs monolithiques et AAL.
 
 ---
 
-## Schémas d'Advection et Linéarisations Convectives
+## Schémas Convectifs et Linéarisations de l'Inertie
 
-Le terme d'advection non linéaire $(\mathbf{u} \cdot \nabla) \mathbf{u}$ dans les équations de quantité de mouvement représente le couplage cinématique d'inertie. COVOF 2D met à disposition quatre formulations sélectionnables par la clé `convective_linearization` dans le fichier JSON.
+Le traitement du terme non linéaire $(\mathbf{u} \cdot \nabla)\mathbf{u}$ est configuré par deux clés complémentaires dans `physics` (ou au niveau racine) :
+- `physics.convective_scheme` : `"UPWIND"`, `"CENTERED"`, `"TVD_SUPERBEE"`.
+- `physics.convective_linearization` : `"PICARD"`, `"ADAMS_BASHFORTH"` (alias `"AB2"`), `"NEWTON"`.
 
-### Schéma Décentré Amont d'Ordre 1 (`UPWIND`)
+### Schémas Spatiaux (`convective_scheme`)
 
-Le schéma décentré amont utilise le sens de propagation de l'écoulement pour évaluer la vitesse sur les faces de contrôle :
+1. **Décentré Amont d'Ordre 1 (`"UPWIND"`) :**
+   Inconditionnellement stable et monotone même à grand nombre de Reynolds de maille $Re_\Delta > 2$, au prix d'une diffusion numérique $\mathcal{O}(\Delta x)$.
+2. **Centré d'Ordre 2 (`"CENTERED"`) :**
+   Évalue les vitesses aux faces par moyenne arithmétique symétrique, atteignant l'ordre $\mathcal{O}(\Delta x^2)$ sans dissipation artificielle, idéal pour la DNS lorsque $Re_\Delta \le 2$.
+3. **Haute Résolution TVD (`"TVD_SUPERBEE"`) :**
+   Combine la précision d'ordre 2 dans les zones régulières et le limiteur non linéaire Superbee près des gradients raides.
 
-$$\left( u \frac{\partial u}{\partial x} \right)_{i+1/2, j} \approx \begin{cases} u_{i+1/2, j} \frac{u_{i+1/2, j} - u_{i-1/2, j}}{\Delta x} & \text{si } u_{i+1/2, j} \ge 0 \\ u_{i+1/2, j} \frac{u_{i+3/2, j} - u_{i+1/2, j}}{\Delta x} & \text{si } u_{i+1/2, j} < 0 \end{cases}$$
+### Linéarisations Temporelles du Terme Convectif (`convective_linearization`)
 
-- **Avantages :** Stabilité inconditionnelle, positivité stricte, absence d'oscillations numériques parasites même à très haut nombre de Reynolds de maille $Re_{\Delta} = \frac{\rho U \Delta x}{\mu} > 2$.
-- **Inconvénients :** Diffusion numérique artificielle d'ordre 1 proportionnelle à $\frac{u \Delta x}{2}$, tronquant les tourbillons fins.
-
-### Schéma Centré d'Ordre 2 (`CENTERED`)
-
-Le schéma centré calcule la moyenne arithmétique de la vitesse aux interfaces de chaque volume de contrôle :
-
-$$\left( u \frac{\partial u}{\partial x} \right)_{i+1/2, j} \approx \frac{1}{\Delta x} \left[ \left(\frac{u_{i+1/2, j} + u_{i+3/2, j}}{2}\right)^2 - \left(\frac{u_{i-1/2, j} + u_{i+1/2, j}}{2}\right)^2 \right]$$
-
-- **Avantages :** Précision spatiale rigoureusement d'ordre 2 $\mathcal{O}(\Delta x^2, \Delta y^2)$, aucune diffusion numérique artificielle, conservation stricte de l'énergie cinétique globale.
-- **Précautions :** Peut générer des oscillations de dispersion lorsque $Re_{\Delta} > 2$, nécessitant un maillage suffisamment résolu.
-
-### Linéarisation Complète de Newton (`NEWTON`)
-
-Pour les simulations monolithiques stationnaires ou à grands pas de temps, COVOF 2D dispose d'une linéarisation complète de Newton-Raphson de l'opérateur convectif :
-
-$$\mathbf{u}^{n+1} = \mathbf{u}^* + \delta \mathbf{u}$$
-
-$$(\mathbf{u}^{n+1} \cdot \nabla) \mathbf{u}^{n+1} \approx (\mathbf{u}^* \cdot \nabla) \delta \mathbf{u} + (\delta \mathbf{u} \cdot \nabla) \mathbf{u}^* + (\mathbf{u}^* \cdot \nabla) \mathbf{u}^*$$
-
-Cette formulation introduit les dérivées croisées $\frac{\partial u}{\partial x}$, $\frac{\partial u}{\partial y}$, $\frac{\partial v}{\partial x}$, $\frac{\partial v}{\partial y}$ dans la matrice jacobienne du système linéaire, garantissant un taux de convergence asymptotique **quadratique** indispensable pour la convergence rapide des solveurs de Krylov couplés.
-
-### Schéma d'Adams-Bashforth d'Ordre 2 (`ADAMS_BASHFORTH` / `AB2`)
-
-Dans ce schéma, la vitesse advectante est extrapolée explicitement à partir des deux pas de temps antérieurs $(n)$ et $(n-1)$ :
-
-$$\mathbf{u}_{\text{adv}} = \frac{3}{2}\mathbf{u}^n - \frac{1}{2}\mathbf{u}^{n-1}$$
-
-L'équation en vitesse devient alors un problème linéaire à coefficients constants durant le pas de temps, découplant l'advection du problème de diffusion-continuité.
+1. **Linéarisation de Picard (`"PICARD"`, défaut) :**
+   La vitesse advectante est figée au pas connu $\mathbf{u}^n$ : $(\mathbf{u}^n \cdot \nabla)\mathbf{u}^{n+1}$. Simple et robuste, précise à l'ordre 1 en temps sur l'advection.
+2. **Extrapolation d'Adams-Bashforth d'Ordre 2 (`"ADAMS_BASHFORTH"` / `"AB2"`) :**
+   Lorsque l'historique $\mathbf{u}^{n-1}$ est disponible (`fields.has_nm1 == true`), la vitesse advectrice est extrapolée à l'ordre 2 selon l'Équation 10 de *Fluids* 2021 :
+   $$\mathbf{u}_{\text{adv}} = 2 \mathbf{u}^n - \mathbf{u}^{n-1} \quad \text{ou} \quad \text{flux extrapolés } \frac{3}{2}\mathcal{C}(\mathbf{u}^n) - \frac{1}{2}\mathcal{C}(\mathbf{u}^{n-1})$$
+   préservant la linéarité du système implicite tout en atteignant l'ordre 2 temporel.
+3. **Linéarisation Complète de Newton (`"NEWTON"`) :**
+   Inclut le terme jacobien croisé $(\delta \mathbf{u} \cdot \nabla)\mathbf{u}^n$ en plus de $(\mathbf{u}^n \cdot \nabla)\mathbf{u}^{n+1}$ dans l'opérateur matriciel `apply_system_matrix` (et le terme quadratique $-(\mathbf{u}^n \cdot \nabla)\mathbf{u}^n$ au second membre `assemble_rhs`), accélérant la convergence sur les écoulements stationnaires ou à grands pas de temps.
 
 ---
 
-## Discrétisation Temporelle et Stabilité
+## Discrétisation Temporelle et Pas de Temps Adaptatif
 
-Le choix de l'algorithme d'avancement en temps est piloté par la clé `time.scheme` dans le fichier de configuration.
+### Schémas Temporels Implémentés (`time.time_scheme`)
 
-### Schémas Temporels Implémentés
+1. **Euler Implicite d'Ordre 1 (`"EULER"`, défaut) :**
+   $$\frac{\mathbf{u}^{n+1} - \mathbf{u}^n}{\Delta t}, \qquad \alpha_{\text{time}} = 1.0$$
+2. **Schéma de Gear / BDF2 d'Ordre 2 (`"GEAR"` ou `"BDF2"`) :**
+   Dès le pas 2 (`fields.has_nm1 == true`), le terme instationnaire utilise la formule rétrograde d'ordre 2 à 3 niveaux temporels :
+   $$\frac{3 \mathbf{u}^{n+1} - 4 \mathbf{u}^n + \mathbf{u}^{n-1}}{2 \Delta t}, \qquad \alpha_{\text{time}} = 1.5$$
+   (avec amorçage automatique par Euler implicite $\alpha_{\text{time}} = 1.0$ au pas 1).
+3. **Transport Inertiel Conservatif `SSP-RK3` (`physics.enable_ssp_rk3_momentum = true`) :**
+   Activé automatiquement lorsque `compressible = true` (ou manuellement), un schéma de Runge-Kutta TVD à 3 étages transporte la quantité de mouvement $(\rho u, \rho v)$ de façon conservative avant l'étape de couplage vitesse-pression (étape 1 de *Fluids* 2024).
 
-1. **Euler Explicite d'Ordre 1 (`EULER_EXPLICIT`) :**
-   $$\frac{\mathbf{u}^{n+1} - \mathbf{u}^n}{\Delta t} = \mathbf{F}(\mathbf{u}^n)$$
-   Utilisé principalement pour la vérification numérique ou les régimes purement dominés par la convection avec CFL strict.
+### Pas de Temps Adaptatif (`time.adaptive_dt = true`)
 
-2. **Schéma de Gear / BDF2 d'Ordre 2 (`GEAR` / `BDF2`) :**
-   Schéma à trois pas de temps implicite, inconditionnellement stable pour les termes linéaires :
-   $$\frac{3 \mathbf{u}^{n+1} - 4 \mathbf{u}^n + \mathbf{u}^{n-1}}{2 \Delta t} = \mathbf{F}(\mathbf{u}^{n+1})$$
-   Dans COVOF 2D, le coefficient $\alpha_{\text{time}}$ est automatiquement basculé à $1.5$ dès que l'historique temporel $\mathbf{u}^{n-1}$ (`fields.has_nm1`) est disponible, avec repli sur Euler implicite ($\alpha_{\text{time}} = 1.0$) lors du tout premier pas de temps.
+À chaque itération, `Simulation::compute_time_step()` (`sim_compute_time_step` en Fortran) évalue la vitesse maximale globale $U_{\max} = \max_{i,j} \sqrt{|u_{i,j}|^2 + |v_{i,j}|^2}$ via `MPI_Allreduce(..., MPI_MAX)` et borne le pas de temps par :
 
-3. **Runge-Kutta à Préservation de Stabilité Forte (`SSP_RK3`) :**
-   Schéma d'ordre 3 en trois sous-étapes pour l'advection conservative conjointe de la masse et de la quantité de mouvement (modèle Consistent Mass-Momentum d'El Ouafa et al., *Fluids* 2021) :
-   $$\mathbf{u}^{(1)} = \mathbf{u}^n + \Delta t \mathcal{L}(\mathbf{u}^n)$$
-   $$\mathbf{u}^{(2)} = \frac{3}{4}\mathbf{u}^n + \frac{1}{4}\mathbf{u}^{(1)} + \frac{1}{4}\Delta t \mathcal{L}(\mathbf{u}^{(1)})$$
-   $$\mathbf{u}^{n+1} = \frac{1}{3}\mathbf{u}^n + \frac{2}{3}\mathbf{u}^{(2)} + \frac{2}{3}\Delta t \mathcal{L}(\mathbf{u}^{(2)})$$
+$$\Delta t_{\text{CFL}} = \text{CFL}_{\max} \frac{\min(\Delta x, \Delta y)}{\max(U_{\max}, 10^{-6})}$$
 
-### Critères de Stabilité et Pas de Temps Adaptatif (CFL)
+$$\Delta t_{\sigma} = \begin{cases} \sqrt{\frac{(\rho_1 + \rho_2) \, \min(\Delta x, \Delta y)^3}{4 \pi \sigma}} & \text{si } \text{enable\_surface\_tension} \text{ et } \sigma > 0 \\ +\infty & \text{sinon} \end{cases}$$
 
-Lorsque `time.adaptative_dt` est activé, COVOF 2D recalcule à chaque itération le pas de temps maximal admissible $\Delta t$ sous la triple contrainte de Courant-Friedrichs-Lewy (CFL) :
+$$\Delta t = \min\left(\Delta t_{\text{init}}, \, \Delta t_{\text{CFL}}, \, \Delta t_{\sigma}\right)$$
 
-1. **Condition CFL Convective :**
-   $$\Delta t_{\text{conv}} = \text{CFL} \cdot \left[ \max_{i, j} \left( \frac{|u_{i+1/2, j}|}{\Delta x} + \frac{|v_{i, j+1/2}|}{\Delta y} \right) \right]^{-1}$$
+où $\Delta t_{\text{init}}$ est `time.dt` et $\text{CFL}_{\max}$ est `time.cfl_max` (le pas est également tronqué sur le dernier pas pour atteindre exactement `time.t_final`).
 
-2. **Condition CFL Diffusive Visqueuse (pour intégration explicite) :**
-   $$\Delta t_{\text{diff}} = \frac{1}{2} \min_{i, j} \left( \frac{\rho_{i, j}}{\mu_{i, j}} \right) \left[ \frac{1}{\Delta x^2} + \frac{1}{\Delta y^2} \right]^{-1}$$
+---
 
-3. **Condition Capillaire d'Ondes de Surface (Brackbill et al. 1992) :**
-   $$\Delta t_{\text{cap}} = \sqrt{\frac{(\rho_1 + \rho_2) \min(\Delta x, \Delta y)^3}{4 \pi \sigma}}$$
+## Suivi d'Interface VOF et Méthode Hybride FC-WY-CVI-Marker
 
-Le pas de temps effectif retenu est :
-$$\Delta t^{n+1} = \min \left( \Delta t_{\text{max}}, \Delta t_{\text{conv}}, \Delta t_{\text{diff}}, \Delta t_{\text{cap}} \right)$$
+### Reconstruction Géométrique et Advection VOF (`vof.*`)
+
+Le module `InterfaceTracker` (`module_interface_vof` en Fortran) met à disposition deux familles d'advection de la fraction volumique $C$ :
+
+1. **Schémas géométriques (`"WEYMOUTH_YUE"` par défaut, et `"CIAM"`) :**
+   - Couplés aux algorithmes de reconstruction affine $n_x x + n_y y + \alpha = 0$ : `"PLIC"` (Youngs), `"ELVIRA"` (6 candidats de fonctions de hauteur, ordre 2 exact sur droites), `"LVIRA"` (moindres carrés non linéaires sur $3\times 3$) ou `"SLIC"`.
+   - **Schéma conservatif de Weymouth & Yue (2010)** avec splitting alterné de Strang (X puis Y aux pas pairs, Y puis X aux pas impairs) : fixe l'indicatrice binaire de dilatation $C_{d,i,j} = \mathbf{1}_{C_{i,j}^n \ge 0.5}$ au début du pas et transporte :
+     $$C_{i,j}^* = C_{i,j}^n - \frac{\Delta V_{i+1,j}^x - \Delta V_{i,j}^x}{\Delta x \Delta y} + C_{d,i,j} \frac{\Delta t}{\Delta x}(u_{i+1,j}^{n+1} - u_{i,j}^{n+1})$$
+     $$C_{i,j}^{n+1} = C_{i,j}^* - \frac{\Delta V_{i,j+1}^y - \Delta V_{i,j}^y}{\Delta x \Delta y} + C_{d,i,j} \frac{\Delta t}{\Delta y}(v_{i,j+1}^{n+1} - v_{i,j}^{n+1})$$
+     où $\Delta V$ est calculé exactement par découpe géométrique Sutherland-Hodgman + Shoelace (`cut_box_area`). Sous $\text{CFL}_{\text{vof}} < 0.5$ et $\nabla_h \cdot \mathbf{u}^{n+1} = 0$, la somme des flux télescope et **conserve le volume à la précision du solveur linéaire**.
+2. **Schéma algébrique (`"VOF_TVD"` / `"TVD"`) :**
+   Sans reconstruction géométrique (`reconstruction_method` forcée à `"NONE"`), piloté par les limiteurs `"SUPERBEE"`, `"VAN_LEER"`, `"MUSCL"` ou `"HRIC"`.
+
+### Méthode Hybride FC-WY-CVI-Marker (Variante B Exacte sur Boîtes MAC Décalées)
+
+Lorsqu'on active `vof.use_markers = true` (ou `markers.enabled = true`), COVOF 2D associe au transport VOF-WY un **nuage de marqueurs lagrangiens non connectés** (`InterfaceMarkers` / `module_markers`) sans arêtes ni maillage surfacique, totalement insensible aux ruptures et coalescences.
+
+#### 1. Interpolation Conservative de la Vitesse (CVI — Variante B exacte)
+Selon le théorème de Liouville, l'interpolation bilinéaire standard sur grille MAC produit une divergence continue non nulle d'ordre $\mathcal{O}(h)$ qui crée des amas artificiels de marqueurs. COVOF 2D implémente la **Variante B exacte de Wang et al. (2015) / Pusok et al. (2017)** (`interpolate_velocity_cvi`) en interpolant chaque composante sur **sa propre boîte décalée MAC** :
+- Boîte pour $u$ : $\Omega_u(i, j_u) = [x_i^f, x_{i+1}^f] \times [y_{j_u}^c, y_{j_u+1}^c]$ avec $j_u = j - 1$ si $y_p < y_j^c$ sinon $j$, et coordonnées réduites $(\xi_u, \eta_u) \in [0, 1]^2$.
+- Boîte pour $v$ : $\Omega_v(i_v, j) = [x_{i_v}^c, x_{i_v+1}^c] \times [y_j^f, y_{j+1}^f]$ avec $i_v = i - 1$ si $x_p < x_i^c$ sinon $i$, et coordonnées réduites $(\xi_v, \eta_v) \in [0, 1]^2$.
+- Formule CVI exacte avec corrections quadratiques solénoïdales ($\Delta v_E = v_{i_v+1,j+1} - v_{i_v+1,j}$, $\Delta v_W = v_{i_v,j+1} - v_{i_v,j}$, $\Delta u_N = u_{i+1,j_u+1} - u_{i,j_u+1}$, $\Delta u_S = u_{i+1,j_u} - u_{i,j_u}$) :
+  $$u_{\text{CVI}}(x_p, y_p) = u_{\text{bilin}}(\xi_u, \eta_u) + \frac{\Delta x}{2 \Delta y} \, \xi_u (1 - \xi_u) (\Delta v_E - \Delta v_W)$$
+  $$v_{\text{CVI}}(x_p, y_p) = v_{\text{bilin}}(\xi_v, \eta_v) + \frac{\Delta y}{2 \Delta x} \, \eta_v (1 - \eta_v) (\Delta u_N - \Delta u_S)$$
+En dérivant analytiquement dans chacun des 4 sous-quadrants de $(i, j)$, tous les termes linéaires croisés s'annulent identiquement :
+$$\frac{\partial u_{\text{CVI}}}{\partial x} + \frac{\partial v_{\text{CVI}}}{\partial y} \equiv \frac{u_{i+1,j} - u_{i,j}}{\Delta x} + \frac{v_{i,j+1} - v_{i,j}}{\Delta y} = D_{i,j}$$
+tout en restant strictement dans la couche unique de halo `(0:nx+1, 0:ny+1)`. *(L'option `marker_advection_scheme = "BILINEAR_RK2"` permet de désactiver la correction quadratique à des fins d'étude comparative).*
+
+#### 2. Advection RK2-Heun, Migration MPI, Élagage et Courbure Parabolique
+À l'intérieur de `InterfaceTracker::advect` (`advect_vof`), juste après l'advection VOF et le lissage SVOF/diffusif et juste avant `compute_curvature_and_CSF` :
+1. **Advection RK2-Heun (`advect_rk2` / `advect_markers_rk2`) :** Prédit $\mathbf{x}_p^* = \mathbf{x}_p^n + \Delta t \, \mathbf{u}_{\text{CVI}}(\mathbf{x}_p^n; \mathbf{u}^n)$, effectue si nécessaire un routage MPI aller-retour à 4 passes pour évaluer $\mathbf{u}_{\text{CVI}}(\mathbf{x}_p^*; \mathbf{u}^{n+1})$ sur le rang propriétaire, puis corrige $\mathbf{x}_p^{n+1} = \mathbf{x}_p^n + \frac{\Delta t}{2}[\mathbf{u}_1 + \mathbf{u}_2]$.
+2. **Migration MPI en 2 passes (`migrate_mpi` / `migrate_markers_mpi`) :** Passe X (Ouest $\leftrightarrow$ Est avec repliement périodique éventuel) puis Passe Y (Sud $\leftrightarrow$ Nord) sans nécessiter de voisins diagonaux.
+3. **Élagage et ré-ensemencement sélectif (`prune_and_reseed`) :**
+   - Supprime les marqueurs tombés en phase pure ($C < 10^{-6}$ ou $C > 1 - 10^{-6}$ dans le voisinage $3\times 3$) et élague par sous-octants si une cellule dépasse `marker_max_per_cell` (défaut `8`).
+   - Ensemence uniquement les cellules interfaciales dépeuplées ($N_p = 0$) avec `markers_per_cell` marqueurs (défaut `4`) sans jamais écraser ni projeter les marqueurs actifs existants.
+4. **Courbure et normale dans le repère tourné $(\tau, \eta)$ (`compute_curvature_from_markers`) :**
+   - Échange les marqueurs fantômes dans une bande $2.5 h$ entre rangs MPI.
+   - Filtre les marqueurs voisins par proximité et cohérence angulaire $\mathbf{n}_p \cdot \mathbf{n}_{i,j}^{\text{ref}} \ge 0.5$ (protégeant les filaments et jupes minces contre le mélange des faces opposées).
+   - Ajuste une parabole pondérée $\eta(\tau) = a \tau^2 + b \tau + c$ par moindres carrés $3\times 3$ :
+     $$\mathbf{n}_{i,j}^{\text{marker}} = \frac{\mathbf{e}_\eta - b \mathbf{e}_\tau}{\sqrt{1 + b^2}}, \qquad \kappa_{i,j}^{\text{marker}} = \frac{2a}{(1 + b^2)^{3/2}}$$
+     avec écrêtage Nyquist $|\kappa| \le 2/\min(\Delta x, \Delta y)$, passe conservative de lissage tangentiel et repli sur la courbure CSF si $M < 4$.
+   - Si `marker_normals_plic = true`, injecte $\mathbf{n}^{\text{marker}}$ (sous réserve de cohérence angulaire $\ge 0.5$ avec le gradient VOF) dans les segments PLIC pour l'étape suivante (`apply_marker_normals_to_segments`).
 
 ---
 
 ## Formulations du Couplage Vitesse-Pression
 
-Le traitement de la contrainte d'incompressibilité $\nabla \cdot \mathbf{u} = 0$ constitue le cœur algorithmique de tout solveur Navier-Stokes. COVOF 2D intègre cinq formulations majeures.
+COVOF 2D propose cinq formulations pilotées par `solver.type` :
 
-### 1. Lagrangien Augmenté Standard (`AUGMENTED_LAGRANGIAN`)
+### 1. Lagrangien Augmenté Standard (`"AUGMENTED_LAGRANGIAN"`, défaut)
+Ajoute le terme de pénalité $-r_{\text{al}} \nabla(\nabla \cdot \mathbf{u}^{k+1})$ à l'équation de quantité de mouvement avec un scalaire uniforme `solver.r_al`, puis actualise la pression par boucle d'Uzawa (`solver.uzawa_iter`) :
 
-La méthode du Lagrangien Augmenté (Fortin & Glowinski, 1982 ; Caltagirone & Breil, 1999) pénalise l'équation de quantité de mouvement par la divergence de la vitesse tout en conservant le gradient de pression :
+$$p^{k+1} = p^k - r_{\text{al}} (\nabla_h \cdot \mathbf{u}^{k+1})$$
 
-$$\rho \left( \frac{\alpha_{\text{time}} \mathbf{u}^{k+1}}{\Delta t} + (\mathbf{u}^n \cdot \nabla)\mathbf{u}^{k+1} \right) - \nabla \cdot \boldsymbol{\tau}^{k+1} - r \nabla(\nabla \cdot \mathbf{u}^{k+1}) = -\nabla p^k + \mathbf{f}$$
+avec arrêt anticipé dès que $\|\nabla_h \cdot \mathbf{u}^{k+1}\|_\infty \le \text{uzawa\_tol}$.
 
-où $r$ est un paramètre scalaire uniforme de pénalité de Lagrangien augmenté ($r \sim 10^2 - 10^4\,\text{Pa}\cdot\text{s}\cdot\text{m}^{-1}$, configuré via `solver.r_al`). La pression est ensuite réactualisée par une étape d'Uzawa :
+### 2. Lagrangien Augmenté Adaptatif Incompressible (`"AAL"` / `"ADAPTATIVE_AUGMENTED_LAGRANGIAN"`)
+Détermine cellule par cellule le paramètre optimal $r(t, M)$ (Vincent et al., *Computers & Fluids* 33, 2004, Éq. 14) en pondérant les sept échelles physiques locales par `solver.k_aal` ($K_{\text{aal}} \in [10, 1000]$, défaut `100.0`) :
 
-$$p^{k+1} = p^k - r \nabla \cdot \mathbf{u}^{k+1}$$
+$$r_{i,j} = K_{\text{aal}} \max\left( \alpha_{\text{time}}\rho \frac{L_0^2}{t_0}, \; \rho u_0 L_0, \; \rho \frac{L_0^2}{u_0}\|\mathbf{g}\|, \; \frac{p_0 L_0}{u_0}, \; \mu, \; \mu \frac{\Delta x \Delta y}{\mathcal{K}}, \; \frac{\sigma}{u_0} \right)$$
 
-Si `solver.uzawa_iter = 1`, la méthode se comporte comme un pseudo-pas fractionnaire très rapide. Si `solver.uzawa_iter > 1`, une boucle itérative d'Uzawa est exécutée jusqu'à ce que $\|\nabla \cdot \mathbf{u}^{k+1}\|_\infty \le \epsilon_{\text{uzawa}}$ (`solver.uzawa_tol`), assurant une divergence rigoureusement nulle au pas de temps $n+1$.
+Les échelles de référence (`l0_ref`, `t0_ref`, `u0_ref`, `p0_ref`) sont calculées automatiquement si laissées à `0.0`.
 
-### 2. Lagrangien Augmenté Adaptatif Incompressible (`AAL`)
+### 3. Lagrangien Augmenté Compressible Bas-Mach (`"C-AAL"` / `"CAAL"`)
+Active automatiquement `compressible = true` et `adaptative_al = true`. Régularise la pénalité dans les zones compressibles ($\chi_T > 0$) et actualise la pression selon la contrainte barotrope :
 
-Dans les écoulements diphasiques présentant de forts contrastes de masse volumique ($\rho_1/\rho_2 \ge 10^3$) et de viscosité ($\mu_1/\mu_2 \ge 10^2$), une valeur scalaire uniforme de $r$ dégrade considérablement le conditionnement du système linéaire. La méthode AAL (*Adaptative Augmented Lagrangian*, Vincent et al., *Computers & Fluids* 2004) détermine automatiquement un champ local de pénalité $r(t, \mathbf{x})$ cellule par cellule :
+$$r_{\text{eff}, i,j} = \frac{r_{i,j}}{1 + r_{i,j} \frac{\chi_{T,i,j}}{\Delta t}}, \qquad p_{i,j}^{k+1} = p_{i,j}^k - r_{\text{eff}, i,j} \left[ (\nabla_h \cdot \mathbf{u}^{k+1})_{i,j} + \frac{\chi_{T,i,j}}{\Delta t}(p_{i,j}^k - p_{i,j}^n) \right]$$
 
-$$r_{i, j} = K_{\text{aal}} \cdot \max \left( \tau_{\text{instat}}, \tau_{\text{inert}}, \tau_{\text{grav}}, \tau_{\text{pres}}, \tau_{\text{visc}}, \tau_{\text{cap}}, \tau_{\text{brink}} \right)$$
+### 4. Résolution Monolithique Tout-Couplé (`"MONOLITHIC"` / `"FULLY_COUPLED"` / `"FC"`)
+Assemble simultanément la vitesse et la pression dans le système point-selle sans pénalité ($r = 0$) :
 
-où les temps caractéristiques physiques sont construits à partir des échelles globales du problème :
-- Terme instationnaire : $\tau_{\text{instat}} = \alpha_{\text{time}} \rho_{i, j} \frac{L_0^2}{t_0}$
-- Terme inertiel : $\tau_{\text{inert}} = \rho_{i, j} u_0 L_0$
-- Terme gravitationnel : $\tau_{\text{grav}} = \rho_{i, j} \frac{L_0^2}{u_0} \|\mathbf{g}\|$
-- Terme de pression : $\tau_{\text{pres}} = \frac{p_0 L_0}{u_0}$
-- Terme visqueux : $\tau_{\text{visc}} = \mu_{i, j}$
-- Terme capillaire : $\tau_{\text{cap}} = \frac{\sigma}{u_0}$
-- Terme de Brinkman : $\tau_{\text{brink}} = \mu_{i, j} \frac{\Delta x \Delta y}{\mathcal{K}_{i, j}}$
+$$\begin{pmatrix} \mathbf{A}_u & \mathbf{A}_{uv} & \mathbf{G}_x \\ \mathbf{A}_{vu} & \mathbf{A}_v & \mathbf{G}_y \\ \mathbf{D}_x & \mathbf{D}_y & -\mathbf{C}_p \end{pmatrix} \begin{pmatrix} \mathbf{u}^{n+1} \\ \mathbf{v}^{n+1} \\ \mathbf{p}^{n+1} \end{pmatrix} = \begin{pmatrix} \mathbf{f}_u \\ \mathbf{f}_v \\ \mathbf{g}_p \end{pmatrix}$$
 
-Ce préconditionnement physique optimal assure une convergence quasi insensible aux sauts de propriétés interfaciales.
+où $\mathbf{C}_p = \text{diag}(\chi_T \Delta x \Delta y / \Delta t)$ en compressible ($\mathbf{0}$ en incompressible). La ligne de continuité n'étant pas divisée par $\rho$, ce système garantit une divergence discrète à la tolérance linéaire `solver.tol` (typiquement $10^{-10}$) quel que soit le saut $\rho_1 / \rho_2$.
 
-### 3. Lagrangien Augmenté Compressible Bas-Mach (`C-AAL`)
-
-Pour les régimes compressibles bas-Mach (`solver.type = "C-AAL"`), le terme de compressibilité isotherme $\chi_T = \frac{1}{\rho c_s^2}$ modifie la contrainte de fermeture. Le paramètre adaptatif de pénalité est régularisé selon :
-
-$$r_{\text{eff}, i, j} = \frac{r_{\text{AAL}, i, j}}{1 + r_{\text{AAL}, i, j} \frac{\chi_{T, i, j}}{\Delta t}}$$
-
-et la mise à jour d'Uzawa devient :
-
-$$p^{k+1}_{i, j} = p^k_{i, j} - r_{\text{eff}, i, j} \left[ (\nabla \cdot \mathbf{u}^{k+1})_{i, j} + \frac{\chi_{T, i, j}}{\Delta t} (p^k_{i, j} - p^n_{i, j}) \right]$$
-
-### 4. Résolution Monolithique Tout-Couplé (`MONOLITHIC` / `FULLY_COUPLED`)
-
-Dans la formulation monolithique, la vitesse et la pression sont assemblées simultanément au sein d'un système point-selle global sans paramètre de pénalité ($r = 0$) :
-
-$$\begin{pmatrix} A_{\mathbf{u}} & B^T \\ B & -C_p \end{pmatrix} \begin{pmatrix} \mathbf{u}^{n+1} \\ p^{n+1} \end{pmatrix} = \begin{pmatrix} \mathbf{f}_{\mathbf{u}} \\ g_p \end{pmatrix}$$
-
-où :
-- $A_{\mathbf{u}}$ est le bloc de quantité de mouvement vectoriel discret.
-- $B^T$ est la matrice du gradient de pression discret.
-- $B$ est la matrice de divergence discrète ($B = - (B^T)^T$).
-- $C_p = \text{diag}\left( \frac{\chi_T \Delta x \Delta y}{\Delta t} \right)$ est la matrice de compressibilité barotrope ($C_p = 0$ en incompressible strict).
-
-Ce système est résolu de manière unifiée à chaque pas de temps via les solveurs de Krylov couplés au préconditionneur par blocs triangulaires.
-
-### 5. Méthode de Projection Standard (`STANDARD_PROJECTION`)
-
-La méthode de projection de Chorin-Temam sépare la résolution en deux sous-étapes découplées :
-1. **Étape prédictive :** Calcul d'un champ de vitesse intermédiaire $\mathbf{u}^*$ sans gradient de pression.
-2. **Étape de projection :** Résolution d'une équation de Poisson pour le pseudo-potentiel de pression $\phi$ :
-   $$\nabla \cdot \left( \frac{1}{\rho} \nabla \phi \right) = \frac{\nabla \cdot \mathbf{u}^*}{\Delta t}$$
-3. **Étape de correction solénoïdale :**
-   $$\mathbf{u}^{n+1} = \mathbf{u}^* - \frac{\Delta t}{\rho} \nabla \phi, \quad p^{n+1} = p^n + \phi$$
+### 5. Méthode de Projection Standard (`"STANDARD_PROJECTION"` / `"PROJECTION"`)
+Résout successivement la prédiction visqueuse $\mathbf{u}^*$, l'équation de Poisson en pression $\nabla \cdot (\frac{1}{\rho}\nabla \phi) = \frac{1}{\Delta t}\nabla \cdot \mathbf{u}^*$, puis corrige $\mathbf{u}^{n+1} = \mathbf{u}^* - \frac{\Delta t}{\rho}\nabla \phi$.
 
 ---
 
-## Solveurs Linéaires de Krylov Matrix-Free
+## Solveurs Linéaires de Krylov et Préconditionneurs
 
-COVOF 2D met en œuvre une infrastructure de solveurs de Krylov **sans matrice explicite (*Matrix-Free*)**. L'opérateur complet $A \mathbf{x}$ n'est jamais assemblé sous forme de matrice creuse globale en mémoire, mais calculé à la volée par passage direct des pochoirs volumes finis décalés sur les tableaux locaux avec synchronisation MPI des mailles fantômes.
+COVOF 2D implémente une architecture **Matrix-Free** (l'opérateur complet $A \mathbf{x}$ est appliqué par parcours des pochoirs MAC avec synchronisation MPI des halos via `apply_system_matrix`) complétée par des blocs locaux pour le préconditionnement (`Fuu`, `Fvv`, `SchurLaplace` en CSR côté C++, stencils 5-points côté Fortran).
 
-### Algorithmes de Résolution Linéaire
+### Solveurs Linéaires (`solver.linear_solver`)
 
-1. **BiCGSTAB(2) (`LINEAR_BICGSTAB2`) :**
-   Algorithme de Sleijpen et van der Vorst (1993). Il combine deux étapes de BiCG avec une étape de minimisation polynomiale locale d'ordre 2, offrant une robustesse exceptionnelle contre les stagnations sur les systèmes asymétriques à fort gradient convectif.
-2. **BiCGSTAB (`LINEAR_BICGSTAB`) :**
-   Algorithme standard de van der Vorst (1992), rapide et efficace pour les matrices asymétriques modérément raides.
-3. **Gradient Conjugué Préconditionné (`LINEAR_CG`) :**
-   Algorithme classique de Hestenes et Stiefel (1952). Strictement dédié aux opérateurs symétriques définis positifs (système de Poisson en pression ou étape de diffusion pure).
-4. **GMRES(m) (`LINEAR_GMRES`) :**
-   *Generalized Minimal Residual* redémarré de Saad et Schultz (1986). Minimise la norme euclidienne du résidu dans le sous-espace de Krylov orthogonalisé par Modified Gram-Schmidt.
-5. **MINRES (`LINEAR_MINRES`) :**
-   Algorithme de Paige et Saunders (1975). Dédié aux systèmes linéaires **symétriques indéfinis** tels que les systèmes point-selle Navier-Stokes de Stokes ou monolithiques. Repose sur la tridiagonalisation de Lanczos à trois termes et les rotations de Givens, garantissant une minimisation monotone de la norme du résidu avec un coût mémoire minimal.
-6. **Solveur Direct Exact (`LINEAR_DIRECT` / `MUMPS`) :**
-   Factorisation LU complète par blocs via les routines LAPACK standards `dgetrf` (décomposition $P A = L U$) et `dgetrs` (descente et remontée triangulaires). Pour les régimes stationnaires linéaires, la factorisation factorisée est mise en cache pour éliminer tout surcoût de factorisation aux pas de temps ultérieurs.
+| Mot-Clé | Algorithme | Domaine d'Emploi Recommandé |
+| :--- | :--- | :--- |
+| `"BICGSTAB2"` (défaut) | BiCGSTAB(2) (Sleijpen & van der Vorst 1993) | Opérateurs asymétriques convectifs, AAL, C-AAL et Monolithique |
+| `"BICGSTAB"` | BiCGSTAB standard (van der Vorst 1992) | Systèmes asymétriques modérément raides |
+| `"CG"` / `"CONJUGATE_GRADIENT"` | Gradient Conjugué Préconditionné | Opérateurs symétriques définis positifs (Stokes pur, Poisson, diffusion) |
+| `"GMRES"` | GMRES(30) redémarré (Arnoldi + Givens) | Systèmes fortement non normaux |
+| `"MINRES"` | Minimal Residual (Paige & Saunders 1975) | Systèmes point-selle symétriques indéfinis |
+| `"DIRECT"` / `"MUMPS"` | Factorisation LU LAPACK (`dgetrf`/`dgetrs`) | Petits maillages de référence ou validation exacte (avec mise en cache si $\Delta t$ constant) |
 
----
+*(Remarque : C++ dispose également des passerelles `PetscSolverBridge` (`"PETSC"`) et `HypreSolverBridge` (`"HYPRE"`) qui basculent automatiquement sur `BiCGSTAB2Solver` si PETSc/HYPRE ne sont pas liés).*
 
-## Préconditionneurs Linéaires Parallèles
+### Préconditionneurs (`solver.precond_type` / `solver.preconditioner`)
 
-Le choix du préconditionneur est essentiel pour accélérer la convergence des méthodes de Krylov. COVOF 2D propose cinq préconditionneurs natifs :
-
-1. **Jacobi Diagonal (`PRECOND_JACOBI` / `DIAGONAL`) :**
-   Inversion de la diagonale enrichie de l'opérateur local. Cette diagonale intègre la contribution instationnaire, la diffusion visqueuse $\mathcal{O}(\mu/\Delta x^2)$, la pénalité de Lagrangien augmenté adaptatif $\mathcal{O}(r/\Delta x^2)$, la résistance de Brinkman $\mu/\mathcal{K}$ et les termes diagonaux de Newton.
-2. **SSOR / Gauss-Seidel Symétrique (`PRECOND_SSOR`) :**
-   Balayage avant (*forward sweep*) puis balayage arrière (*backward sweep*) sur la grille locale avec coefficient de relaxation optimal $\omega = 1.0$, offrant un lissage haute fréquence efficace.
-3. **ILU(0) (`PRECOND_ILU0`) :**
-   Factorisation incomplète sans remplissage sur les blocs de vitesse et pression.
-4. **Blocs Triangulaires avec Complément de Schur (`PRECOND_BLOCK_TRIANGULAR` / `BT_SBP`) :**
-   Préconditionneur spécifique dédié au système monolithique tout-couplé (El Ouafa et al., 2021/2023). Il s'appuie sur une factorisation triangulaire supérieure par blocs :
-   $$P = \begin{pmatrix} D_{\mathbf{u}} & B^T \\ 0 & S_p \end{pmatrix}$$
-   où $D_{\mathbf{u}}$ est l'approximation diagonale du bloc de quantité de mouvement et $S_p$ est le complément de Schur approché $S_p \approx B D_{\mathbf{u}}^{-1} B^T - C_p$, résolu par balayages de Gauss-Seidel symétriques.
-5. **Préconditionneur Personnalisé (`PRECOND_CUSTOM`) :**
-   Point d'entrée permettant à l'utilisateur d'injecter une fonction lambda C++ ou un pointeur de procédure Fortran (`custom_precond_hook`) pour tester de nouvelles heuristiques spectrales ou des couplages multigrilles externes.
+| Mot-Clé (et Alias) | Formulation | Recommandation |
+| :--- | :--- | :--- |
+| `"JACOBI"` / `"DIAGONAL"` (défaut) | Inversion de la diagonale locale enrichie (`diag_u`, `diag_v`, `diag_p`) | Optimal et 100 % parallèle pour `AAL` et `C-AAL` |
+| `"BLOCK_TRIANGULAR"` / `"BT_SBP"` / `"SCHUR"` | Factorisation par blocs triangulaires $P = \begin{pmatrix} D_u & G \\ 0 & S \end{pmatrix}$ avec 8 balayages SSOR sur le complément de Schur $S$ et 4 balayages sur $F_u, F_v$ | Indispensable pour le mode `"MONOLITHIC"` |
+| `"SSOR"` / `"GAUSS_SEIDEL"` | Lissage avant/arrière symétrique ($\omega = 1.0$) | Écoulements modérément visqueux |
+| `"ILU0"` / `"ILU"` | Factorisation incomplète ILU(0) locale par sous-domaine | Systèmes raides sur sous-domaines compacts |
+| `"CUSTOM"` | Hook utilisateur (`CustomPreconditioner::set_custom_operator` / `custom_precond_hook`) | Prototypage de nouveaux préconditionneurs |
+| `"NONE"` | Identité ($P = I$) | Diagnostic de conditionnement |
 # Géométrie, Maillages et Conditions aux Limites
 
 ## Génération et Topologie du Maillage Cartésien MAC
 
-Le solveur **COVOF 2D** opère sur des domaines géométriques rectangulaires discrétisés par un maillage cartésien structuré uniforme selon la topologie décalée MAC (*Marker-and-Cell*).
+Le solveur **COVOF 2D** opère sur des domaines rectangulaires $[0, L_x] \times [0, L_y]$ discrétisés par un maillage cartésien structuré uniforme selon la topologie décalée MAC (*Marker-and-Cell*).
 
-### Définition Géométrique du Domaine
+### Définition Géométrique du Domaine (`mesh`)
 
-Le domaine physique de calcul $\Omega = [x_{\text{min}}, x_{\text{max}}] \times [y_{\text{min}}, y_{\text{max}}]$ est caractérisé dans le bloc `mesh` du fichier JSON par :
-- Les dimensions physiques : $L_x = x_{\text{max}} - x_{\text{min}}$ (`mesh.lx`) et $L_y = y_{\text{max}} - y_{\text{min}}$ (`mesh.ly`) $[\text{m}]$.
-- L'origine des coordonnées cartésiennes : $(x_{\text{min}}, y_{\text{min}})$ (`mesh.x_min`, `mesh.y_min`) $[\text{m}]$ (défaut : $0.0, 0.0$).
-- Le nombre total de subdivisions spatiales globales : $N_x$ mailles selon l'axe horizontal $X$ (`mesh.nx`) et $N_y$ mailles selon l'axe vertical $Y$ (`mesh.ny`).
+Le domaine de calcul est entièrement spécifié dans le bloc `mesh` du fichier JSON par quatre paramètres exacts :
+- `mesh.nx` (`integer`, défaut `64`) : nombre global de cellules de calcul selon l'axe horizontal $X$.
+- `mesh.ny` (`integer`, défaut `64`) : nombre global de cellules de calcul selon l'axe vertical $Y$.
+- `mesh.lx` (`double`, défaut `1.0` m) : longueur physique totale du domaine selon $X$.
+- `mesh.ly` (`double`, défaut `1.0` m) : hauteur physique totale du domaine selon $Y$.
 
-Les pas d'espace constants du maillage sont calculés immédiatement selon :
+Les pas d'espace constants sont calculés à l'initialisation selon :
 
-$$\Delta x = \frac{L_x}{N_x}, \quad \Delta y = \frac{L_y}{N_y}$$
+$$\Delta x = \frac{L_x}{N_x}, \qquad \Delta y = \frac{L_y}{N_y}$$
 
-### Coordonnées Spatiales des Nœuds, Faces et Centres
+### Coordonnées des Centres, Faces et Sommets
 
-Pour une maille repérée par les indices discrets globaux $(i, j)$ où $i \in [1, N_x]$ et $j \in [1, N_y]$ :
-- **Coordonnées du centre de maille (Pression, VOF, Température) :**
-  $$x_{c, i} = x_{\text{min}} + \left( i - \frac{1}{2} \right) \Delta x, \quad y_{c, j} = y_{\text{min}} + \left( j - \frac{1}{2} \right) \Delta y$$
-- **Coordonnées des faces verticales (Vitesse $u$) :**
-  $$x_{f, i} = x_{\text{min}} + (i - 1) \Delta x, \quad y_{c, j} = y_{\text{min}} + \left( j - \frac{1}{2} \right) \Delta y$$
-  Il y a au total $(N_x + 1) \times N_y$ faces de vitesse horizontale dans le domaine complet.
-- **Coordonnées des faces horizontales (Vitesse $v$) :**
-  $$x_{c, i} = x_{\text{min}} + \left( i - \frac{1}{2} \right) \Delta x, \quad y_{f, j} = y_{\text{min}} + (j - 1) \Delta y$$
-  Il y a au total $N_x \times (N_y + 1)$ faces de vitesse verticale dans le domaine complet.
+Pour une maille repérée localement par $(i, j)$ avec décalage global `(i_offset, j_offset)` en C++ (base 0) ou `(i_start_global - 1, j_start_global - 1)` en Fortran (base 1), les fonctions d'accès physiques retournent exactement :
+
+- **Centres de cellules (Pression $p$, Fraction VOF $C$, $C_s$, $\widetilde{C}$, $\rho$, $\mu$, $T$, $\kappa$, $\chi_T$) :**
+  $$x_c(i) = \left(i_{\text{offset}} + i - \frac{1}{2}\right)\Delta x, \qquad y_c(j) = \left(j_{\text{offset}} + j - \frac{1}{2}\right)\Delta y$$
+- **Faces verticales (Vitesse $u$, $\rho_u$, $F_{\sigma, x}$) :**
+  $$x_u(i) = \left(i_{\text{offset}} + i - 1\right)\Delta x, \qquad y_c(j) = \left(j_{\text{offset}} + j - \frac{1}{2}\right)\Delta y$$
+  La face `u(1, j)` coïncide avec le bord gauche $x = 0$ du sous-domaine (ou du domaine global), et la face `u(nx_local + 1, j)` avec le bord droit.
+- **Faces horizontales (Vitesse $v$, $\rho_v$, $F_{\sigma, y}$) :**
+  $$x_c(i) = \left(i_{\text{offset}} + i - \frac{1}{2}\right)\Delta x, \qquad y_v(j) = \left(j_{\text{offset}} + j - 1\right)\Delta y$$
+  La face `v(i, 1)` coïncide avec le bord inférieur $y = 0$, et `v(i, ny_local + 1)` avec le bord supérieur.
+- **Sommets / Nœuds (Viscosité harmonique nodale $\mu_{\text{node}}$) :**
+  $$\big(x_u(i), \, y_v(j)\big)$$
 
 ---
 
-## Décomposition de Domaine et Parallélisme Cartésien 2D (MPI)
+## Décomposition de Domaine et Parallélisme Cartésien 2D (MPI pur)
 
-Pour permettre l'exécution sur architectures distribuées (grappes de calcul et supercalculateurs), COVOF 2D partitionne le maillage global selon une grille 2D de processus MPI communicants.
+Pour l'exécution distribuée, COVOF 2D partitionne la grille globale $(N_x, N_y)$ en $P = P_x \times P_y$ sous-domaines rectangulaires gérés par des processus MPI indépendants (**MPI pur**, sans OpenMP).
 
-```
+```text
        +-----------------------+-----------------------+
-       |                       |                       |
-       |     Rang MPI (0, 1)   |     Rang MPI (1, 1)   |
-       |     Sous-domaine      |     Sous-domaine      |
-       |                       |                       |
+       |  Rang MPI (0, 1)      |  Rang MPI (1, 1)      |
+       |  is_boundary_left     |  is_boundary_right    |
+       |  is_boundary_top      |  is_boundary_top      |
 Ny / 2 +-----------------------+-----------------------+
-       |                       |                       |
-       |     Rang MPI (0, 0)   |     Rang MPI (1, 0)   |
-       |     Sous-domaine      |     Sous-domaine      |
-       |                       |                       |
+       |  Rang MPI (0, 0)      |  Rang MPI (1, 0)      |
+       |  is_boundary_left     |  is_boundary_right    |
+       |  is_boundary_bottom   |  is_boundary_bottom   |
        +-----------------------+-----------------------+
-                   0                    Nx / 2                  Nx
+       0                    Nx / 2                     Nx
 ```
 
 ### Topologie Virtuelle Cartésienne (`MPI_Cart_create`)
 
-1. **Calcul automatique des dimensions de partitionnement :**
-   À partir du nombre total de processus alloués $N_{\text{procs}}$, COVOF 2D détermine la décomposition optimale en $P_x$ tranches horizontales et $P_y$ tranches verticales via `MPI_Dims_create(n_procs, 2, dims)` :
-   $$N_{\text{procs}} = P_x \times P_y \quad \text{avec} \quad \frac{P_x}{P_y} \approx \frac{N_x}{N_y}$$
-2. **Identification des rangs voisins :**
-   Grâce à `MPI_Cart_shift`, chaque processus détermine les rangs de ses quatre voisins directs dans la grille :
-   - Voisin Ouest (`rank_west`) à la coordonnée $(p_x - 1, p_y)$
-   - Voisin Est (`rank_east`) à la coordonnée $(p_x + 1, p_y)$
-   - Voisin Sud (`rank_south`) à la coordonnée $(p_x, p_y - 1)$
-   - Voisin Nord (`rank_north`) à la coordonnée $(p_x, p_y + 1)$
-   Si un processus est situé sur une frontière physique sans condition périodique, le rang voisin correspondant est positionné à `MPI_PROC_NULL`, désactivant automatiquement les transferts réseau sans conditionnement lourd.
+1. **Factorisation automatique et gestion des restes :**
+   `MPI_Dims_create(num_procs, 2, dims)` détermine la grille $(P_x, P_y)$ la plus équilibrée. Si $N_x$ n'est pas divisible par $P_x$, les `nx_global % px` premiers rangs reçoivent une maille supplémentaire (`Mesh2D::init` / `init_mesh`).
+2. **Périodicité et voisins cardinaux :**
+   Les drapeaux `periodic_x` et `periodic_y` sont activés automatiquement si `left`/`right` ou `bottom`/`top` ont pour type `"PERIODIC"`. `MPI_Cart_shift` identifie les 4 voisins directs (`rank_left`, `rank_right`, `rank_bottom`, `rank_top` en C++ ; `neighbor_west`, `neighbor_east`, `neighbor_south`, `neighbor_north` en Fortran), valant `MPI_PROC_NULL` sur les parois physiques non périodiques.
 
-### Gestion des Cellules Fantômes (*Halos / Ghost Cells*)
+### Couche Unique de Cellules Fantômes (*Halos*)
 
-Chaque sous-domaine local alloue une couche périphérique de cellules de garde :
-- `nx_local` $\times$ `ny_local` : mailles intérieures possédées en propre par le processus.
-- `nx_ghost = nx_local + 2` et `ny_ghost = ny_local + 2` : taille mémoire totale incluant les cellules fantômes d'indice $0$ et `nx_local + 1`.
-
-À chaque étape de calcul nécessitant des dérivées spatiales ou des flux aux interfaces de sous-domaines :
-1. Les données des mailles intérieures de bordure sont emballées dans des tampons contigus (*packing*).
-2. Les communications asynchrones non bloquantes `MPI_Isend` et `MPI_Irecv` sont initiées vers les voisins E, W, N, S.
-3. Après synchronisation par `MPI_Waitall`, les valeurs reçues sont déballées dans les cellules fantômes (*unpacking*).
+Chaque sous-domaine alloue exactement **1 couche de cellules fantômes** de chaque côté :
+- Dimensions allouées pour les scalaires centrés : `nx_ghost = nx_local + 2`, `ny_ghost = ny_local + 2`, soit des indices locaux valides $i \in [0, N_{x,\text{loc}}+1]$ et $j \in [0, N_{y,\text{loc}}+1]$.
+- Zone intérieure utile : $i \in [1, N_{x,\text{loc}}]$, $j \in [1, N_{y,\text{loc}}]$.
+- L'échange non bloquant (`MpiComm::sync_cell_scalar`, `sync_u`, `sync_v` en C++ ; `exchange_halos_scalar`, `exchange_halos_velocity` en Fortran) procède en deux passes séquentielles (`MPI_Irecv`/`MPI_Isend` + `MPI_Waitall`) : d'abord selon $X$, puis selon $Y$ sur toute la largeur `[0 .. nx_local + 1]` afin de **propager exactement les 4 coins diagonaux** sans nécessiter de communications diagonales.
 
 ---
 
 ## Catalogue Exhaustif des Conditions aux Limites (CL)
 
-COVOF 2D dispose d'un catalogue complet de conditions aux limites physiques et numériques applicables indépendamment sur les quatre frontières cardinales du domaine : `left` (Ouest, $x = x_{\text{min}}$), `right` (Est, $x = x_{\text{max}}$), `bottom` (Sud, $y = y_{\text{min}}$) et `top` (Nord, $y = y_{\text{max}}$).
+Les quatre frontières du domaine (`left`, `right`, `bottom`, `top` dans `boundary_conditions`) sont configurées indépendamment. L'analyseur JSON reconnaît **quatre types hydrodynamiques fondamentaux (`BCType`)**, complétés par le mot-clé `profile` pour les entrées spécialisées et `T_type` pour la thermique.
 
-### 1. Vitesse Imposée (`DIRICHLET`)
+:::note
+Contrairement à certaines conventions génériques, les mots-clés `NO_SLIP`, `PRESSURE`, `PRESSURE_OUTLET`, `OUTFLOW`, `SYMMETRY` ou `PISTON` **n'existent pas** dans les analyseurs `Config.cpp` et `module_config.f90` (toute chaîne inconnue rebascule silencieusement sur `DIRICHLET`). Les comportements correspondants s'expriment exactement à l'aide des quatre types ci-dessous et de `profile`.
+:::
 
-La condition de Dirichlet prescrit explicitement la valeur vectorielle de la vitesse à la frontière :
+### 1. Condition de Dirichlet (`"DIRICHLET"`, défaut)
 
-$$\mathbf{u} = \mathbf{u}_{\text{wall}} = (u_{\text{bc}}, v_{\text{bc}})^T \quad \text{sur } \partial \Omega$$
+Impose le vecteur vitesse $\mathbf{u} = (u_{\text{bc}}, v_{\text{bc}})^T$ sur la frontière (`u`, `v`).
 
-#### Implémentation Numérique Décalée
-- **Pour la composante normale :**
-  La vitesse normale coïncide géométriquement avec la face frontière. Elle est imposée directement sans interpolation :
-  $$u_{1/2, j} = u_{\text{bc}} \quad \text{(sur frontière gauche)}$$
-- **Pour la composante tangentielle :**
-  La vitesse tangentielle $v$ est localisée à une distance $\frac{\Delta x}{2}$ de la paroi. Pour imposer la valeur $v_{\text{bc}}$ sur la frontière physique avec une précision d'ordre 2, la cellule fantôme d'indice $i=0$ est extrapolée linéairement :
-  $$\frac{v_{0, j+1/2} + v_{1, j+1/2}}{2} = v_{\text{bc}} \implies v_{0, j+1/2} = 2 v_{\text{bc}} - v_{1, j+1/2}$$
+- **Paroi solide immobile (*No-Slip*) :** `"type": "DIRICHLET", "u": 0.0, "v": 0.0`.
+- **Paroi mobile (ex. cavité entraînée) :** `"type": "DIRICHLET", "u": 1.0, "v": 0.0` sur `"top"`.
+- **Piston mobile compressible :** `"type": "DIRICHLET", "u": 0.0, "v": v_piston` sur `"bottom"`.
 
-#### Cas d'Usage Typiques
-- **Paroi solide immobile sans glissement (*No-Slip Wall*) :** $u_{\text{bc}} = 0, v_{\text{bc}} = 0$.
-- **Paroi mobile de cavité entraînée (*Lid-Driven Cavity*) :** sur la frontière supérieure, $u_{\text{bc}} = U_{\text{lid}} = 1.0\,\text{m}\cdot\text{s}^{-1}, v_{\text{bc}} = 0$.
-- **Profil d'entrée parabolique de Poiseuille :** $u(y) = 4 U_{\max} \frac{y (L_y - y)}{L_y^2}$.
+#### Implémentation Discrète MAC (`MpiComm.cpp` / `module_mpi_comm.f90`)
+- **Composante normale sur face frontière :** imposée directement sur la face et sa fantôme externe (ex. sur `left` : $u_{1,j} = u_{0,j} = u_{\text{inlet}}$ ; sur `top` : $v_{i, N_y+1} = v_{i, N_y+2} = v_{\text{top}}$).
+- **Composante tangentielle :**
+  - Sur les parois horizontales (`bottom` et `top`), **extrapolation quadratique d'ordre 2 à 3 points** (exacte pour les profils paraboliques de Poiseuille lorsque $N_{y,\text{loc}} \ge 2$) :
+    $$u_{i, 0} = \frac{8 u_{\text{bot}} - 6 u_{i, 1} + u_{i, 2}}{3}, \qquad u_{i, N_y+1} = \frac{8 u_{\text{top}} - 6 u_{i, N_y} + u_{i, N_y-1}}{3}$$
+    *(avec repli linéaire $2 u_{\text{wall}} - u_{\text{int}}$ si $N_{y,\text{loc}} < 2$)*.
+  - Sur les parois verticales (`left` et `right`), réflexion linéaire d'ordre 2 :
+    $$v_{0, j} = 2 v_{\text{left}} - v_{1, j}, \qquad v_{N_x+1, j} = 2 v_{\text{right}} - v_{N_x, j}$$
+- **Pression et VOF :** Neumann homogène sur les parois ($p_{\text{ghost}} = p_{\text{int}}$, $C_{\text{ghost}} = C_{\text{int}}$).
 
-### 2. Gradient Nul / Sortie Libre (`NEUMANN`)
+#### Profils Spécialisés (`boundary_conditions.<face>.profile`)
 
-La condition de Neumann prescrit un flux nul (dérivée normale nulle) des grandeurs de vitesse à travers la frontière :
-
-$$\frac{\partial \mathbf{u}}{\partial \mathbf{n}} = \mathbf{0} \quad \iff \quad \frac{\partial u}{\partial n} = 0, \quad \frac{\partial v}{\partial n} = 0$$
-
-#### Implémentation Numérique Décalée
-Sur la frontière droite ($x = x_{\text{max}}$) :
-$$u_{N_x+1/2, j} = u_{N_x-1/2, j}, \quad v_{N_x+1, j+1/2} = v_{N_x, j+1/2}$$
-Pour la pression, la condition de Neumann homogène $\frac{\partial p}{\partial n} = 0$ est naturellement imposée pour assurer la compatibilité avec l'équation de quantité de mouvement.
-
-#### Cas d'Usage Typiques
-- **Sortie libre convective (*Outflow / Open Boundary*) :** Permet à l'écoulement et aux tourbillons de s'évacuer du domaine de calcul sans réflexion d'ondes numériques.
-
-### 3. Périodicité Spatiale (`PERIODIC`)
-
-La condition de périodicité relie topologiquement les frontières opposées du domaine pour simuler un milieu infini ou un écoulement en boucle fermée :
-
-$$\mathbf{u}(x_{\text{min}}, y) = \mathbf{u}(x_{\text{max}}, y), \quad p(x_{\text{min}}, y) = p(x_{\text{max}}, y)$$
-
-#### Implémentation Numérique Décalée
-Les cellules fantômes de la frontière Ouest reçoivent les données des dernières cellules intérieures de la frontière Est, et réciproquement. Dans le module MPI, le communicateur cartésien active le drapeau de périodicité `periods = [true, false]`, de sorte que les processus de rang $0$ communiquent directement avec les processus de rang $P_x - 1$.
-
-#### Cas d'Usage Typiques
-- **Vortex de Taylor-Green et instabilités de cisaillement.**
-- **Canaux infinis sous gradient de pression moteur.**
-
-### 4. Glissement Parfait sans Frottement (`FREESLIP`)
-
-La condition de glissement parfait impose une vitesse normale nulle (imperméabilité) et un cisaillement tangentiel nul (aucun frottement visqueux) :
-
-$$\mathbf{u} \cdot \mathbf{n} = 0, \quad \frac{\partial (\mathbf{u} \times \mathbf{n})}{\partial \mathbf{n}} = \mathbf{0}$$
-
-#### Implémentation Numérique Décalée
-Sur la frontière inférieure ($y = y_{\text{min}}$, normale selon $y$) :
-- Vitesse normale nulle sur la face frontière : $v_{i, 1/2} = 0$.
-- Extrapolation symétrique de la vitesse tangentielle dans la maille fantôme :
-  $$u_{i+1/2, 0} = u_{i+1/2, 1} \implies \left( \frac{\partial u}{\partial y} \right)_{y=y_{\text{min}}} = 0$$
-
-#### Cas d'Usage Typiques
-- **Plans de symétrie géométrique et hydrodynamique.**
-- **Surfaces libres idéalisées et fonds marins sans couche limite visqueuse.**
-
----
-
-## Conditions aux Limites Thermiques et VOF
-
-En complément des conditions hydrodynamiques, les frontières physiques accueillent les conditions sur les scalaires passifs et actifs :
-
-| Condition aux Limites | Mot-Clé JSON | Équation Continue | Implémentation Fantôme |
+| Valeur de `profile` | Face Supportée | Paramètres Associés | Formulation Mathématique Exacte |
 | :--- | :--- | :--- | :--- |
-| **Température Imposée** | `THERMAL_DIRICHLET` | $T = T_{\text{wall}}$ | $T_{\text{ghost}} = 2 T_{\text{wall}} - T_{\text{interior}}$ |
-| **Paroi Adiabatique** | `THERMAL_NEUMANN` | $\frac{\partial T}{\partial n} = 0$ | $T_{\text{ghost}} = T_{\text{interior}}$ |
-| **Interface Imperméable** | `VOF_WALL` | $\mathbf{u} \cdot \mathbf{n}_{\text{wall}} = 0$ | Flux VOF nul à travers la face |
-| **Sortie de Phase Libre** | `VOF_NEUMANN` | $\frac{\partial C}{\partial n} = 0$ | $C_{\text{ghost}} = C_{\text{interior}}$ |
+| `"UNIFORM"` (défaut) | Toutes | `u`, `v` | $u = u_{\text{bc}}, \; v = v_{\text{bc}}$ uniforme sur toute la face |
+| `"PARABOLIC"` | `left` | `u_mean` (C++), `u` (Fortran) | $u(y) = 6 \, u_{\text{mean}} \frac{y (L_y - y)}{L_y^2}$ (profil de Poiseuille établi, $\bar{u} = u_{\text{mean}}$) |
+| `"POISEUILLE_STEP"` | `left` | `u_mean`, `y_step` (C++) / `obs_y1` (Fortran) | $u(y) = 0$ si $y < y_{\text{step}}$ ; $u(y) = 6 \, u_{\text{mean}} \frac{(y - y_{\text{step}})(L_y - y)}{(L_y - y_{\text{step}})^2}$ si $y \ge y_{\text{step}}$ |
+| `"JET_INLET"` | `top` | `v`, `jet_center`, `jet_width` | Injecteur centré en $x_c$ sur $|x - x_c| \le W/2$ avec $v_{\text{in,eff}} = v_{\text{top}} \frac{W}{D_{\text{disc}}}$, $C_{\text{ghost}} = 0$ (Fluide 2), $u=0$ ; et **débit compensatoire d'évacuation du gaz** hors buse $v_{\text{out}} = -v_{\text{top}} \frac{W}{L_x - D_{\text{disc}}}$ assurant $\int_{\partial\Omega} \mathbf{u}\cdot\mathbf{n}\,ds = 0$ |
+
+### 2. Condition de Neumann (`"NEUMANN"`)
+
+Prescrit une dérivée normale nulle pour la vitesse, la pression et la fraction volumique :
+
+$$\frac{\partial u}{\partial n} = 0, \qquad \frac{\partial v}{\partial n} = 0, \qquad \frac{\partial p}{\partial n} = 0, \qquad \frac{\partial C}{\partial n} = 0$$
+
+- **Implémentation :** Copie directe de l'intérieur vers la couche fantôme (ex. sur `right` : $u_{N_x+2, j} = u_{N_x+1, j}$, $v_{N_x+1, j} = v_{N_x, j}$, $p_{N_x+1, j} = p_{N_x, j}$).
+- **Usage :** Sortie libre (*outflow*) en aval de canal, marche descendante ou sillage de cylindre.
+
+### 3. Glissement Parfait / Symétrie (`"FREE_SLIP"`)
+
+Impose l'imperméabilité normale et l'absence de cisaillement tangentiel :
+
+$$\mathbf{u} \cdot \mathbf{n} = 0, \qquad \frac{\partial (\mathbf{u} \cdot \boldsymbol{\tau})}{\partial n} = 0$$
+
+- **Implémentation :** Sur `bottom` par exemple, $v_{i, 1} = v_{i, 0} = 0$ (imperméabilité stricte) et $u_{i, 0} = u_{i, 1}$ (cisaillement nul).
+- **Usage :** Plans de symétrie axiale, parois sans couche limite pour la rupture de barrage ou l'ascension de bulle, surface supérieure libre idéalisée. Notez la graphie exacte `"FREE_SLIP"` (avec tiret bas).
+
+### 4. Périodicité Spatiale (`"PERIODIC"`)
+
+Relie la frontière Ouest à la frontière Est (`left` et `right` en `"PERIODIC"`) ou Sud à Nord (`bottom` et `top` en `"PERIODIC"`). Les communications MPI connectent directement les sous-domaines extrêmes via `periods` dans `MPI_Cart_create` (ou copient directement sur 1 rang), et la migration des marqueurs CVI applique le repliement géométrique $\pm L_x$ ou $\pm L_y$.
+- **Usage :** Nappe liquide cisaillée de Kelvin-Helmholtz (`LIQUID_SHEET`), instabilités de Rayleigh-Taylor périodiques latéralement, canaux infinis.
 
 ---
 
-## Modélisation Géométrique des Obstacles Immergés
+## Conditions aux Limites Thermiques et Comportement des Marqueurs
 
-COVOF 2D intègre un générateur géométrique interne d'obstacles solides immergés pénalisés par la méthode de Darcy-Brinkman (`obstacles.enable_obstacles = true`). Deux formes canoniques sont disponibles :
+### Conditions Thermiques (`T_type`, `T`)
 
-### 1. Obstacle Cylindrique (`CYLINDER`)
+Indépendamment de la condition hydrodynamique, chaque bord supporte `T_type` :
 
-L'obstacle est défini par le centre de son disque $(x_c, y_c)$ (`obs_xc`, `obs_yc`) et son rayon $R$ (`obs_radius`) :
+| `T_type` | Équation Continue | Implémentation Fantôme (`apply_thermal_boundary_conditions`) |
+| :--- | :--- | :--- |
+| `"DIRICHLET"` | $T = T_{\text{bc}}$ sur $\partial\Omega$ | $T_{\text{ghost}} = 2 \, T_{\text{bc}} - T_{\text{interior}}$ (précision ordre 2) |
+| `"NEUMANN"` (défaut) | $\frac{\partial T}{\partial n} = 0$ (adiabatique) | $T_{\text{ghost}} = T_{\text{interior}}$ |
+| `"PERIODIC"` (C++) | $T(0,y) = T(L_x, y)$ | Synchronisation directe MPI ou copie si `dims == 1` |
+
+### Traitement des Frontières pour les Marqueurs CVI (`InterfaceMarkers`)
+
+Lors de l'advection RK2-Heun (`advect_rk2`), les positions prédites $\mathbf{x}_p^*$ sont traitées de manière cohérente avec les frontières physiques :
+- Sur bord `"PERIODIC"` : repliement modulo $L_x$ ou $L_y$ dans $[0, L_x[ \times [0, L_y[$.
+- Sur bord physique non périodique : maintien à $\epsilon_b \Delta x$ à l'intérieur des parois lors de la sous-étape d'évaluation de vitesse (réflexion sur parois `FREE_SLIP`, suppression ou sortie en zone pure hors domaine, et ré-ensemencement continu à la buse pour `JET_INLET`).
+
+---
+
+## Modélisation Géométrique des Obstacles Immergés (`obstacles`)
+
+COVOF 2D représente les corps solides ou milieux poreux fixes par le tableau JSON `obstacles` (C++ supporte un nombre quelconque d'obstacles dans `std::vector<Obstacle>` ; Fortran lit le premier élément du tableau `"obstacles": [...]` via `json_get_obstacle`). Deux formes géométriques exactes sont implémentées :
+
+### 1. Obstacle Rectangulaire (`"BOX"`)
+
+Défini par les bornes $[x_0, x_1] \times [y_0, y_1]$ (`x0`, `y0`, `x1`, `y1`) et sa perméabilité `permeability` :
+
+$$\Omega_s = \left\{ (x, y) \in \Omega \;\middle|\; x_0 - 10^{-9} \le x \le x_1 + 10^{-9} \;\text{ et }\; y_0 - 10^{-9} \le y \le y_1 + 10^{-9} \right\}$$
+
+Usage typique : marche descendante (*backward-facing step*), chicane, plaque mince verticale, bloc poreux rectangulaire.
+
+### 2. Obstacle Cylindrique Circulaire (`"CYLINDER"`)
+
+Défini par son centre $(x_c, y_c)$ (`xc`, `yc`), son rayon $R$ (`radius`) et sa perméabilité `permeability` :
 
 $$\Omega_s = \left\{ (x, y) \in \Omega \;\middle|\; (x - x_c)^2 + (y - y_c)^2 \le R^2 \right\}$$
 
-- Pour chaque face verticale $u_{i+1/2, j}$, le test d'appartenance `is_u_face_in_obstacle` vérifie si le centre de face $(x_{f, i+1/2}, y_{c, j})$ est à l'intérieur du cylindre.
-- Si le point est immergé et que la perméabilité `obs_perm` $\le 10^{-12}$, la composante de vitesse est directement annulée ($u = 0$, Dirichlet solide) ou pénalisée par le coefficient de Brinkman $\frac{\mu}{K}$.
+Usage typique : écoulement autour d'un cylindre rigide (allée de von Kármán à $Re = 100$) ou matrice cylindrique poreuse.
 
-### 2. Obstacle Rectangulaire / Plaque (`RECTANGLE`)
-
-L'obstacle est défini par sa boîte englobante $[x_0, x_1] \times [y_0, y_1]$ (`obs_x0`, `obs_x1`, `obs_y0`, `obs_y1`) :
-
-$$\Omega_s = \left\{ (x, y) \in \Omega \;\middle|\; x_0 \le x \le x_1 \quad \text{et} \quad y_0 \le y \le y_1 \right\}$$
-
-Cette géométrie permet de représenter facilement des marches descendantes (*backward-facing step*), des chicanes, des parois internes minces ou des piliers carrés.
+Dans les deux cas, l'appartenance est testée indépendamment au centre de chaque face $u$ (`is_u_face_in_obstacle`), au centre de chaque face $v$ (`is_v_face_in_obstacle`) et au centre de cellule pour l'échelle AAL (`is_cell_in_obstacle`). Si `permeability <= 1.0e-12`, la face est traitée comme un **solide rigide adhérent** ($u = 0$ ou $v = 0$) ; si `permeability > 1.0e-12`, le terme de traînée de Darcy-Brinkman $\frac{\mu}{\mathcal{K}}\Delta x \Delta y$ est ajouté à la matrice et à la diagonale du préconditionneur.
 # Dictionnaire Encyclopédique des Paramètres d'Entrée
 
 ## Structure Générale du Fichier de Configuration JSON
 
-COVOF 2D utilise un format de fichier d'entrée textuel standardisé en notation **JSON** (*JavaScript Object Notation*), tolérant les commentaires sur une seule ligne préfixés par `//`. Ce format offre une lisibilité parfaite, une hiérarchisation arborescente naturelle et une compatibilité immédiate avec les outils d'automatisation et d'exploration paramétrique en Python.
+COVOF 2D utilise un fichier d'entrée textuel au format **JSON** analysé nativement sans dépendance externe par `Config::load_from_json` (`COVOF_2D-C++/src/Config.cpp`) et `load_config_from_json` (`COVOF_2D-FORTRAN/src/module_config.f90`). Les commentaires sur une ligne débutant par `//` sont automatiquement supprimés avant l'extraction.
 
-Le fichier d'entrée est structuré en **10 blocs fonctionnels principaux** :
+Le dictionnaire complet s'organise autour des **sections et blocs JSON réels** suivants :
 
-1. `mode` et métadonnées globales : Choix du type de problème physique et nom du cas.
-2. `mesh` : Définition de la grille cartésienne MAC décalée.
-3. `time` : Paramètres d'intégration temporelle et de pas de temps adaptatif.
-4. `physics` : Propriétés hydrodynamiques et thermodynamiques des fluides (phases 1 et 2).
-5. `thermal` : Paramètres de l'équation d'énergie et couplage de Boussinesq.
-6. `solver` : Méthode de couplage vitesse-pression, solveurs de Krylov et préconditionneurs.
-7. `convection` : Schémas spatiaux et linéarisation de l'advection.
-8. `obstacles` : Définition des corps solides ou poreux immergés par pénalisation de Brinkman.
-9. `boundary_conditions` : Conditions aux limites sur les quatre frontières cardinales.
-10. `output` : Fréquence et format des sorties volumiques VTK et journaux de convergence.
+1. **Clés globales (racine JSON)** et bloc optionnel `laplacian`
+2. **`mesh`** : Dimensions et résolution du maillage cartésien MAC
+3. **`physics`** : Régimes, schémas convectifs, lissage SVOF/diffusif, thermique, EOS et sous-blocs `fluid1` / `fluid2`
+4. **`time`** : Discrétisation temporelle, pas de temps et critère CFL adaptatif
+5. **`boundary_conditions`** : Conditions hydrodynamiques, profils d'entrée et conditions thermiques sur `left`, `right`, `bottom`, `top`
+6. **`initial_condition`** (alias `initial_conditions`) : Géométrie initiale de la fraction volumique $C$ et champs initiaux
+7. **`solver`** : Couplage vitesse-pression (AL, AAL, C-AAL, Monolithique, Projection), solveur de Krylov et préconditionneur
+8. **`vof`** et **`markers`** : Advection VOF, reconstruction géométrique, limiteurs TVD et marqueurs lagrangiens CVI
+9. **`obstacles`** : Tableau d'obstacles immergés `BOX` / `CYLINDER` (pénalisation de Darcy-Brinkman)
+10. **`output`** : Répertoire, préfixe de cas, intervalles VTK/logs et diagnostics CSV
+
+:::note
+Les clés sont sensibles à la casse. Lorsqu'une valeur par défaut diffère légèrement entre `Config.hpp` (C++) et `module_config.f90` (Fortran), les deux valeurs exactes sont explicitement indiquées (`C++ / Fortran`) : il est donc recommandé de renseigner explicitement les paramètres critiques dans le fichier JSON pour garantir une parité stricte.
+:::
 
 ---
 
 ## Dictionnaire Exhaustif des Paramètres par Section
 
-### 1. Paramètres Généraux et Régime Physique
+### 1. Clés Globales à la Racine (et Bloc `laplacian`)
 
-| Clé JSON | Type | Défaut | Options / Plage | Description Physique et Numérique |
-| :------------ | :------ | :-------- | :--------------------- | :--------------------------------------------------- |
-| `mode` | `string` | `"NAVIER_STOKES"` | `"NAVIER_STOKES"`, `"TWO_PHASE"`, `"RAYLEIGH_BENARD"`, `"LAPLACIAN"`, `"VORTEX_ADVECTION"` | Définit le système d'équations résolu. `"LAPLACIAN"` résout l'équation elliptique pure $\Delta \phi = f$, `"VORTEX_ADVECTION"` active le transport cinématique pur de l'interface VOF. |
-| `test_case` | `string` | `"SIMULATION"` | Texte libre | Chaîne descriptive du cas-test pour les en-têtes de journaux et métadonnées de sortie. |
-| `steady_state_tol` | `double` | `0.0` | $[0.0, 1.0]$ | Seuil d'arrêt sur régime stationnaire : arrêt si $\frac{\|\mathbf{u}^{n+1} - \mathbf{u}^n\|_\infty}{\Delta t} \le \text{tol}$. Mettre `0.0` pour désactiver. |
-| `source_term` | `double` | `0.0` | Réel quelconque | Terme source volumique uniforme utilisé en mode `"LAPLACIAN"`. |
+| Clé JSON | Type | Défaut (C++ / Fortran) | Options / Alias / Plage | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- |
+| `mode` | `string` | `"NAVIER_STOKES"` | `"NAVIER_STOKES"`, `"LAPLACIAN"`, `"VORTEX_ADVECTION"` | Sélectionne le pilote d'exécution dans `Simulation::run()`. `"LAPLACIAN"` résout $-\Delta\psi = f$ ; `"VORTEX_ADVECTION"` exécute le test cinématique de Rider-Kothe ; toute autre valeur lance la boucle Navier-Stokes. |
+| `test_case` | `string` | `"CAS_3_1"` | Texte libre (ex. `"CAS_3_2_NEUMANN"`, `"CAS_3_7"`, `"CAS_3_8"`, `"POISEUILLE"`) | Identifiant de cas utilisé pour activer les exports analytiques dédiés (`CAS_3_2_NEUMANN`, `CAS_3_7` Poiseuille stationnaire, `CAS_3_8` Poiseuille instationnaire). |
+| `case_name` | `string` | — / `"covof_case"` | Chaîne valide | Nom de cas racine lu en repli par Fortran (priorité à `output.case_name`). |
+| `time_scheme` | `string` | `"EULER"` | `"EULER"`, `"GEAR"`, `"BDF2"` | Peut être spécifié à la racine ou dans `time.time_scheme` (priorité au bloc `time`). |
+| `convective_linearization` | `string` | `"PICARD"` | `"PICARD"`, `"ADAMS_BASHFORTH"`, `"AB2"`, `"NEWTON"` | Peut être spécifié à la racine ou dans `physics.convective_linearization` (priorité à `physics`). |
+| `enable_svof_smoothing` | `boolean` | `false` | `true`, `false` | Peut être spécifié à la racine ou dans `physics.enable_svof_smoothing`. |
+| `svof_filter_width` | `double` | `1.0` | $> 0.0$ | Peut être spécifié à la racine ou dans `physics.svof_filter_width`. |
+| `steady_state_tol` | `double` | `0.0` | $\ge 0.0$ | Critère d'arrêt sur $\|\mathbf{u}^{n+1} - \mathbf{u}^n\|_\infty < \text{steady\_state\_tol}$ (après `step > 10`). Désactivé si `0.0` (ignoré en diphasique Fortran). Également lu dans `solver.steady_state_tol`. |
+| `source_term` (alias `f`) | `double` | `1.0` | Réel quelconque | Terme source scalaire du mode `"LAPLACIAN"`. Également lu dans `laplacian.source_term` / `laplacian.f` et `physics.source_term` / `physics.f`. |
+
+*(Remarque : en C++, les clés des marqueurs `use_markers`, `markers_per_cell`, `marker_advection_scheme`, `marker_curvature`, `marker_normals_plic`, `marker_max_per_cell`, `write_markers_vtk` sont aussi acceptées à la racine avant d'être surchargées par `vof.*` puis `markers.*`.)*
 
 ### 2. Section `mesh` (Maillage Cartésien MAC)
 
-| Clé JSON | Type | Défaut | Options / Plage | Description Physique et Numérique |
-| :------------ | :------ | :-------- | :--------------------- | :--------------------------------------------------- |
-| `mesh.nx` | `integer` | `100` | $\ge 4$ | Nombre total de cellules de calcul selon l'axe horizontal $X$. |
-| `mesh.ny` | `integer` | `100` | $\ge 4$ | Nombre total de cellules de calcul selon l'axe vertical $Y$. |
-| `mesh.lx` | `double` | `1.0` | $> 0.0\,\text{m}$ | Longueur physique totale du domaine de calcul selon $X$. |
-| `mesh.ly` | `double` | `1.0` | $> 0.0\,\text{m}$ | Hauteur physique totale du domaine de calcul selon $Y$. |
-| `mesh.x_min` | `double` | `0.0` | Réel quelconque | Coordonnée minimale d'origine selon $X$ $[\text{m}]$. |
-| `mesh.y_min` | `double` | `0.0` | Réel quelconque | Coordonnée minimale d'origine selon $Y$ $[\text{m}]$. |
-| `mesh.grid_type` | `string` | `"CARTESIAN"` | `"CARTESIAN"` | Type de maillage. Actuellement seul le maillage cartésien décalé est supporté. |
+| Clé JSON | Type | Défaut | Plage Valide | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- |
+| `mesh.nx` | `integer` | `64` | $\ge 4$ | Nombre global de cellules de pression selon l'axe $X$. |
+| `mesh.ny` | `integer` | `64` | $\ge 4$ | Nombre global de cellules de pression selon l'axe $Y$. |
+| `mesh.lx` | `double` | `1.0` | $> 0.0\,\text{m}$ | Longueur physique totale du domaine $\Omega$ selon $X$. |
+| `mesh.ly` | `double` | `1.0` | $> 0.0\,\text{m}$ | Hauteur physique totale du domaine $\Omega$ selon $Y$. |
 
-### 3. Section `time` (Intégration Temporelle)
+*(Note : Le domaine physique commence toujours à l'origine $(0, 0)$ : le maillage couvre exactement $[0, L_x] \times [0, L_y]$ avec $\Delta x = L_x / N_x$ et $\Delta y = L_y / N_y$.)*
 
-| Clé JSON | Type | Défaut | Options / Plage | Description Physique et Numérique |
-| :------------ | :------ | :-------- | :--------------------- | :--------------------------------------------------- |
-| `time.dt` | `double` | `0.001` | $> 0.0\,\text{s}$ | Pas de temps d'intégration initial ou fixe $[\text{s}]$. |
-| `time.t_end` | `double` | `1.0` | $> 0.0\,\text{s}$ | Temps physique final d'arrêt de la simulation $[\text{s}]$. |
-| `time.cfl` | `double` | `0.5` | $]0.0, 1.0]$ | Nombre de Courant-Friedrichs-Lewy maximal autorisé pour le pas adaptatif. |
-| `time.time_scheme` | `string` | `"EULER_EXPLICIT"` | `"EULER_EXPLICIT"`, `"GEAR"`, `"BDF2"`, `"SSP_RK3"` | Schéma d'intégration temporelle. `"GEAR"` (ordre 2 implicite stable) est recommandé pour Navier-Stokes. |
-| `time.adaptative_dt` | `boolean` | `false` | `true`, `false` | Active le calcul dynamique du pas de temps sous contraintes CFL convective, visqueuse et capillaire. |
+### 3. Section `physics` (Modèles Physiques, Thermique, EOS et Fluides)
 
-### 4. Section `physics` (Propriétés des Fluides et Interfaces)
+#### 3.1. Paramètres Généraux du Bloc `physics`
 
-| Clé JSON | Type | Défaut | Options / Plage | Description Physique et Numérique |
-| :------------ | :------ | :-------- | :--------------------- | :--------------------------------------------------- |
-| `physics.rho1` | `double` | `1.0` | $> 0.0\,\text{kg}\cdot\text{m}^{-3}$ | Masse volumique de la Phase 1 (fluide porteur ou liquide). |
-| `physics.rho2` | `double` | `1.0` | $> 0.0\,\text{kg}\cdot\text{m}^{-3}$ | Masse volumique de la Phase 2 (goutte, bulle ou gaz). |
-| `physics.mu1` | `double` | `0.01` | $> 0.0\,\text{Pa}\cdot\text{s}$ | Viscosité dynamique de la Phase 1. |
-| `physics.mu2` | `double` | `0.01` | $> 0.0\,\text{Pa}\cdot\text{s}$ | Viscosité dynamique de la Phase 2. |
-| `physics.sigma` | `double` | `0.0` | $\ge 0.0\,\text{N}\cdot\text{m}^{-1}$ | Coefficient de tension superficielle interfaciale (modèle CSF). |
-| `physics.gx` | `double` | `0.0` | Réel $[\text{m}\cdot\text{s}^{-2}]$ | Composante horizontale du vecteur gravité. |
-| `physics.gy` | `double` | `0.0` | Réel $[\text{m}\cdot\text{s}^{-2}]$ | Composante verticale du vecteur gravité (ex. `-9.81`). |
-| `physics.enable_two_phase` | `boolean` | `false` | `true`, `false` | Active le modèle diphasique et le transport VOF de l'interface. |
-| `physics.viscosity_model` | `string` | `"CONSTANT"` | `"CONSTANT"`, `"VARIABLE"` | Modèle de viscosité. `"VARIABLE"` active une viscosité non uniforme $\mu(y)$. |
-| `physics.vof_model` | `string` | `"PLIC"` | `"PLIC"` | Modèle de suivi d'interface VOF. Reconstruction linéaire par morceaux. |
-| `physics.compressible` | `boolean` | `false` | `true`, `false` | Active la formulation barotrope bas-Mach All-Mach ($\chi_T > 0$). |
-| `physics.gamma` | `double` | `1.4` | $> 1.0$ | Rapport des chaleurs spécifiques $\gamma = C_p / C_v$ pour l'air ou le gaz. |
-| `physics.p_inf` | `double` | `0.0` | $\ge 0.0\,\text{Pa}$ | Pression de cohésion pour l'équation d'état *Stiffened Gas*. |
-| `physics.ic_type` | `string` | `"NONE"` | `"NONE"`, `"CIRCLE"`, `"RECTANGLE"`, `"DAM_BREAK"`, `"TAYLOR_GREEN"`, `"VORTEX"` | Géométrie de la condition initiale diphasique de fraction volumique $C(x, y)$. |
-| `physics.ic_x0`, `ic_y0` | `double` | `0.0` | Coordonnées $[\text{m}]$ | Centre du disque ou coin inférieur gauche du rectangle initial. |
-| `physics.ic_radius` | `double` | `0.1` | $> 0.0\,\text{m}$ | Rayon de la goutte ou bulle initiale (si `ic_type="CIRCLE"`). |
-| `physics.ic_width`, `ic_height` | `double` | `0.1` | $> 0.0\,\text{m}$ | Largeur et hauteur du bloc fluide initial (si `ic_type="RECTANGLE"`). |
+| Clé JSON | Type | Défaut (C++ / Fortran) | Options / Plage | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- |
+| `physics.enable_two_phase` | `boolean` | `false` | `true`, `false` | Active l'advection VOF de $C$, la mise à jour des propriétés de mélange et éventuellement les marqueurs CVI. |
+| `physics.enable_surface_tension` | `boolean` | `false` | `true`, `false` | Active la force capillaire CSF équilibrée $\mathbf{f}_\sigma = \sigma \kappa \nabla C$. |
+| `physics.sigma` | `double` | `0.0` | $\ge 0.0\,\text{N}\cdot\text{m}^{-1}$ | Coefficient de tension superficielle entre Fluide 1 et Fluide 2. |
+| `physics.gx` | `double` | `0.0` | Réel $[\text{m}\cdot\text{s}^{-2}]$ | Composante horizontale de la gravité. |
+| `physics.gy` | `double` | `0.0` | Réel $[\text{m}\cdot\text{s}^{-2}]$ | Composante verticale de la gravité (ex. `-9.81`). |
+| `physics.enable_convection` | `boolean` | `true` | `true`, `false` | Active le terme d'inertie $(\mathbf{u}\cdot\nabla)\mathbf{u}$ (`false` pour résoudre les équations de Stokes pures). |
+| `physics.convective_scheme` | `string` | `"UPWIND"` | `"UPWIND"`, `"CENTERED"`, `"TVD_SUPERBEE"` | Schéma spatial des flux convectifs de quantité de mouvement. |
+| `physics.convective_linearization` | `string` | `"PICARD"` | `"PICARD"`, `"ADAMS_BASHFORTH"`, `"AB2"`, `"NEWTON"` | Méthode de linéarisation temporelle de $(\mathbf{u}\cdot\nabla)\mathbf{u}$ dans l'opérateur implicite. |
+| `physics.enable_svof_smoothing` | `boolean` | `false` | `true`, `false` | Active le filtre de Helmholtz $(I - D\Delta)C_s = C$ pour $\rho(C_s), \mu(C_s), \mu_{\text{node}}(C_s)$ tout en gardant $C$ raide. |
+| `physics.svof_filter_width` | `double` | `1.0` | $> 0.0$ | Facteur $k$ de la diffusivité du filtre Helmholtz $D = k \, \Delta x \Delta y$. |
+| `physics.enable_diffusion_smoothing` | `boolean` | `false` | `true`, `false` | Active le lissage par diffusion parabolique explicite $\widetilde{C}$ pour le calcul de la courbure CSF classique. |
+| `physics.diffusion_smoothing_steps` | `integer` | `3` | $\ge 1$ | Nombre de pas de pseudo-temps $\Delta\tau = 0.2 \min(\Delta x^2, \Delta y^2)$ pour calculer $\widetilde{C}$. |
+| `physics.compressible` | `boolean` | `false` | `true`, `false` | Active la formulation compressible barotrope / *All-Mach* ($\chi_T > 0$, équations d'état EOS). |
+| `physics.flow_regime` | `string` | `"INCOMPRESSIBLE"` | `"INCOMPRESSIBLE"`, `"COMPRESSIBLE"`, `"ALL_MACH"` | Si `"COMPRESSIBLE"` ou `"ALL_MACH"`, force `compressible = true`. |
+| `physics.enable_ssp_rk3_momentum` | `boolean` | `compressible` (`false` si incomp., `true` si comp.) | `true`, `false` | Active le transport inertiel explicite conservatif SSP-RK3 de $(\rho u, \rho v)$ avant le couplage vitesse-pression. |
+| `physics.enable_energy` | `boolean` | `false` | `true`, `false` | Active l'équation thermique (Boussinesq si incompressible, énergie totale $\rho e$ si compressible). *(Fortran accepte aussi l'alias `thermal.enable_energy`.)* |
+| `physics.Ra` | `double` | `1.0e5` / `1.0e4` | $> 0.0$ | Nombre de Rayleigh pour la convection naturelle thermique. |
+| `physics.Pr` | `double` | `0.71` | $> 0.0$ | Nombre de Prandtl $\nu / \alpha$. |
+| `physics.T_ref` | `double` | `0.0` | Réel $[\text{K}]$ ou adim. | Température de référence pour la flottabilité de Boussinesq (et initialisation si compressible). |
+| `physics.beta` | `double` | `3.33e-3` / `3.41e-3` | $\ge 0.0\,\text{K}^{-1}$ | Coefficient de dilatation thermique volumique. |
+| `physics.viscosity_model` | `string` | `"CONSTANT"` | `"CONSTANT"`, `"EXPONENTIAL"` (et `"ASYMMETRIC_EXPONENTIAL"` en C++) | Modèle de viscosité spatiale en monophasique ($\mu(y) = \mu_0 \exp(a((y-e)/e)^2)$ si `"EXPONENTIAL"`). |
+| `physics.visc_mu0` | `double` | `1.85e-5` / `1.0e-3` | $> 0.0\,\text{Pa}\cdot\text{s}$ | Viscosité de référence $\mu_0$ du modèle exponentiel. |
+| `physics.visc_a` | `double` | `0.02` / `2.0` | Réel | Coefficient d'amplitude $a$ du modèle exponentiel. |
+| `physics.visc_e` | `double` | `0.01` | $> 0.0\,\text{m}$ | Échelle caractéristique $e$ du modèle exponentiel. |
+| `physics.source_term` (alias `f`) | `double` | `1.0` | Réel quelconque | Alias du terme source scalaire en mode `"LAPLACIAN"`. |
 
-### 5. Section `thermal` (Énergie Thermique et Convection Naturelle)
+#### 3.2. Sous-Blocs `physics.fluid1` et `physics.fluid2`
 
-| Clé JSON | Type | Défaut | Options / Plage | Description Physique et Numérique |
-| :------------ | :------ | :-------- | :--------------------- | :--------------------------------------------------- |
-| `thermal.enable_energy` | `boolean` | `false` | `true`, `false` | Active l'équation de transport-diffusion de la température. |
-| `thermal.th_cond1` | `double` | `0.026` | $> 0.0\,\text{W}\cdot\text{m}^{-1}\cdot\text{K}^{-1}$ | Conductivité thermique de la Phase 1. |
-| `thermal.th_cond2` | `double` | `0.026` | $> 0.0\,\text{W}\cdot\text{m}^{-1}\cdot\text{K}^{-1}$ | Conductivité thermique de la Phase 2. |
-| `thermal.cp1` | `double` | `1005.0` | $> 0.0\,\text{J}\cdot\text{kg}^{-1}\cdot\text{K}^{-1}$ | Capacité thermique massique isobare de la Phase 1. |
-| `thermal.cp2` | `double` | `1005.0` | $> 0.0\,\text{J}\cdot\text{kg}^{-1}\cdot\text{K}^{-1}$ | Capacité thermique massique isobare de la Phase 2. |
-| `thermal.beta_th` | `double` | `0.0034` | $> 0.0\,\text{K}^{-1}$ | Coefficient de dilatation volumique thermique (approximation de Boussinesq). |
-| `thermal.t_ref` | `double` | `293.15` | $> 0.0\,\text{K}$ | Température de référence pour la force de flottabilité. |
-| `thermal.t_hot`, `t_cold` | `double` | `300.0`, `280.0` | $> 0.0\,\text{K}$ | Températures imposées sur les parois chaude et froide. |
-| `thermal.t_init` | `double` | `293.15` | $> 0.0\,\text{K}$ | Température initiale uniforme dans le domaine de calcul. |
+Chaque phase (`fluid1` correspondant à $C = 1$, et `fluid2` correspondant à $C = 0$) possède les paramètres suivants :
 
-### 6. Section `solver` (Couplage Navier-Stokes et Solveurs Linéaires)
+| Clé JSON (`physics.fluid{1,2}.*`) | Type | Défaut (C++ `f1`/`f2` \| Fortran `f1`/`f2`) | Options / Plage | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- |
+| `rho` | `double` | `1.0` / `1.0` \| `1.0` / `rho1` | $> 0.0\,\text{kg}\cdot\text{m}^{-3}$ | Masse volumique de référence de la phase. |
+| `mu` | `double` | `1.0` / `1.0` \| `1.0e-3` / `mu1` | $> 0.0\,\text{Pa}\cdot\text{s}$ | Viscosité dynamique de la phase. |
+| `Cp` | `double` | `1006.0` \| `1.0` (`fluid1` uniquement en Fortran) | $> 0.0\,\text{J}\cdot\text{kg}^{-1}\cdot\text{K}^{-1}$ | Capacité thermique massique à pression constante. |
+| `k_thermal` | `double` | `0.026` \| `0.014` (`fluid1` uniquement en Fortran) | $> 0.0\,\text{W}\cdot\text{m}^{-1}\cdot\text{K}^{-1}$ | Conductivité thermique du fluide. |
+| `beta` | `double` | `3.33e-3` (C++) | $\ge 0.0\,\text{K}^{-1}$ | Dilatation thermique propre à la phase (C++ ; Fortran utilise `physics.beta`). |
+| `eos` | `string` | `"INCOMPRESSIBLE"` | `"INCOMPRESSIBLE"`, `"LINEAR"` (`"ACOUSTIC"`), `"IDEAL_GAS"` (`"PERFECT_GAS"`), `"NASG"` (`"STIFFENED_GAS"`) | Loi d'état thermodynamique utilisée lorsque `physics.compressible = true`. |
+| `chi_T` | `double` | `0.0` | $\ge 0.0\,\text{Pa}^{-1}$ | Compressibilité isotherme $\chi_T = \frac{1}{\rho c_s^2}$ pour l'EOS `"LINEAR"`. |
+| `gamma` | `double` | `1.4` | $> 1.0$ | Rapport des chaleurs spécifiques $\gamma = C_p / C_v$ (`IDEAL_GAS`, `NASG`). |
+| `r_gas` | `double` | `287.05` | $> 0.0\,\text{J}\cdot\text{kg}^{-1}\cdot\text{K}^{-1}$ | Constante massique des gaz parfaits (`IDEAL_GAS`). |
+| `cv` | `double` | `717.5` | $> 0.0\,\text{J}\cdot\text{kg}^{-1}\cdot\text{K}^{-1}$ | Capacité calorifique à volume constant (`NASG`, énergie totale). |
+| `p_inf` | `double` | `0.0` | $\ge 0.0\,\text{Pa}$ | Pression de cohésion $p_\infty$ de l'EOS `NASG`. |
+| `b_nasg` | `double` | `0.0` | $\ge 0.0\,\text{m}^3\cdot\text{kg}^{-1}$ | Covolume $b$ de l'EOS `NASG`. |
+| `q_nasg` | `double` | `0.0` | Réel $[\text{J}\cdot\text{kg}^{-1}]$ | Énergie de référence $q$ de l'EOS `NASG`. |
 
-| Clé JSON | Type | Défaut | Options / Plage | Description Physique et Numérique |
-| :------------ | :------ | :-------- | :--------------------- | :--------------------------------------------------- |
-| `solver.type` | `string` | `"AUGMENTED_LAGRANGIAN"` | `"AUGMENTED_LAGRANGIAN"`, `"AAL"`, `"C-AAL"`, `"MONOLITHIC"`, `"STANDARD_PROJECTION"` | Formulation de couplage vitesse-pression. `"AAL"` est le mode adaptatif incompressible pur ; `"C-AAL"` active la thermodynamique bas-Mach ; `"MONOLITHIC"` résout le point-selle couplé. |
-| `solver.linear_solver` | `string` | `"BICGSTAB2"` | `"BICGSTAB2"`, `"BICGSTAB"`, `"CG"`, `"GMRES"`, `"MINRES"`, `"DIRECT"` | Algorithme de résolution du système linéaire. `"MINRES"` est optimal pour opérateurs symétriques indéfinis. |
-| `solver.preconditioner` | `string` | `"JACOBI"` | `"JACOBI"`, `"SSOR"`, `"ILU0"`, `"BLOCK_TRIANGULAR"`, `"CUSTOM"`, `"NONE"` | Préconditionneur linéaire. `"BLOCK_TRIANGULAR"` est recommandé pour `"MONOLITHIC"`. |
-| `solver.tol` | `double` | `1.0e-5` | $]0.0, 1.0e-2]$ | Tolérance d'arrêt sur le résidu relatif du solveur linéaire de Krylov. |
-| `solver.max_iter` | `integer` | `300` | $\ge 10$ | Nombre maximal d'itérations par résolution de système linéaire. |
-| `solver.r_al` | `double` | `100.0` | $> 0.0$ | Paramètre scalaire de pénalité de Lagrangien augmenté standard $[\text{Pa}\cdot\text{s}\cdot\text{m}^{-1}]$. |
-| `solver.adaptative_al` | `boolean` | `false` | `true`, `false` | Active le calcul adaptatif local de la pénalité $r(t, \mathbf{x})$ selon Vincent et al. (2004). |
-| `solver.k_aal` | `double` | `1.0` | $]0.0, 10.0]$ | Facteur multiplicatif d'échelle pour la pénalité AAL / C-AAL ($K_{\text{aal}}$). |
-| `solver.uzawa_iter` | `integer` | `1` | $\ge 1$ | Nombre maximal d'itérations dans la boucle d'Uzawa par pas de temps. |
-| `solver.uzawa_tol` | `double` | `1.0e-4` | $> 0.0$ | Seuil d'arrêt d'Uzawa sur la divergence maximale $\|\nabla \cdot \mathbf{u}\|_\infty$. |
-| `solver.use_precond` | `boolean` | `true` | `true`, `false` | Active ou désactive l'application du préconditionneur linéaire. |
+### 4. Section `time` (Intégration Temporelle)
 
-### 7. Section `convection` (Discrétisation Spatiale des Flux)
+| Clé JSON | Type | Défaut (C++ / Fortran) | Options / Plage | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- |
+| `time.time_scheme` | `string` | `"EULER"` | `"EULER"`, `"GEAR"`, `"BDF2"` | Schéma temporel implicite pour Navier-Stokes (`"GEAR"` et `"BDF2"` activent BDF2 d'ordre 2). |
+| `time.dt` | `double` | `0.001` / `0.01` | $> 0.0\,\text{s}$ | Pas de temps fixe (si `adaptive_dt = false`) ou pas de temps plafond initial (si `adaptive_dt = true`). |
+| `time.t_final` | `double` | `1.0` | $> 0.0\,\text{s}$ | Temps physique final d'arrêt de la simulation. |
+| `time.cfl_max` | `double` | `0.4` / `0.5` | $]0.0, 1.0]$ | Nombre de Courant maximal autorisé lors du calcul automatique de $\Delta t_{\text{CFL}}$. |
+| `time.adaptive_dt` | `boolean` | `false` | `true`, `false` | Active la limitation dynamique $\Delta t = \min(\Delta t_{\text{init}}, \Delta t_{\text{CFL}}, \Delta t_\sigma)$. |
 
-| Clé JSON | Type | Défaut | Options / Plage | Description Physique et Numérique |
-| :------------ | :------ | :-------- | :--------------------- | :--------------------------------------------------- |
-| `convection.convective_scheme` | `string` | `"UPWIND"` | `"UPWIND"`, `"CENTERED"` | Schéma de flux d'advection spatiale. `"CENTERED"` est d'ordre 2 mais nécessite un maillage fin. |
-| `convection.convective_linearization`| `string` | `"UPWIND"` | `"UPWIND"`, `"CENTERED"`, `"NEWTON"`, `"ADAMS_BASHFORTH"` | Linéarisation du terme convectif. `"NEWTON"` assure une convergence quadratique en monolithique. |
+### 5. Section `boundary_conditions` (`left`, `right`, `bottom`, `top`)
 
-### 8. Section `obstacles` (Pénalisation de Brinkman pour Corps Immergés)
+Chaque sous-objet `boundary_conditions.<face>` (où `<face>` $\in \{\text{left}, \text{right}, \text{bottom}, \text{top}\}$) accepte les paramètres suivants :
 
-| Clé JSON | Type | Défaut | Options / Plage | Description Physique et Numérique |
-| :------------ | :------ | :-------- | :--------------------- | :--------------------------------------------------- |
-| `obstacles.enable_obstacles`| `boolean` | `false` | `true`, `false` | Active la présence d'obstacles solides ou poreux immergés. |
-| `obstacles.type` | `string` | `"CYLINDER"` | `"CYLINDER"`, `"RECTANGLE"` | Géométrie de l'obstacle. |
-| `obstacles.xc`, `yc` | `double` | `0.5`, `0.5` | Coordonnées $[\text{m}]$ | Centre du cylindre immergé (si `type="CYLINDER"`). |
-| `obstacles.radius` | `double` | `0.1` | $> 0.0\,\text{m}$ | Rayon du cylindre immergé. |
-| `obstacles.x0`, `x1` | `double` | `0.2`, `0.4` | Coordonnées $[\text{m}]$ | Limites en $X$ du rectangle immergé (si `type="RECTANGLE"`). |
-| `obstacles.y0`, `y1` | `double` | `0.0`, `0.3` | Coordonnées $[\text{m}]$ | Limites en $Y$ du rectangle immergé. |
-| `obstacles.permeability` | `double` | `1.0e-40` | $\ge 0.0\,\text{m}^2$ | Perméabilité de Darcy $K$. Valeur $\le 10^{-12}$ correspond à un solide imperméable adhérent. |
+| Clé JSON | Type | Défaut | Options / Alias / Plage | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- |
+| `type` | `string` | `"DIRICHLET"` | `"DIRICHLET"`, `"NEUMANN"`, `"FREE_SLIP"`, `"PERIODIC"` | Condition aux limites hydrodynamique sur la vitesse et la pression. |
+| `u` | `double` | `0.0` | Réel $[\text{m}\cdot\text{s}^{-1}]$ (Fortran accepte aussi `u_mean`, `u_val`) | Valeur de vitesse horizontale imposée si `type = "DIRICHLET"`. |
+| `v` | `double` | `0.0` | Réel $[\text{m}\cdot\text{s}^{-1}]$ (Fortran accepte aussi `v_val`) | Valeur de vitesse verticale imposée si `type = "DIRICHLET"`. |
+| `profile` | `string` | `"UNIFORM"` | `"UNIFORM"`, `"PARABOLIC"`, `"POISEUILLE_STEP"` (C++), `"JET_INLET"` | Profil spatial de vitesse à l'entrée (`left` pour `PARABOLIC`/`POISEUILLE_STEP`, `top` pour `JET_INLET`). |
+| `u_mean` | `double` | `0.0` | Réel $[\text{m}\cdot\text{s}^{-1}]$ | Vitesse débitante moyenne pour les profils `"PARABOLIC"` et `"POISEUILLE_STEP"` en C++ (Fortran lit `u`). |
+| `y_step` | `double` | `0.0` | $[0, L_y[\,\text{m}$ | Hauteur de la marche sur le bord gauche pour `"POISEUILLE_STEP"` en C++ (Fortran utilise `obs_y1` si `OBS_BOX`). |
+| `jet_width` | `double` | `0.08` | $> 0.0\,\text{m}$ | Largeur de la buse d'injection pour `profile = "JET_INLET"` sur la face `top`. |
+| `jet_center` | `double` | `0.5` | $]0, L_x[\,\text{m}$ | Abscisse centrale $x_c$ de l'injecteur pour `profile = "JET_INLET"`. |
+| `T_type` | `string` | `"NEUMANN"` | `"DIRICHLET"`, `"NEUMANN"` (et `"PERIODIC"` en C++) | Type de condition aux limites thermique sur $T$. |
+| `T` | `double` | `0.0` | Réel $[\text{K}]$ (Fortran accepte aussi `T_val`) | Température imposée si `T_type = "DIRICHLET"`. |
 
-### 9. Section `boundary_conditions` (Frontières du Domaine)
+### 6. Section `initial_condition` (Alias `initial_conditions`)
 
-Chaque frontière (`left`, `right`, `bottom`, `top`) est configurée indépendamment :
+| Clé JSON | Type | Défaut (C++ / Fortran) | Options / Plage | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- |
+| `type` | `string` | `"SINGLE_PHASE"` / `"UNIFORM"` | `"SINGLE_PHASE"`, `"DROPLET"`, `"BUBBLE"`, `"CYLINDER"`, `"DAM_BREAK"`, `"LIQUID_SHEET"`, `"VISCOUS_JET"` (`"JET_BUCKLING"`), `"RAYLEIGH_TAYLOR"`, `"VORTEX_SHEAR"`, `"SHEAR_LAYER"` (C++), `"UNIFORM"` / `"POISEUILLE"` / `"LAPLACIAN_TEST"` (Fortran) | Forme géométrique initiale de la fraction volumique $C$ (et du champ de vitesse initial associé pour `LIQUID_SHEET` et `VISCOUS_JET`). |
+| `u`, `v` | `double` | `0.0` | Réel $[\text{m}\cdot\text{s}^{-1}]$ | Champ de vitesse initial uniforme dans tout le domaine. |
+| `center_x`, `center_y` | `double` | `0.5` | Coordonnées $[\text{m}]$ | Centre de la goutte/bulle/cylindre/vortex, ou hauteur médiane pour `LIQUID_SHEET` / `RAYLEIGH_TAYLOR` / `SHEAR_LAYER`, ou centre X de l'amorce pour `VISCOUS_JET`. |
+| `radius` | `double` | `0.25` | $> 0.0\,\text{m}$ | Rayon initial pour `DROPLET`, `BUBBLE`, `CYLINDER`, `VORTEX_SHEAR`. |
+| `axis_a`, `axis_b` | `double` | `0.0` | $\ge 0.0\,\text{m}$ | Demi-axes elliptiques $a$ (X) et $b$ (Y) pour bulle/goutte oscillante de Lamb. Si `axis_a <= 0` et `pert_amp > 0`, auto-calculés par $a = R(1+\varepsilon)$ et $b = R/(1+\varepsilon)$. |
+| `pert_amp` | `double` | `0.0` (`0.01`/`0.05` si RT) | $\ge 0.0$ | Amplitude de perturbation géométrique (sinusoïde Rayleigh-Taylor/Shear-Layer ou ellipticité de Lamb). |
+| `pert_k` | `double` | `1.0` | $> 0.0$ | Nombre de modes / nombre d'onde de la perturbation initiale. |
+| `box_x0`, `box_y0`, `box_x1`, `box_y1` | `double` | `0,0,1,1` / `0,0,0.5,0.5` | Coordonnées $[\text{m}]$ | Emprise rectangulaire $[x_0, x_1] \times [y_0, y_1]$ de Fluide 1 pour `DAM_BREAK`. |
+| `thickness` | `double` | `0.0003` | $> 0.0\,\text{m}$ | Épaisseur $\delta$ de la nappe liquide horizontale ($C=0$) pour `LIQUID_SHEET`. |
+| `jet_width` | `double` | `0.08` | $> 0.0\,\text{m}$ | Largeur de l'amorce liquide initiale sous la paroi supérieure pour `VISCOUS_JET`. |
+| `p_init` (alias `p0`) | `double` | `0.0` | Réel $[\text{Pa}]$ | Pression thermodynamique initiale uniforme (ex. `1.01325e5` en régime `compressible = true`). |
 
-| Clé JSON | Type | Défaut | Options / Plage | Description Physique et Numérique |
-| :------------ | :------ | :-------- | :--------------------- | :--------------------------------------------------- |
-| `boundary_conditions.<face>.type` | `string` | `"DIRICHLET"` | `"DIRICHLET"`, `"NEUMANN"`, `"PERIODIC"`, `"FREESLIP"` | Type de condition aux limites hydrodynamique. |
-| `boundary_conditions.<face>.u` | `double` | `0.0` | Réel $[\text{m}\cdot\text{s}^{-1}]$ | Valeur de vitesse horizontale prescrite si Dirichlet. |
-| `boundary_conditions.<face>.v` | `double` | `0.0` | Réel $[\text{m}\cdot\text{s}^{-1}]$ | Valeur de vitesse verticale prescrite si Dirichlet. |
-| `boundary_conditions.<face>.t` | `double` | `293.15` | Réel $[\text{K}]$ | Valeur de température prescrite si Dirichlet thermique. |
+### 7. Section `solver` (Couplage Navier-Stokes, Krylov et Préconditionneurs)
 
-### 10. Section `output` (Visualisation et Fichiers de Données)
+| Clé JSON | Type | Défaut (C++ / Fortran) | Options / Alias / Plage | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- |
+| `solver.type` | `string` | `"AUGMENTED_LAGRANGIAN"` | `"AUGMENTED_LAGRANGIAN"`, `"AAL"` (`"ADAPTATIVE_AUGMENTED_LAGRANGIAN"`, `"ADAPTIVE_AUGMENTED_LAGRANGIAN"`), `"C-AAL"` (`"CAAL"`, `"COMPRESSIBLE_AAL"`), `"MONOLITHIC"` (`"FULLY_COUPLED"`, `"FC"`), `"STANDARD_PROJECTION"` (`"PROJECTION"`), `"DIRECT"` (`"MUMPS"`), `"CONJUGATE_GRADIENT"` (Fortran) | Formulation de couplage vitesse-pression. `"AAL"` et `"C-AAL"` activent automatiquement `adaptative_al = true` (`"C-AAL"` active aussi `compressible = true`). |
+| `solver.linear_solver` | `string` | `"BICGSTAB2"` | `"BICGSTAB2"`, `"BICGSTAB"`, `"CG"` (`"CONJUGATE_GRADIENT"`), `"GMRES"`, `"MINRES"`, `"DIRECT"` (`"MUMPS"`), et `"PETSC"`/`"HYPRE"` en C++ | Algorithme de résolution du système linéaire (par défaut `"DIRECT"` si `solver.type = "DIRECT"`). |
+| `solver.precond_type` (alias `preconditioner`) | `string` | `"JACOBI"` | `"JACOBI"` (`"DIAGONAL"`), `"BLOCK_TRIANGULAR"` (`"SCHUR"`, `"BT_SBP"`, `"BT-SBP"`, `"BLOCK"`, `"BLOCK_PRECONDITIONER"`), `"SSOR"` (`"GAUSS_SEIDEL"`), `"ILU0"` (`"ILU"`), `"CUSTOM"`, `"NONE"` | Préconditionneur appliqué à gauche ($P^{-1} A \mathbf{x} = P^{-1} \mathbf{b}$). |
+| `solver.tol` | `double` | `1.0e-7` / `1.0e-5` | $]0.0, 1.0[$ | Tolérance relative d'arrêt du solveur de Krylov $\|\mathbf{r}_k\|_2 / \|\mathbf{r}_0\|_2$. |
+| `solver.max_iter` | `integer` | `1000` / `300` | $\ge 1$ | Nombre maximal d'itérations de Krylov par résolution linéaire. |
+| `solver.r_al` | `double` | `500.0` / `100.0` | $> 0.0\,\text{Pa}\cdot\text{s}$ | Paramètre scalaire de pénalité AL (ou valeur de repli si AAL produit $0$). |
+| `solver.adaptative_al` (alias `adaptative_r`, `adaptative_r_al`) | `boolean` | `false` | `true`, `false` | Active le calcul adaptatif spatio-temporel $r(t, M)$ (Vincent et al. 2004, Éq. 14). |
+| `solver.k_aal` (alias `r_factor`) | `double` | `100.0` | $> 0.0$ (typ. $[10, 1000]$) | Facteur d'amplification adimensionnel $K_{\text{aal}}$ de l'Équation 14. |
+| `solver.uzawa_iter` | `integer` | `1` | $\ge 1$ | Nombre maximal d'itérations externes d'Uzawa par pas de temps (en mode AL/AAL/C-AAL). |
+| `solver.uzawa_tol` | `double` | `1.0e-12` | $\ge 0.0\,\text{s}^{-1}$ | Critère d'arrêt anticipé d'Uzawa sur $\|\nabla\cdot\mathbf{u} + \frac{\chi_T}{\Delta t}(p - p^n)\|_\infty \le \text{uzawa\_tol}$. |
+| `solver.l0_ref`, `t0_ref`, `u0_ref`, `p0_ref` | `double` | `0.0` | $\ge 0.0$ (`0.0` = automatique) | Échelles physiques manuelles ($L_0, t_0, u_0, p_0$) pour l'adimensionnement AAL. |
+| `solver.use_precond` | `boolean` | `true` | `true`, `false` | Active (`true`) ou court-circuite (`false`) le préconditionneur. |
+| `solver.steady_state_tol` | `double` | `0.0` | $\ge 0.0$ | Alias du seuil d'arrêt stationnaire dans `solver`. |
 
-| Clé JSON | Type | Défaut | Options / Plage | Description Physique et Numérique |
-| :------------ | :------ | :-------- | :--------------------- | :--------------------------------------------------- |
-| `output.format` | `string` | `"VTK"` | `"VTK"`, `"CSV"`, `"NONE"` | Format des résultats de calcul. `"VTK"` génère `.vtr` et `.pvtr`. |
-| `output.frequency` | `integer` | `10` | $\ge 1$ | Fréquence d'écriture des fichiers de résultats (toutes les $N$ itérations). |
-| `output.directory` | `string` | `"output"` | Chemin valide | Répertoire de destination des fichiers de résultats. |
-| `output.filename` | `string` | `"result"` | Nom valide | Préfixe des fichiers numériques de sortie (ex. `result_00010.vtr`). |
-| `output.save_pvd` | `boolean` | `true` | `true`, `false` | Génère le fichier maître `.pvd` liant la série temporelle pour ParaView. |
+### 8. Sections `vof` et `markers` (Suivi d'Interface et Marqueurs CVI)
+
+:::note
+Les clés de marqueurs peuvent être placées soit directement dans le bloc **`vof`** (préfixe `marker_*`), soit dans le bloc dédié **`markers`** (avec les alias indiqués ci-dessous), le bloc `markers` ayant la priorité finale s'il est présent.
+:::
+
+| Clé dans `vof` | Alias dans `markers` | Type | Défaut (C++ / Fortran) | Options / Plage | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `vof.advection_method` | — | `string` | `"WEYMOUTH_YUE"` | `"WEYMOUTH_YUE"`, `"CIAM"`, `"VOF_TVD"` (`"TVD"`) | Algorithme d'advection de la fraction volumique $C$. |
+| `vof.reconstruction_method` | — | `string` | `"PLIC"` | `"PLIC"`, `"ELVIRA"`, `"LVIRA"`, `"SLIC"`, `"NONE"` | Méthode de reconstruction affine (forcée à `"NONE"` si `VOF_TVD`, et à `"PLIC"` si géométrique). |
+| `vof.tvd_limiter` | — | `string` | `"NONE"` (`"SUPERBEE"` si `VOF_TVD`) | `"SUPERBEE"`, `"VAN_LEER"`, `"MUSCL"`, `"HRIC"`, `"NONE"` | Limiteur algébrique (forcé à `"NONE"` pour `WEYMOUTH_YUE` et `CIAM`). |
+| `vof.cfl_vof` | — | `double` | `0.5` | $]0.0, 0.5]$ | Nombre de CFL VOF de référence. |
+| `vof.use_markers` | `markers.enabled`, `markers.use_markers` | `boolean` | `false` | `true`, `false` | Active le nuage de marqueurs lagrangiens non connectés (méthode FC-WY-CVI-Marker). |
+| `vof.markers_per_cell` | `markers.markers_per_cell` | `integer` | `4` | $\ge 2$ | Nombre de marqueurs semés initialement (et lors du ré-ensemencement) par segment PLIC coupé. |
+| `vof.marker_advection_scheme` | `markers.advection_scheme`, `markers.marker_advection_scheme` | `string` | `"CVI_RK2"` | `"CVI_RK2"`, `"BILINEAR_RK2"` (`"BILINEAR"`) | Interpolation conservative CVI (Variante B exacte) ou bilinéaire MAC pour l'advection RK2-Heun. |
+| `vof.marker_curvature` | `markers.use_marker_curvature`, `markers.marker_curvature` | `boolean` | `true` / `false` | `true`, `false` | Active la courbure par régression parabolique pondérée dans le repère $(\tau, \eta)$ pour le modèle CSF. |
+| `vof.marker_normals_plic` | `markers.use_marker_normals_plic`, `markers.marker_normals_plic` | `boolean` | `true` / `false` | `true`, `false` | Injecte les normales issues des marqueurs dans les segments PLIC lors de l'advection VOF. |
+| `vof.marker_max_per_cell` | `markers.max_per_cell`, `markers.marker_max_per_cell` | `integer` | `8` | $\ge 4$ | Seuil d'élagage par sous-octants dans une cellule afin d'éviter la surpopulation locale. |
+| `vof.write_markers_vtk` | `markers.write_vtk`, `markers.write_markers_vtk` *(et `output.write_markers_vtk` en C++)* | `boolean` | `false` | `true`, `false` | Exporte le nuage de points au format VTK PolyData (`<case_name>_markers_<step:06d>.vtk`). |
+
+### 9. Section `obstacles` (Tableau d'Obstacles Immergés Brinkman)
+
+Déclarée sous forme de tableau JSON `"obstacles": [ { ... } ]`. C++ supporte plusieurs objets dans le tableau ; Fortran lit le premier objet défini.
+
+| Clé JSON | Type | Défaut (C++ / Fortran) | Options / Plage | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- |
+| `type` | `string` | `"BOX"` | `"BOX"`, `"CYLINDER"` | Forme géométrique de l'obstacle immergé. |
+| `x0`, `y0`, `x1`, `y1` | `double` | `0.0` | Coordonnées $[\text{m}]$ | Bornes du rectangle $[x_0, x_1] \times [y_0, y_1]$ (si `type = "BOX"`). |
+| `xc`, `yc`, `radius` | `double` | `0.0` | Coordonnées & rayon $[\text{m}]$ | Centre $(x_c, y_c)$ et rayon $R$ du disque (si `type = "CYLINDER"`). |
+| `permeability` | `double` | `1.0e-14` / `1.0e-40` | $> 0.0\,\text{m}^2$ | Perméabilité de Darcy $\mathcal{K}$ : $\mathcal{K} \le 10^{-12}$ impose un solide rigide adhérent ; $\mathcal{K} > 10^{-12}$ applique la traînée poreuse $-\frac{\mu}{\mathcal{K}}\mathbf{u}$. |
+
+### 10. Section `output` (Sorties VTK, Journaux Console et CSV)
+
+| Clé JSON | Type | Défaut (C++ / Fortran) | Options / Plage | Description Physique et Numérique |
+| :--- | :--- | :--- | :--- | :--- |
+| `output.output_dir` (alias Fortran `directory`) | `string` | `"output"` | Chemin de dossier | Répertoire de sortie (créé automatiquement sur le rang 0). |
+| `output.case_name` | `string` | `"covof"` / `"covof2d_case"` | Préfixe de fichier | Préfixe commun des fichiers `.vtr`, `.pvtr`, `_markers_*.vtk` et `_history.csv`. |
+| `output.vtk_interval` | `integer` | `10` / `50` | $\ge 1$ | Période d'écriture des fichiers `.vtr`/`.pvtr` (et `_markers_*.vtk` si activé), en nombre de pas de temps (le pas `0` et le pas final sont toujours écrits). |
+| `output.log_interval` | `integer` | `1` / `10` | $\ge 1$ | Période d'affichage du tableau de suivi sur la sortie standard du rang 0. |
+| `output.write_csv_history` | `boolean` | `true` | `true`, `false` | Active l'écriture à chaque pas de temps du fichier `<output_dir>/<case_name>_history.csv`. |
+| `output.write_markers_vtk` | `boolean` | `false` | `true`, `false` | Alias C++ pour activer l'export VTK PolyData des marqueurs. |
 
 ---
 
-## Fichier de Configuration Maître Intégral et Commenté
+## Fichier de Configuration Maître Intégral et Validé
 
-Voici la reproduction complète du fichier de référence maître (`template_parametres_covof2d.json`) utilisable comme canevas pour tout nouveau cas de simulation :
+Le fichier ci-dessous n'utilise **exclusivement que des clés reconnues à 100 %** par `Config.cpp` et `module_config.f90` (exemple : goutte capillaire ou bulle ascendante avec méthode hybride **FC-WY-CVI-Marker** et lissage SVOF) :
 
 ```json
 {
-  // =========================================================================================
-  // COVOF 2D — FICHIER DE CONFIGURATION MAÎTRE ET CATALOGUE EXHAUSTIF DES PARAMÈTRES
-  // =========================================================================================
+  // =========================================================================
+  // COVOF 2D — FICHIER DE CONFIGURATION MAÎTRE (C++17 & FORTRAN 2018)
+  // =========================================================================
   "mode": "NAVIER_STOKES",
-  "test_case": "SIMULATION_MAITRE_COVOF2D",
+  "test_case": "MAITRE_FC_WY_CVI_MARKER",
   "steady_state_tol": 0.0,
-  "source_term": 0.0,
 
-  // -----------------------------------------------------------------------------------------
-  // 1. MAILLAGE CARTÉSIEN DÉCALÉ (MAC)
-  // -----------------------------------------------------------------------------------------
   "mesh": {
     "nx": 64,
     "ny": 128,
-    "lx": 0.1,
-    "ly": 0.2,
-    "x_min": 0.0,
-    "y_min": 0.0,
-    "grid_type": "CARTESIAN"
+    "lx": 1.0,
+    "ly": 2.0
   },
 
-  // -----------------------------------------------------------------------------------------
-  // 2. DISCRÉTISATION TEMPORELLE ET CFL ADAPTATIF
-  // -----------------------------------------------------------------------------------------
-  "time": {
-    "dt": 0.0005,
-    "t_end": 0.5,
-    "cfl": 0.5,
-    "time_scheme": "GEAR",
-    "adaptative_dt": true
-  },
-
-  // -----------------------------------------------------------------------------------------
-  // 3. PROPRIÉTÉS PHYSIQUES DES PHASES ET TENSION SUPERFICIELLE
-  // -----------------------------------------------------------------------------------------
   "physics": {
-    "rho1": 1000.0,
-    "rho2": 1.2,
-    "mu1": 1.0e-3,
-    "mu2": 1.8e-5,
-    "sigma": 0.0728,
-    "gx": 0.0,
-    "gy": -9.81,
     "enable_two_phase": true,
-    "viscosity_model": "CONSTANT",
-    "vof_model": "PLIC",
-    "compressible": false,
-    "ic_type": "DAM_BREAK",
-    "ic_x0": 0.0,
-    "ic_y0": 0.0,
-    "ic_width": 0.035,
-    "ic_height": 0.07
-  },
-
-  // -----------------------------------------------------------------------------------------
-  // 4. TRANSFERT THERMIQUE (ÉNERGIE)
-  // -----------------------------------------------------------------------------------------
-  "thermal": {
+    "enable_surface_tension": true,
+    "enable_convection": true,
+    "convective_scheme": "CENTERED",
+    "convective_linearization": "ADAMS_BASHFORTH",
+    "enable_svof_smoothing": true,
+    "svof_filter_width": 0.5,
+    "enable_diffusion_smoothing": false,
+    "diffusion_smoothing_steps": 3,
     "enable_energy": false,
-    "th_cond1": 0.6,
-    "th_cond2": 0.026,
-    "cp1": 4182.0,
-    "cp2": 1005.0,
-    "beta_th": 2.1e-4,
-    "t_ref": 293.15,
-    "t_hot": 303.15,
-    "t_cold": 283.15,
-    "t_init": 293.15
+    "compressible": false,
+    "flow_regime": "INCOMPRESSIBLE",
+    "enable_ssp_rk3_momentum": false,
+    "sigma": 24.5,
+    "gx": 0.0,
+    "gy": -0.98,
+    "Ra": 1.0e5,
+    "Pr": 0.71,
+    "T_ref": 300.0,
+    "beta": 3.33e-3,
+    "viscosity_model": "CONSTANT",
+    "fluid1": {
+      "rho": 1000.0,
+      "mu": 10.0,
+      "Cp": 4182.0,
+      "k_thermal": 0.6,
+      "beta": 2.1e-4,
+      "eos": "INCOMPRESSIBLE",
+      "chi_T": 0.0,
+      "gamma": 1.4,
+      "r_gas": 287.05,
+      "cv": 717.5,
+      "p_inf": 0.0,
+      "b_nasg": 0.0,
+      "q_nasg": 0.0
+    },
+    "fluid2": {
+      "rho": 100.0,
+      "mu": 1.0,
+      "Cp": 1006.0,
+      "k_thermal": 0.026,
+      "beta": 3.33e-3,
+      "eos": "INCOMPRESSIBLE",
+      "chi_T": 0.0,
+      "gamma": 1.4,
+      "r_gas": 287.05,
+      "cv": 717.5,
+      "p_inf": 0.0,
+      "b_nasg": 0.0,
+      "q_nasg": 0.0
+    }
   },
 
-  // -----------------------------------------------------------------------------------------
-  // 5. COUPLAGE NAVIER-STOKES ET SOLVEURS LINÉAIRES
-  // -----------------------------------------------------------------------------------------
+  "time": {
+    "time_scheme": "GEAR",
+    "dt": 1.0e-3,
+    "t_final": 3.0,
+    "cfl_max": 0.35,
+    "adaptive_dt": true
+  },
+
+  "initial_condition": {
+    "type": "BUBBLE",
+    "u": 0.0,
+    "v": 0.0,
+    "center_x": 0.5,
+    "center_y": 0.5,
+    "radius": 0.25,
+    "axis_a": 0.0,
+    "axis_b": 0.0,
+    "pert_amp": 0.0,
+    "pert_k": 1.0,
+    "p_init": 0.0
+  },
+
+  "boundary_conditions": {
+    "left":   { "type": "FREE_SLIP", "u": 0.0, "v": 0.0, "profile": "UNIFORM", "T_type": "NEUMANN", "T": 300.0 },
+    "right":  { "type": "FREE_SLIP", "u": 0.0, "v": 0.0, "profile": "UNIFORM", "T_type": "NEUMANN", "T": 300.0 },
+    "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0, "profile": "UNIFORM", "T_type": "NEUMANN", "T": 300.0 },
+    "top":    { "type": "DIRICHLET", "u": 0.0, "v": 0.0, "profile": "UNIFORM", "T_type": "NEUMANN", "T": 300.0 }
+  },
+
+  "vof": {
+    "advection_method": "WEYMOUTH_YUE",
+    "reconstruction_method": "ELVIRA",
+    "tvd_limiter": "NONE",
+    "cfl_vof": 0.35,
+    "use_markers": true,
+    "markers_per_cell": 4,
+    "marker_advection_scheme": "CVI_RK2",
+    "marker_curvature": true,
+    "marker_normals_plic": true,
+    "marker_max_per_cell": 8,
+    "write_markers_vtk": true
+  },
+
   "solver": {
-    "type": "AAL",
+    "type": "MONOLITHIC",
     "linear_solver": "BICGSTAB2",
-    "preconditioner": "JACOBI",
-    "tol": 1.0e-6,
-    "max_iter": 500,
-    "r_al": 100.0,
-    "adaptative_al": true,
-    "k_aal": 1.0,
-    "uzawa_iter": 3,
-    "uzawa_tol": 1.0e-5,
+    "precond_type": "BLOCK_TRIANGULAR",
+    "tol": 1.0e-10,
+    "max_iter": 1000,
+    "r_al": 500.0,
+    "adaptative_al": false,
+    "k_aal": 100.0,
+    "uzawa_tol": 1.0e-10,
+    "uzawa_iter": 1,
+    "l0_ref": 0.0,
+    "t0_ref": 0.0,
+    "u0_ref": 0.0,
+    "p0_ref": 0.0,
     "use_precond": true
   },
 
-  // -----------------------------------------------------------------------------------------
-  // 6. SCHÉMAS CONVECTIFS
-  // -----------------------------------------------------------------------------------------
-  "convection": {
-    "convective_scheme": "UPWIND",
-    "convective_linearization": "NEWTON"
-  },
+  "obstacles": [],
 
-  // -----------------------------------------------------------------------------------------
-  // 7. CORPS SOLIDES IMMERGÉS (PÉNALISATION DE BRINKMAN)
-  // -----------------------------------------------------------------------------------------
-  "obstacles": {
-    "enable_obstacles": true,
-    "type": "CYLINDER",
-    "xc": 0.05,
-    "yc": 0.04,
-    "radius": 0.01,
-    "permeability": 1.0e-40
-  },
-
-  // -----------------------------------------------------------------------------------------
-  // 8. CONDITIONS AUX LIMITES HYDRODYNAMIQUES ET THERMIQUES
-  // -----------------------------------------------------------------------------------------
-  "boundary_conditions": {
-    "left":   { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
-    "right":  { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
-    "bottom": { "type": "DIRICHLET", "u": 0.0, "v": 0.0 },
-    "top":    { "type": "FREESLIP",  "u": 0.0, "v": 0.0 }
-  },
-
-  // -----------------------------------------------------------------------------------------
-  // 9. GESTION DES SORTIES NUMÉRIQUES ET LOGS
-  // -----------------------------------------------------------------------------------------
   "output": {
-    "format": "VTK",
-    "frequency": 20,
-    "directory": "output",
-    "filename": "dambreak_obs",
-    "save_pvd": true
+    "output_dir": "output/bulle_cvi",
+    "case_name": "rising_bubble",
+    "vtk_interval": 50,
+    "log_interval": 10,
+    "write_csv_history": true
   }
 }
 ```
 # Exécution, Post-Traitement et Dépannage
 
-## Lancement d'une Simulation et Gestion du Calcul
+## Lancement d'une Simulation en Ligne de Commande
 
-Le lancement d'une simulation avec **COVOF 2D** est conçu pour être direct, rapide et unifié entre les deux implémentations C++17 et Fortran 2018.
+Les exécutables **C++17** (`covof2d_cpp` et son lien `covof2d`) et **Fortran 2018** (`covof2d_fortran`) acceptent exactement la même interface en ligne de commande et fonctionnent en **MPI pur** (aucun thread OpenMP).
 
-### Lancement en Ligne de Commande
-
-Les deux exécutables acceptent le chemin vers le fichier de configuration JSON comme argument unique en ligne de commande :
+### Syntaxe d'Exécution
 
 ```bash
-# Exécution séquentielle C++ :
+# Exécution séquentielle (1 processus MPI) :
 ./COVOF_2D-C++/bin/covof2d_cpp chemin/vers/mon_cas.json
-
-# Exécution séquentielle Fortran :
 ./COVOF_2D-FORTRAN/bin/covof2d_fortran chemin/vers/mon_cas.json
 
-# Exécution parallèle distribuée MPI (exemple sur 4 processus) :
+# Exécution parallèle distribuée MPI (exemple sur 4 rangs MPI) :
 mpirun -np 4 ./COVOF_2D-C++/bin/covof2d_cpp chemin/vers/mon_cas.json
 mpirun -np 4 ./COVOF_2D-FORTRAN/bin/covof2d_fortran chemin/vers/mon_cas.json
+
+# Affichage de l'aide intégrée :
+./COVOF_2D-C++/bin/covof2d_cpp --help
+./COVOF_2D-FORTRAN/bin/covof2d_fortran --help
 ```
 
-Si aucun argument n'est fourni, les deux solveurs recherchent par défaut un fichier nommé `config.json` dans le répertoire d'exécution courant. En cas d'absence de ce fichier, ils affichent une notice d'aide claire récapitulant les options d'usage et les cas d'exemples.
+Si aucun argument n'est fourni sur la ligne de commande, les deux programmes tentent de charger le fichier par défaut `cases/cavity.json`. En cas d'échec d'ouverture du fichier JSON, le rang 0 affiche un message d'erreur et déclenche `MPI_Abort(MPI_COMM_WORLD, 1)`.
 
 ---
 
-## Interprétation des Journaux de Convergence (Logs)
+## Interprétation des Journaux Console (`main.cpp` / `Config::print()` / `Simulation::run()`)
 
-Dès son initialisation, COVOF 2D affiche une bannière technique récapitulant les paramètres de la simulation : maillage local et global, topologie des processus MPI, propriétés thermodynamiques, choix des solveurs et pas de temps initial.
+Dès le lancement, seul le processus maître (`rank == 0`) affiche l'en-tête d'accueil, le résumé complet de la configuration (`Config::print()` en C++), puis l'en-tête de la boucle temporelle.
 
-### Exemple de Journal Console au Démarrage
+### Exemple Réel de Sortie Console (C++17)
 
 ```text
 ================================================================================
-   COVOF 2D — Solveur CFD Navier-Stokes Incompressible Parallèle (C++17 / MPI)   
+   COVOF 2D — Solveur CFD Navier-Stokes Incompressible Parallèle (C++17/MPI)   
 ================================================================================
-[INFO] Lecture de la configuration : case_dambreak.json
-[INFO] Topologie MPI 2D active     : 4 processus (Px = 2, Py = 2)
-[INFO] Maillage global             : 128 x 256 mailles (Lx = 0.1 m, Ly = 0.2 m)
-[INFO] Maillage local par rang     : 64 x 128 mailles (dx = 7.8125e-04 m, dy = 7.8125e-04 m)
-[INFO] Modèle d'écoulement         : Diphasique VOF-PLIC (rho1=1000, rho2=1.2, mu1=1e-3, mu2=1.8e-5)
-[INFO] Couplage Navier-Stokes      : AAL (Adaptative Augmented Lagrangian, Vincent et al. 2004)
-[INFO] Solveur Linéaire            : BiCGSTAB(2) avec préconditionneur JACOBI (tol = 1.0e-06)
+  Nombre de processus MPI  : 4
+  Fichier de configuration : rising_bubble.json
 ================================================================================
-  Step        Time [s]        dt [s]    Iter_NS         Res_U        Res_Div         CFL
---------------------------------------------------------------------------------------
-     1     5.00000e-04   5.00000e-04         12   1.45821e-07   8.91420e-06     0.0124
-     2     1.00000e-03   5.00000e-04         14   2.11045e-07   7.23410e-06     0.0241
-    10     5.00000e-03   5.00000e-04         15   3.45120e-07   4.12050e-06     0.0895
-    50     2.50000e-02   5.00000e-04         18   5.12040e-07   2.89120e-06     0.2450
+========================================================
+       COVOF 2D PARALLELE - CONFIGURATION DU CAS         
+========================================================
+ Mode calcul : NAVIER_STOKES
+ Maillage : 64 x 128 cellules (Lx = 1 m, Ly = 2 m)
+ dx = 0.015625 m, dy = 0.015625 m
+ Physique : Diphasique | Convection : Oui | Tension de surface : Oui
+ Fluide 1 : rho=1000 kg/m3, mu=10 Pa.s
+ Fluide 2 : rho=100 kg/m3, mu=1 Pa.s
+ Tension superficielle sigma = 24.5 N/m
+ VOF : Advection=WEYMOUTH_YUE | Reconstruction=ELVIRA | Marqueurs CVI=CVI_RK2 (N_init=4, Courbure=Oui, NormalesPLIC=Oui)
+ Gravite : g = (0, -0.98) m/s^2
+   Schema temporel : GEAR | Linearisation convective : ADAMS_BASHFORTH | Lissage SVOF : Oui (k=0.500000)
+ Temps : dt = 0.001 s, t_final = 3 s
+ Solveur : MONOLITHIC | BiCGSTAB(2), tol=1e-10, max_iter=1000, r_al=500, uzawa_iter=1
+ Sorties : Dossier 'output/bulle_cvi', intervalle VTK=50
+========================================================
+
+>>> DEMARRAGE DU CALCUL COVOF 2D PARALLELE <<<
+Pas     Temps [s]     dt [s]      Iter Krylov Vitesse Max     Div Max         
+-------------------------------------------------------------------------------------
+10      0.01000       1.000e-03   14          1.2410e-02      3.1842e-11      
+20      0.02000       1.000e-03   15          2.4635e-02      2.9410e-11      
+...
+------------------------------------------------------------------------------
+>>> SIMULATION COVOF 2D TERMINEE AVEC SUCCES A t = 3.00000 s <<<
+Fichiers de visualisation VTK et CSV disponibles dans : output/bulle_cvi
 ```
 
-### Signification des Colonnes du Journal
+*(Note : en Fortran, la bannière de démarrage de boucle affiche `>>> DEMARRAGE DU CALCUL COVOF 2D FORTRAN 2018 PARALLELE <<<` et inclut systématiquement la colonne `Nu Moyen`, qui vaut `0.0000` lorsque `enable_energy = false` ; en C++, la colonne `Nu Moyen` n'est affichée que si `enable_energy = true`.)*
 
-- `Step` : Numéro de l'itération temporelle courante $n$.
-- `Time [s]` : Temps physique total simulé écoulé depuis le début du calcul $t = \sum \Delta t$.
-- `dt [s]` : Valeur du pas de temps d'avancement $\Delta t$ utilisé pour le pas courant.
-- `Iter_NS` : Nombre cumulé d'itérations effectuées par le solveur linéaire de Krylov (ex. BiCGSTAB2 ou MINRES) sur l'ensemble des sous-itérations d'Uzawa du pas.
-- `Res_U` : Norme relative euclidienne du résidu du système linéaire de quantité de mouvement à la convergence.
-- `Res_Div` : Norme infinie maximale du résidu de continuité $\|\nabla \cdot \mathbf{u}^{n+1}\|_\infty$ sur l'ensemble du domaine de calcul $[\text{s}^{-1}]$.
-- `CFL` : Nombre de Courant-Friedrichs-Lewy convectif maximal observé sur la grille : $\max_{i, j} \left( \frac{|u|\Delta t}{\Delta x} + \frac{|v|\Delta t}{\Delta y} \right)$.
+### Signification des Colonnes de la Boucle Temporelle
 
-### Fichier d'Historique de Convergence CSV
-
-En parallèle de la sortie console, le solveur enregistre à chaque pas de temps une ligne dans le fichier `output/convergence.csv`, permettant le tracé dynamique en cours de calcul des courbes de résidus et du suivi du bilan de masse global.
+| Colonne | Signification Physique et Numérique |
+| :--- | :--- |
+| `Pas` | Indice de l'itération temporelle courante (`step`). |
+| `Temps [s]` | Temps physique cumulé $t = \sum \Delta t$ $[\text{s}]$. |
+| `dt [s]` | Pas de temps effectif $\Delta t$ utilisé à l'itération courante $[\text{s}]$. |
+| `Iter Krylov` | Nombre cumulé d'itérations du solveur linéaire (`total_iters`) sur toutes les itérations d'Uzawa du pas. |
+| `Vitesse Max` | Norme maximale de vitesse observée sur la grille globale (`global_max_u`, $[\text{m}\cdot\text{s}^{-1}]$). |
+| `Div Max` | Divergence discrète maximale $\max_{i,j} \left|\frac{u_{i+1,j}-u_{i,j}}{\Delta x} + \frac{v_{i,j+1}-v_{i,j}}{\Delta y}\right|$ $[\text{s}^{-1}]$. |
+| `Nu Moyen` | Nombre de Nusselt moyen à la paroi chaude $x=0$ (si `enable_energy = true`, ou toujours affiché en Fortran). |
 
 ---
 
-## Visualisation et Extraction de Données
+## Fichiers de Sortie, Visualisation ParaView et Post-Traitement
 
-COVOF 2D produit des sorties volumiques au standard ouvert **XML VTK Rectilinear Grid**, optimisé pour les maillages cartésiens et directement exploitable sous **ParaView**, **VisIt** ou par les scripts Python de traitement d'images et de données scientifiques.
+Tous les fichiers générés sont placés dans le répertoire `output.output_dir` en utilisant le préfixe `output.case_name` (noté `<case>` ci-dessous).
 
-### Structure des Fichiers XML VTK Générés
+### 1. Historique Temporel CSV : `<case>_history.csv`
 
-Lorsqu'un pas d'écriture est franchi (selon la fréquence `output.frequency`), le répertoire `output/` reçoit :
+Écrit à chaque pas de temps lorsque `output.write_csv_history = true` (`VTKWriter.cpp` / `module_vtk_writer.f90`).
 
-1. **Les fichiers de sous-domaines `.vtr` (*VTK Rectilinear Grid*) :**
-   Chaque processus MPI de rang $p$ écrit de manière autonome son sous-domaine local sans goulot d'étranglement centralisé :
-   `output/nom_00100_piece_0.vtr`, `output/nom_00100_piece_1.vtr`, etc.
-   Ces fichiers contiennent les tableaux de coordonnées 1D $x(i)$, $y(j)$ et les champs volumiques au format binaire ou base64 :
-   - `Velocity` : vecteur vitesse $(u, v, 0)$ aux centres ou interpolé aux nœuds.
-   - `Pressure` : champ scalaire de pression $p$.
-   - `VOF_Color` : fraction volumique de liquide $C \in [0, 1]$.
-   - `Density` et `Viscosity` : champs de masse volumique $\rho$ et viscosité $\mu$.
-   - `Temperature` : champ thermique $T$ (si l'énergie est activée).
+- **Format C++ (9 colonnes) :**
+  `step,time,dt,center_of_mass_y,rise_velocity,bubble_volume,kinetic_energy,max_u,max_div`
+- **Format Fortran (11 colonnes) :**
+  `step,time,dt,center_of_mass_y,rise_velocity,bubble_volume,kinetic_energy,max_u,max_div,avg_rho_gas,avg_p_gas`
 
-2. **Le fichier maître `.pvtr` (*Parallel VTK Rectilinear Grid*) :**
-   Le processus de rang maître (rang 0) génère un fichier XML léger pointant vers les différentes pièces `.vtr` associées à chaque rang :
-   ```xml
-   <?xml version="1.0"?>
-   <VTKFile type="PRectilinearGrid" version="0.1" byte_order="LittleEndian">
-     <PRectilinearGrid WholeExtent="0 128 0 256 0 0" GhostLevel="0">
-       <PCoordinates>
-         <PDataArray type="Float64" Name="XCoordinates"/>
-         <PDataArray type="Float64" Name="YCoordinates"/>
-         <PDataArray type="Float64" Name="ZCoordinates"/>
-       </PCoordinates>
-       <PCellData Scalars="Pressure,VOF_Color" Vectors="Velocity">
-         <PDataArray type="Float64" Name="Velocity" NumberOfComponents="3"/>
-         <PDataArray type="Float64" Name="Pressure"/>
-         <PDataArray type="Float64" Name="VOF_Color"/>
-       </PCellData>
-       <Piece Extent="0 64 0 128 0 0" Source="dambreak_00100_piece_0.vtr"/>
-       <Piece Extent="64 128 0 128 0 0" Source="dambreak_00100_piece_1.vtr"/>
-       <Piece Extent="0 64 128 256 0 0" Source="dambreak_00100_piece_2.vtr"/>
-       <Piece Extent="64 128 128 256 0 0" Source="dambreak_00100_piece_3.vtr"/>
-     </PRectilinearGrid>
-   </VTKFile>
-   ```
+Définition exacte des métriques calculées sur l'indicateur de la phase 2 (`1.0 - C`) :
+- `center_of_mass_y` : ordonnée du barycentre de la phase 2, $y_c = \frac{\int y (1-C)\,d\Omega}{\int (1-C)\,d\Omega}$.
+- `rise_velocity` : vitesse verticale moyenne de la phase 2, $v_c = \frac{\int v (1-C)\,d\Omega}{\int (1-C)\,d\Omega}$.
+- `bubble_volume` : aire totale (volume 2D) de la phase 2, $\int (1-C)\,d\Omega$.
+- `kinetic_energy` : énergie cinétique discrète aux nœuds de pression, $\frac{1}{2}\sum_{i,j}\rho_{i,j}\left(\frac{u_{i,j}^2 + u_{i+1,j}^2}{2} + \frac{v_{i,j}^2 + v_{i,j+1}^2}{2}\right)\Delta x \Delta y$.
+- `max_u`, `max_div` : vitesse maximale au centre des mailles et divergence discrète maximale.
+- `avg_rho_gas`, `avg_p_gas` (Fortran) : masse volumique gaz et pression moyenne dans la phase $1-C$ (pour suivi compressible).
 
-3. **Le fichier de collection temporelle `.pvd` (*ParaView Data*) :**
-   Ce fichier liste la séquence temporelle complète, permettant à ParaView de charger l'animation en un seul clic :
-   ```xml
-   <?xml version="1.0"?>
-   <VTKFile type="Collection" version="0.1">
-     <Collection>
-       <DataSet timestep="0.000" file="dambreak_00000.pvtr"/>
-       <DataSet timestep="0.010" file="dambreak_00020.pvtr"/>
-       <DataSet timestep="0.020" file="dambreak_00040.pvtr"/>
-     </Collection>
-   </VTKFile>
-   ```
+### 2. Champs Volumiques Parallèles XML VTK : `.vtr` et `.pvtr`
+
+Écrits au pas `0`, tous les `output.vtk_interval` pas, et au pas final :
+
+1. **Pièces locales par rang MPI :** `<case>_p<rank>_<step:06d>.vtr` (ex. `rising_bubble_p0_000050.vtr`). Chaque processus écrit son propre sous-domaine `RectilinearGrid` avec ses coordonnées `XCoordinates`, `YCoordinates`, `ZCoordinates`.
+2. **Fichier maître parallèle :** `<case>_<step:06d>.pvtr` (ex. `rising_bubble_000050.pvtr`), écrit par le rang 0 et référençant l'ensemble des `<Piece Extent="..." Source="<case>_p<rank>_<step:06d>.vtr"/>`.
+
+Les tableaux `<CellData>` exportés dans chaque `.vtr` et `.pvtr` sont exactement :
+- `PhaseIndicator` : fraction volumique brute $C_{i,j}$
+- `PhaseIndicator_Smoothed` : fraction volumique lissée SVOF $C_{s,i,j}$ (présente si `C_s` est alloué/non vide)
+- `Pressure` : pression $p_{i,j}$
+- `Density` : masse volumique $\rho_{i,j}$
+- `Viscosity` : viscosité dynamique $\mu_{i,j}$
+- `Divergence` : divergence discrète $(\nabla_h \cdot \mathbf{u})_{i,j}$
+- `Temperature` : température $T_{i,j}$
+- `Curvature` : courbure locale $\kappa_{i,j}$
+- `Velocity` : vecteur vitesse $(u_c, v_c, 0.0)$ à 3 composantes interpolé aux centres de mailles
+
+### 3. Nuage de Marqueurs Lagrangiens CVI : `<case>_markers_<step:06d>.vtk`
+
+Lorsque `vof.use_markers = true` et `vof.write_markers_vtk = true`, les rangs MPI rassemblent par `MPI_Gatherv` vers le rang 0 l'ensemble des marqueurs actifs et écrivent un fichier VTK Legacy ASCII `DATASET POLYDATA` (`InterfaceMarkers::write_vtk` / `write_markers_vtk`) :
+- `POINTS <N> double` : coordonnées $(x_p, y_p, 0.0)$
+- `VERTICES <N> <2N>` : sommets ponctuels pour affichage direct dans ParaView
+- `POINT_DATA <N>` contenant :
+  - `VECTORS MarkerNormal double` : normale unitaire $(n_{x,p}, n_{y,p}, 0.0)$ orientée vers $C=1$
+  - `SCALARS MarkerCurvature double 1` : courbure locale $\kappa_p$ portée par le marqueur
+
+### 4. Sorties Analytiques Spécifiques aux Modes de Vérification
+
+Selon la configuration (`mode` ou `test_case`), les routines dédiées de `Simulation.cpp` et `module_simulation.f90` exportent automatiquement des fichiers CSV de métrologie exacte dans `output_dir` :
+
+| Cas / Mode | Fichiers Générés | Colonnes Principales |
+| :--- | :--- | :--- |
+| `mode = "LAPLACIAN"` (`CAS_3_1`, `CAS_3_2_NEUMANN`) | `laplacian_error.csv`, `solver_history.csv`, `solution_field_2d.csv`, `profile_x_mid.csv`, `profile_y_mid.csv`, `solution_field.vtk` | `nx,ny,dx,dy,iters,err_l1,err_l2,err_linf` et `iter,residual` |
+| `test_case = "CAS_3_7"` / `"POISEUILLE"` | `poiseuille_error.csv`, `profile_u_y.csv`, `profile_p_x.csv`, `solution_field_2d.csv`, `solution_field.vtk` | `nx,ny,dx,dy,iters,err_l1,err_l2,err_linf,err_grad_p,cpu_time` |
+| `test_case = "CAS_3_8"` / `"CAS_3_8_POISEUILLE_UNSTEADY"` | `poiseuille_unsteady_error.csv`, `profile_u_y.csv`, `solution_field_2d.csv`, `solution_field.vtk` | `nx,ny,dx,dy,total_step,final_time,err_l1,err_l2,err_linf,cpu_time` |
+| `mode = "VORTEX_ADVECTION"` | `vortex_error.csv` (+ `.vtr`/`.pvtr` et `_markers_*.vtk`) | `nx,ny,dt,T,advection,reconstruction,limiter,err_l1,err_l2,err_linf,mass_init,mass_final,mass_conservation` |
 
 ### Exploitation sous ParaView
 
-1. **Chargement :** Ouvrir le fichier `.pvd` dans ParaView et cliquer sur **Apply**.
-2. **Visualisation de l'interface liquide/gaz :**
-   Appliquer le filtre **Contour** sur le champ scalaire `VOF_Color` avec la valeur seuil $C = 0.5$. La surface ainsi extraite représente fidèlement la frontière matérielle entre les deux phases.
-3. **Vecteurs vitesse et lignes de courant :**
-   Appliquer le filtre **Glyph** (flèches 2D orientées selon `Velocity`) ou **Stream Tracer** pour visualiser les tourbillons de recirculation dans la cavité ou le sillage d'obstacle.
+1. **Champs volumiques :** Dans ParaView, ouvrir le groupe temporel `<case>_*.pvtr` et cliquer sur **Apply**.
+2. **Iso-contour d'interface VOF :** Appliquer le filtre **Cell Data to Point Data**, puis **Contour** sur `PhaseIndicator` avec la valeur `0.5`.
+3. **Visualisation des marqueurs CVI :** Ouvrir simultanément le groupe `<case>_markers_*.vtk`, appliquer une taille de point visible (*Point Size = 4*) ou le filtre **Glyph** orienté selon `MarkerNormal` et coloré par `MarkerCurvature`.
+4. **Vecteurs et lignes de courant :** Utiliser **Glyph** ou **Stream Tracer** sur le champ vectoriel `Velocity`.
 
-### Script Python d'Extraction Automatisée et de Tracé de Profils
+### Scripts Python de Post-Traitement (`pyvista`, `numpy`, `matplotlib`)
 
-Voici un script Python complet (`extract_profiles.py`) s'appuyant sur les bibliothèques scientifiques `numpy`, `matplotlib` et `pyvista` pour extraire et tracer les profils de vitesse au centre du domaine :
+#### Script 1 : Extraction de Profils et Superposition des Marqueurs depuis `.pvtr` et `_markers_*.vtk`
 
 ```python
 #!/usr/bin/env python3
@@ -1465,63 +1501,83 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pyvista as pv
 
-def extract_mid_profile(pvtr_file):
-    # Chargement du fichier parallèle VTK
-    reader = pv.get_reader(pvtr_file)
-    data = reader.read()
-
-    # Définition de la ligne d'échantillonnage verticale au centre X = Lx / 2
+def plot_fields_and_markers(pvtr_file, markers_vtk=None):
+    data = pv.get_reader(pvtr_file).read()
     bounds = data.bounds  # [xmin, xmax, ymin, ymax, zmin, zmax]
     x_mid = 0.5 * (bounds[0] + bounds[1])
-    p_start = [x_mid, bounds[2], 0.0]
-    p_end   = [x_mid, bounds[3], 0.0]
 
-    # Extraction des données le long du segment
-    sampled_line = data.sample_over_line(p_start, p_end, resolution=500)
-    
-    y_coords = sampled_line.points[:, 1]
-    u_velocity = sampled_line['Velocity'][:, 0]
-    pressure = sampled_line['Pressure']
+    # 1. Extraction d'un profil vertical au centre X = Lx / 2
+    line = data.sample_over_line([x_mid, bounds[2], 0.0],
+                                 [x_mid, bounds[3], 0.0], resolution=400)
+    y = line.points[:, 1]
+    u = line["Velocity"][:, 0]
+    p = line["Pressure"]
 
-    # Tracé graphique haute définition
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5), dpi=300)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5), dpi=200)
+    axes[0].plot(u, y, "b-", lw=2, label="u(x_mid, y)")
+    axes[0].set_xlabel("Vitesse horizontale u [m/s]")
+    axes[0].set_ylabel("Ordonnée y [m]")
+    axes[0].grid(True, ls="--", alpha=0.6)
+    axes[0].legend()
 
-    ax1.plot(u_velocity, y_coords, 'b-', lw=2, label='COVOF 2D')
-    ax1.set_xlabel('Vitesse horizontale u [m/s]')
-    ax1.set_ylabel('Hauteur y [m]')
-    ax1.set_title(f'Profil de Vitesse à x = {x_mid:.3f} m')
-    ax1.grid(True, ls='--', alpha=0.7)
-    ax1.legend()
+    axes[1].plot(p, y, "r-", lw=2, label="p(x_mid, y)")
+    axes[1].set_xlabel("Pression p [Pa]")
+    axes[1].set_ylabel("Ordonnée y [m]")
+    axes[1].grid(True, ls="--", alpha=0.6)
+    axes[1].legend()
 
-    ax2.plot(pressure, y_coords, 'r-', lw=2, label='Pression hydrodynamique')
-    ax2.set_xlabel('Pression p [Pa]')
-    ax2.set_ylabel('Hauteur y [m]')
-    ax2.set_title(f'Profil de Pression à x = {x_mid:.3f} m')
-    ax2.grid(True, ls='--', alpha=0.7)
-    ax2.legend()
+    if markers_vtk is not None:
+        mk = pv.read(markers_vtk)
+        print(f"Nombre de marqueurs CVI actifs : {mk.n_points}")
+        print(f"Courbure moyenne |kappa|       : {np.mean(np.abs(mk['MarkerCurvature'])):.4f} m^-1")
 
     plt.tight_layout()
-    plt.savefig('profil_vertical_covof2d.png')
-    print("Graphique sauvegardé avec succès dans profil_vertical_covof2d.png")
+    plt.savefig("covof_postproc_profiles.png")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 extract_profiles.py <fichier.pvtr>")
+        print("Usage: python3 postproc.py <case_000050.pvtr> [case_markers_000050.vtk]")
         sys.exit(1)
-    extract_mid_profile(sys.argv[1])
+    mk_arg = sys.argv[2] if len(sys.argv) > 2 else None
+    plot_fields_and_markers(sys.argv[1], mk_arg)
+```
+
+#### Script 2 : Suivi de l'Historique CSV (`<case>_history.csv`)
+
+```python
+#!/usr/bin/env python3
+import sys
+import numpy as np
+import matplotlib.pyplot as plt
+
+csv_path = sys.argv[1]
+data = np.genfromtxt(csv_path, delimiter=",", names=True)
+
+fig, ax = plt.subplots(1, 2, figsize=(10, 4), dpi=200)
+ax[0].plot(data["time"], data["rise_velocity"], "k-", lw=1.8)
+ax[0].set_xlabel("Temps [s]")
+ax[0].set_ylabel("Vitesse d'ascension [m/s]")
+ax[0].grid(True, ls="--", alpha=0.6)
+
+ax[1].semilogy(data["time"], np.maximum(data["max_div"], 1e-16), "m-", lw=1.8)
+ax[1].set_xlabel("Temps [s]")
+ax[1].set_ylabel("Divergence max [s^-1]")
+ax[1].grid(True, ls="--", alpha=0.6)
+
+plt.tight_layout()
+plt.savefig("history_diagnostics.png")
 ```
 
 ---
 
-## Guide Complet de Dépannage (Troubleshooting)
-
-Le tableau suivant présente une matrice exhaustive des anomalies numériques potentielles, leurs causes sous-jacentes et les actions correctives recommandées :
+## Guide Complet de Dépannage (*Troubleshooting*)
 
 | Symptôme Observé | Cause Physique / Numérique Probable | Action Corrective Recommandée |
 | :--- | :--- | :--- |
-| **Divergence du solveur de Krylov (`Iter_NS` atteint `max_iter`, résidu NaN)** | 1. Pas de temps $\Delta t$ trop grand violant la condition CFL visqueuse ou convective.<br>2. Paramètre de pénalité de Lagrangien $r_{\text{al}}$ excessif détériorant le conditionnement spectral.<br>3. Absence de préconditionneur sur maillage fin. | 1. Réduire $\Delta t$ ou activer `time.adaptative_dt = true` avec `time.cfl = 0.3`.<br>2. Activer le mode adaptatif `solver.type = "AAL"` au lieu d'une valeur scalaire fixe `r_al`.<br>3. Activer `solver.preconditioner = "JACOBI"` ou `"BLOCK_TRIANGULAR"`. |
-| **Résidu de continuité élevé ($\|\nabla \cdot \mathbf{u}\|_\infty > 10^{-3}$)** | Nombre insuffisant d'itérations d'Uzawa pour assurer la fermeture de l'incompressibilité. | Augmenter `solver.uzawa_iter` à $3$ ou $5$, et abaisser `solver.uzawa_tol` à $1.0\times 10^{-5}$. |
-| **Courants parasites / Déformation artificielle de l'interface diphasique** | Mauvaise résolution de la courbure $\kappa$ dans le modèle CSF lorsque le maillage est trop grossier par rapport au rayon de courbure. | S'assurer que le diamètre de goutte ou bulle comporte au moins $20$ à $30$ cellules de calcul ($2R/\Delta x \ge 25$). Vérifier que le pas de temps respecte la limite d'ondes capillaires $\Delta t \le \sqrt{\frac{\rho \Delta x^3}{4\pi\sigma}}$. |
-| **Oscillations de vitesse en damier (*checkerboard*)** | Présence d'un schéma convectif d'ordre 2 centré sans maillage suffisant ($Re_\Delta > 2$). | Basculer `convection.convective_scheme = "UPWIND"` ou raffiner le maillage localement pour ramener le nombre de Reynolds de maille sous la limite de Peclet $Pe \le 2$. |
-| **Blocage ou dépassement de temps (*Timeout*) lors de l'exécution MPI** | 1. Décomposition de domaine incompatible avec les dimensions du maillage (mailles locales nulles : `nx_local = 0`).<br>2. Blocage sur barrière collective lors d'un calcul thermique ou projection. | 1. Vérifier que $N_x \ge 4 \times P_x$ et $N_y \ge 4 \times P_y$.<br>2. S'assurer que le communicateur MPI cartésien a été initialisé sans rangs orphelins. |
-| **Perte de conservation de la masse globale de fluide** | Schéma d'advection VOF non conservatif ou pas de temps violant la condition de conservation volumique. | Vérifier que `physics.vof_model` est configuré sur `"PLIC"` et que le pas de temps respecte $u \Delta t / \Delta x \le 0.5$. |
+| **Divergence de Krylov (`Iter Krylov` = `max_iter`, `NaN` dans les logs)** | 1. Pas de temps $\Delta t$ violant la CFL convective ou capillaire ($\Delta t_\sigma$).<br>2. Saut $\rho_1/\rho_2$ ou $\mu_1/\mu_2$ brutal sans lissage SVOF.<br>3. Préconditionneur inadapté au mode `MONOLITHIC`. | 1. Activer `time.adaptive_dt = true` avec `time.cfl_max = 0.35`.<br>2. Activer `physics.enable_svof_smoothing = true` (`svof_filter_width = 0.5`).<br>3. Avec `solver.type = "MONOLITHIC"`, utiliser impérativement `solver.precond_type = "BLOCK_TRIANGULAR"`. |
+| **Divergence maximale `Div Max` élevée ($> 10^{-4}$)** | Trop peu d'itérations d'Uzawa en mode AL/AAL ou tolérance linéaire trop relâchée. | Passer `solver.type = "MONOLITHIC"` (ou `"AAL"` avec `uzawa_iter = 5`, `uzawa_tol = 1.0e-8`) et abaisser `solver.tol` à `1.0e-9` ou `1.0e-10`. |
+| **Courants parasites intenses autour d'une goutte statique** | Courbure CSF bruitée par différentiation finie de $C$. | Activer la méthode hybride CVI-Marqueurs (`vof.use_markers = true`, `vof.marker_curvature = true`, `vof.marker_advection_scheme = "CVI_RK2"`) et la reconstruction `"ELVIRA"`. |
+| **Fragmentation d'un filament mince ou d'une jupe de bulle** | Sous-résolution sous-maille ($\delta < \Delta x$) ou perte de cohérence de normale. | Activer `vof.use_markers = true`, `vof.marker_normals_plic = true` et `vof.advection_method = "WEYMOUTH_YUE"` avec `cfl_vof <= 0.35`. |
+| **Oscillations spatiales en damier dans les zones à fort gradient** | Schéma convectif `CENTERED` utilisé alors que $Re_\Delta > 2$. | Basculer `physics.convective_scheme = "UPWIND"` ou `"TVD_SUPERBEE"`, ou raffiner `(mesh.nx, mesh.ny)`. |
+| **Dépassement ou blocage MPI lors du lancement** | Nombre de processus MPI incompatible avec `nx`, `ny`, ou rangs bloqués sur barrière suite à une erreur JSON. | Vérifier que $N_x / P_x \ge 2$ et $N_y / P_y \ge 2$, et contrôler le JSON (clés exactes, pas de virgule traînante en fin de bloc). |
+| **Clé JSON ignorée silencieusement** | Utilisation d'un ancien nom de clé (ex. `physics.rho1`, `time.t_end`, `thermal.*`, `convection.*`, `NO_SLIP`). | Consulter le Chapitre 6 : utiliser `physics.fluid1.rho`, `time.t_final`, `physics.enable_energy`, `physics.convective_*`, `DIRICHLET`, `FREE_SLIP`, `BOX`. |

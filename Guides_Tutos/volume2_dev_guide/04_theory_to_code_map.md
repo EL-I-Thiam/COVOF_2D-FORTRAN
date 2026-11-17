@@ -1,202 +1,116 @@
 # Correspondance Théorie $\leftrightarrow$ Discrétisation $\leftrightarrow$ Code Source
 
-Ce chapitre constitue la **section pivot** du Guide de Développement. Il établit la passerelle rigoureuse et exhaustive entre les équations aux dérivées partielles continues de la mécanique des fluides, leur discrétisation spatiotemporelle sur grille décalée MAC (*Marker-And-Cell*), et leur traduction concrète ligne par ligne dans les codes sources C++17 (`COVOF_2D-C++`) et Fortran 2018 (`COVOF_2D-FORTRAN`).
+Ce chapitre constitue la **section pivot** du Guide de Développement. Il établit le lien explicite entre les équations continues de la mécanique des fluides, leur discrétisation spatiotemporelle sur grille MAC et leur implémentation exacte dans `COVOF_2D-C++` (C++17) et `COVOF_2D-FORTRAN` (Fortran 2018).
 
-Chaque opérateur numérique majeur est disséqué selon un triptyque méthodologique strict :
-1. **Équation discrète exacte :** Formulation mathématique complète indicée en espace et en temps.
-2. **Localisation exacte dans le code :** Fichiers, classes, méthodes C++ et modules/routines Fortran.
-3. **Analyse ligne par ligne de l'implémentation :** Pochoirs mémoire, régularisations physiques et optimisations SIMD.
+Chaque opérateur est présenté selon le triptyque rigoureux :
+1. **Équation discrète exacte** (indicée selon les conventions du code).
+2. **Localisation exacte** (fichiers, classes/modules, méthodes/subroutines et plages de lignes).
+3. **Analyse de l'implémentation** (boucles critiques, régularisations et invariants).
 
 ---
 
-## 4.1. Diffusion Visqueuse et Moyenne Harmonique aux Nœuds ($\mu_{xy}$)
+## 4.1. Diffusion Visqueuse et Moyenne Harmonique aux Nœuds ($\mu_{\text{node}}$)
 
 ### 4.1.1. Équation Discrète Exacte
 
-Dans un écoulement à viscosité variable $\mu(\mathbf{x})$, le tenseur des contraintes visqueuses s'écrit $\boldsymbol{\tau} = \mu \left( \nabla \mathbf{u} + (\nabla \mathbf{u})^T \right)$. Sur la grille décalée MAC, la divergence du tenseur visqueux pour la composante horizontale de vitesse $u_{i+1/2, j}$ fait intervenir :
-- La contrainte normale $\tau_{xx} = 2 \mu \frac{\partial u}{\partial x}$ évaluée aux centres de mailles $(i, j)$ et $(i+1, j)$.
-- La contrainte tangentielle $\tau_{xy} = \mu \left( \frac{\partial u}{\partial y} + \frac{\partial v}{\partial x} \right)$ évaluée aux sommets (nœuds) $(i+1/2, j+1/2)$ et $(i+1/2, j-1/2)$.
+Sur la grille MAC, la composante $u_{i,j}$ (face Ouest de la cellule $(i,j)$) intègre deux types de flux visqueux sur le volume de contrôle $\Delta x \Delta y$ :
+- Les contraintes normales d'élongation $2\mu \partial_x u$ évaluées aux centres $(i,j)$ et $(i-1,j)$ :
+  $$\text{Diff}_{\text{elong}} = \left[ 2 \mu_{i,j} \frac{u_{i+1,j} - u_{i,j}}{\Delta x} - 2 \mu_{i-1,j} \frac{u_{i,j} - u_{i-1,j}}{\Delta x} \right] \Delta y$$
+- Les contraintes tangentielles de cisaillement $\mu_{\text{node}}(\partial_y u + \partial_x v)$ évaluées aux nœuds Nord $(i, j+1)$ et Sud $(i, j)$ :
+  $$\text{Shear} = \left[ \mu_{\text{node}, i, j+1} \left( \frac{u_{i,j+1} - u_{i,j}}{\Delta y} + \frac{v_{i,j+1} - v_{i-1,j+1}}{\Delta x} \right) - \mu_{\text{node}, i, j} \left( \frac{u_{i,j} - u_{i,j-1}}{\Delta y} + \frac{v_{i,j} - v_{i-1,j}}{\Delta x} \right) \right] \Delta x$$
 
-L'opérateur discret de diffusion horizontale $\mathcal{D}_u(u)_{i+1/2, j}$ s'écrit :
-$$
-\begin{aligned}
-\mathcal{D}_u(u)_{i+1/2, j} = & \frac{2 \mu_{i+1, j} \frac{u_{i+3/2, j} - u_{i+1/2, j}}{\Delta x} - 2 \mu_{i, j} \frac{u_{i+1/2, j} - u_{i-1/2, j}}{\Delta x}}{\Delta x} \\
-& + \frac{\mu_{xy, i+1/2, j+1/2} \left( \frac{u_{i+1/2, j+1} - u_{i+1/2, j}}{\Delta y} + \frac{v_{i+1, j+1/2} - v_{i, j+1/2}}{\Delta x} \right)}{\Delta y} \\
-& - \frac{\mu_{xy, i+1/2, j-1/2} \left( \frac{u_{i+1/2, j} - u_{i+1/2, j-1}}{\Delta y} + \frac{v_{i+1, j-1/2} - v_{i, j-1/2}}{\Delta x} \right)}{\Delta y}
-\end{aligned}
-$$
+Pour assurer la continuité des contraintes tangentielles à travers une interface diphasique à fort saut $\mu_1/\mu_2$, $\mu_{\text{node}}$ est calculée par **moyenne harmonique** (ou interpolation SVOF harmonique de $C_{s,\text{node}}$ si `enable_svof_smoothing = true`) :
 
-Afin de préserver la continuité du flux tangentiel à travers les interfaces diphasiques présentant un fort saut de viscosité ($\mu_1 / \mu_2 \gg 1$), la viscosité au sommet $\mu_{xy}$ est calculée par **moyenne harmonique** des quatre mailles adjacentes :
-$$
-\mu_{xy, i+1/2, j+1/2} = \frac{4}{\frac{1}{\mu_{i, j}} + \frac{1}{\mu_{i+1, j}} + \frac{1}{\mu_{i, j+1}} + \frac{1}{\mu_{i+1, j+1}}}
-$$
+$$\mu_{\text{node}, i, j} = \frac{4}{\frac{1}{\mu_{i-1, j-1}} + \frac{1}{\mu_{i, j-1}} + \frac{1}{\mu_{i-1, j}} + \frac{1}{\mu_{i, j}}} \quad \text{ou} \quad \frac{\mu_1 \mu_2}{\mu_2 C_{s,\text{node}} + \mu_1 (1 - C_{s,\text{node}})}$$
 
 ### 4.1.2. Localisation dans le Code Source
 
-- **C++17 :**
-  - Fichier : `COVOF_2D-C++/src/NavierStokesSolver.cpp`
-  - Méthode : `NavierStokesSolver::computeViscousStress(const FlowFields& f, FlowFields& out)`
-  - Lignes de code : Lignes 142 à 215.
-- **Fortran 2018 :**
-  - Fichier : `COVOF_2D-FORTRAN/src/module_navier_stokes.f90`
-  - Routine : `subroutine ns_compute_viscous_stress(fields, mesh)`
-  - Lignes de code : Lignes 198 à 280.
+- **Calcul de $\mu_{\text{node}}$ :**
+  - C++17 : `COVOF_2D-C++/src/InterfaceTracker.cpp` $\rightarrow$ `InterfaceTracker::update_physical_properties` (lignes 558–582).
+  - Fortran 2018 : `COVOF_2D-FORTRAN/src/module_interface_vof.f90` $\rightarrow$ `update_physical_properties` (lignes 479–626).
+- **Application dans l'opérateur linéaire :**
+  - C++17 : `COVOF_2D-C++/src/NavierStokesSolver.cpp` $\rightarrow$ `NavierStokesSolver::apply_system_matrix` (lignes 334–358 pour $u$, lignes 480–510 pour $v$).
+  - Fortran 2018 : `COVOF_2D-FORTRAN/src/module_navier_stokes.f90` $\rightarrow$ `ns_apply_system_matrix` (lignes 380–809).
 
-### 4.1.3. Analyse de l'Implémentation
+### 4.1.3. Analyse de l'Implémentation C++ (`NavierStokesSolver.cpp`, lignes 336–358)
 
-```fortran
-! Calcul de la moyenne harmonique aux sommets
-do j = 1, ny + 1
-    do i = 1, nx + 1
-        mu_sum = 1.0_dp / max(fields%mu(i-1, j-1), 1.0e-12_dp) + &
-                 1.0_dp / max(fields%mu(i,   j-1), 1.0e-12_dp) + &
-                 1.0_dp / max(fields%mu(i-1, j  ), 1.0e-12_dp) + &
-                 1.0_dp / max(fields%mu(i,   j  ), 1.0e-12_dp)
-        mu_xy(i, j) = 4.0_dp / mu_sum
-    end do
-end do
+```cpp
+// (a) Viscosité d'élongation 2*mu d2u/dx2
+double mu_cell_E = fields_old.mu[mesh.cell_idx(i, j)];
+double mu_cell_W = fields_old.mu[mesh.cell_idx(i - 1, j)];
+double diff_elong_E = 2.0 * mu_cell_E * (tf.u[mesh.u_idx(i + 1, j)] - tf.u[mesh.u_idx(i, j)]) / dx * dy;
+double diff_elong_W = 2.0 * mu_cell_W * (tf.u[mesh.u_idx(i, j)] - tf.u[mesh.u_idx(i - 1, j)]) / dx * dy;
+val -= (diff_elong_E - diff_elong_W);
+
+// (b) Viscosité de cisaillement et rotation mu (d2u/dy2 + d2v/dxdy)
+double mu_node_N = fields_old.mu_node[mesh.node_idx(i, j + 1)];
+double mu_node_S = fields_old.mu_node[mesh.node_idx(i, j)];
+double shear_N = mu_node_N * ((tf.u[mesh.u_idx(i, j + 1)] - tf.u[mesh.u_idx(i, j)]) / dy +
+                              (tf.v[mesh.v_idx(i, j + 1)] - tf.v[mesh.v_idx(i - 1, j + 1)]) / dx) * dx;
+double shear_S = mu_node_S * ((tf.u[mesh.u_idx(i, j)] - tf.u[mesh.u_idx(i, j - 1)]) / dy +
+                              (tf.v[mesh.v_idx(i, j)] - tf.v[mesh.v_idx(i - 1, j)]) / dx) * dx;
+val -= (shear_N - shear_S);
 ```
 
-*Détails d'optimisation et robustesse :*
-1. **Régularisation par seuil minimal :** L'usage de `max(mu, 1.0e-12)` prémunit l'algorithme contre toute division par zéro dans le cas où un fluide fictif non visqueux est simulé.
-2. **Localité spatiale :** Le tableau `mu_xy` est précalculé une fois par pas de temps avant l'assemblage de l'opérateur et réutilisé pour les deux composantes de vitesse $u$ et $v$.
+Notice : L'opérateur complet étant multiplié par le volume cellulaire $\Delta x \Delta y$, les flux surfaciques sont directement multipliés par $\Delta y$ (faces $X$) et $\Delta x$ (faces $Y$), garantissant la conservation symétrique.
 
 ---
 
-## 4.2. Advection Convective : Upwind, Centré, Newton et Adams-Bashforth 2
+## 4.2. Advection Convective et Linéarisations (Picard, AB2, Newton)
 
 ### 4.2.1. Équation Discrète Exacte
 
-Le terme convectif $\nabla \cdot (\rho \mathbf{u} \mathbf{u})$ pour la quantité de mouvement en $x$ s'écrit sous forme conservative :
-$$
-\mathcal{C}_u(\mathbf{u})_{i+1/2, j} = \frac{(\rho u u)_{i+1, j} - (\rho u u)_{i, j}}{\Delta x} + \frac{(\rho v u)_{i+1/2, j+1/2} - (\rho v u)_{i+1/2, j-1/2}}{\Delta y}
-$$
+Dans l'opérateur implicite `apply_system_matrix`, la forme semi-implicite de la convection sur la composante $u_{i,j}$ avec vitesse advectante de référence $(\mathbf{u}_{\text{ref}}, \mathbf{v}_{\text{ref}})$ s'écrit avec flux aux faces $F_E = \frac{1}{2}(u_{\text{ref}, i,j} + u_{\text{ref}, i+1,j})\Delta y$, $F_W = \frac{1}{2}(u_{\text{ref}, i-1,j} + u_{\text{ref}, i,j})\Delta y$, $F_N = \bar{v}_{\text{ref}, N}\Delta x$, $F_S = \bar{v}_{\text{ref}, S}\Delta x$ :
 
-COVOF 2D implémente quatre discrétisations du flux convectif :
-1. **Centré d'ordre 2 (*Centered*) :**
-   $$u_{i, j} = \frac{u_{i+1/2, j} + u_{i-1/2, j}}{2}, \quad u_{i+1/2, j+1/2} = \frac{u_{i+1/2, j} + u_{i+1/2, j+1}}{2}$$
-2. **Amont du 1er ordre (*Upwind*) :**
-   $$u_{i, j} = \begin{cases} u_{i-1/2, j} & \text{si } F_{i, j} \ge 0 \\ u_{i+1/2, j} & \text{si } F_{i, j} < 0 \end{cases}$$
-3. **Linéarisation de Newton implicite (*Newton Linearization*) :**
-   Lors de l'itération non linéaire $k+1$, le produit convectif est linéarisé par Taylor :
-   $$\mathbf{u}^{k+1} \cdot \nabla \mathbf{u}^{k+1} \approx \mathbf{u}^k \cdot \nabla \mathbf{u}^{k+1} + \mathbf{u}^{k+1} \cdot \nabla \mathbf{u}^k - \mathbf{u}^k \cdot \nabla \mathbf{u}^k$$
-4. **Schéma explicite d'Adams-Bashforth d'ordre 2 (AB2) :**
-   $$\mathcal{C}(\mathbf{u})^{n+1/2} = \frac{3}{2} \mathcal{C}(\mathbf{u}^n) - \frac{1}{2} \mathcal{C}(\mathbf{u}^{n-1})$$
+$$\mathcal{C}_u(\delta \mathbf{u}) = \frac{\rho_{u, i, j}}{2} \left[ F_E (\delta u_{i+1,j} + \delta u_{i,j}) - F_W (\delta u_{i-1,j} + \delta u_{i,j}) + F_N (\delta u_{i,j+1} + \delta u_{i,j}) - F_S (\delta u_{i,j-1} + \delta u_{i,j}) \right]$$
+
+- **Mode `"PICARD"` :** $\mathbf{u}_{\text{ref}} = \mathbf{u}^n$.
+- **Mode `"ADAMS_BASHFORTH"` / `"AB2"` :** lorsque `has_nm1 == true`, $\mathbf{u}_{\text{ref}} = 2 \mathbf{u}^n - \mathbf{u}^{n-1}$ (extrapolation à $t^{n+1}$ depuis $n$ et $n-1$).
+- **Mode `"NEWTON"` :** ajoute le jacobien croisé $\rho_u \left( \delta u_{i,j} \frac{u^n_{i+1,j} - u^n_{i-1,j}}{2\Delta x} + \bar{\delta v}_{i,j} \frac{u^n_{i,j+1} - u^n_{i,j-1}}{2\Delta y} \right) \Delta x \Delta y$, et compense le terme quadratique dans `assemble_rhs`.
 
 ### 4.2.2. Localisation dans le Code Source
 
-- **C++17 :**
-  - Fichier : `COVOF_2D-C++/src/NavierStokesSolver.cpp`
-  - Méthode : `NavierStokesSolver::computeConvectionTerm(const FlowFields& f, std::vector<double>& cu, std::vector<double>& cv)`
-  - Lignes de code : Lignes 230 à 345.
-- **Fortran 2018 :**
-  - Fichier : `COVOF_2D-FORTRAN/src/module_navier_stokes.f90`
-  - Routine : `subroutine ns_compute_convection(fields, mesh, cu, cv, scheme_type)`
-  - Lignes de code : Lignes 310 à 425.
-
-### 4.2.3. Analyse de l'Implémentation
-
-Dans le code C++, l'aiguillage entre les schémas s'effectue sans surcoût de virtualité par branchement statique :
-
-```cpp
-if (config_.convective_scheme == ConvectionScheme::UPWIND) {
-    double u_face_east = (u_conv > 0.0) ? u[IDX(i, j)] : u[IDX(i+1, j)];
-    double u_face_west = (u_conv_w > 0.0) ? u[IDX(i-1, j)] : u[IDX(i, j)];
-    cu[IDX(i, j)] = (u_conv * u_face_east - u_conv_w * u_face_west) * idx;
-} else if (config_.convective_scheme == ConvectionScheme::CENTERED) {
-    double u_face_east = 0.5 * (u[IDX(i, j)] + u[IDX(i+1, j)]);
-    double u_face_west = 0.5 * (u[IDX(i-1, j)] + u[IDX(i, j)]);
-    cu[IDX(i, j)] = (u_conv * u_face_east - u_conv_w * u_face_west) * idx;
-}
-```
+- **C++17 :** `COVOF_2D-C++/src/NavierStokesSolver.cpp` $\rightarrow$ `apply_system_matrix` (lignes 230–332) et `assemble_rhs` (lignes 553–839).
+- **Fortran 2018 :** `COVOF_2D-FORTRAN/src/module_navier_stokes.f90` $\rightarrow$ `ns_apply_system_matrix` (lignes 380–809) et `ns_assemble_rhs` (lignes 810–1124).
 
 ---
 
-## 4.3. Pénalisation par Lagrangien Augmenté : AL, AAL et C-AAL
+## 4.3. Lagrangien Augmenté Adaptatif (AL, AAL, C-AAL) et Mise à Jour d'Uzawa
 
 ### 4.3.1. Équation Discrète Exacte
 
-La contrainte d'incompressibilité ou de compressibilité acoustique est imposée via l'algorithme du Lagrangien Augmenté :
-$$
-\mathcal{A}_{AL}(\mathbf{u}) = \mathcal{A}_{\text{NS}}(\mathbf{u}) - r_{\text{penalty}} \nabla (\nabla \cdot \mathbf{u})
-$$
+1. **Pénalité spatio-temporelle locale AAL (Vincent et al. 2004, Éq. 14) :**
+   Dans chaque cellule $(i, j)$ :
+   $$r_{i,j} = K_{\text{aal}} \max\left( \alpha_{\text{time}} \rho_{i,j} \frac{L_0^2}{t_0}, \; \rho_{i,j} u_0 L_0, \; \rho_{i,j} \frac{L_0^2}{u_0}\|\mathbf{g}\|, \; \frac{p_0 L_0}{u_0}, \; \mu_{i,j}, \; \mu_{i,j} \frac{\Delta x \Delta y}{\mathcal{K}_{i,j}}, \; \frac{\sigma}{u_0} \right)$$
+   En mode compressible (`C-AAL` ou `compressible && !is_aal_incompressible`), régularisation acoustique :
+   $$r_{\text{eff}, i,j} = \frac{r_{i,j}}{1 + r_{i,j} \frac{\chi_{T, i,j}}{\Delta t}}$$
 
-Trois variantes distinctes sont implémentées :
-1. **AL Standard :**
-   Pénalisation de la divergence pure :
-   $$- r \nabla (\nabla \cdot \mathbf{u}^{n+1})$$
-   avec mise à jour d'Uzawa pour la pression : $p^{k+1} = p^k - r \nabla \cdot \mathbf{u}^{k+1}$.
-2. **AAL Incompressible (*Adaptive Augmented Lagrangian*) :**
-   Introduction d'un terme mémoire $r_{\text{aal}}$ stocké au centre des mailles :
-   $$r_{\text{aal}}^{n+1} = r_{\text{aal}}^n - \gamma (\nabla \cdot \mathbf{u}^{n+1})$$
-   Ce terme absorbe l'erreur de divergence accumulée et autorise l'utilisation de pas de temps plus grands ($CFL > 1$) sans perte de conservation de la masse.
-3. **C-AAL Compressible (*Compressible All-Mach Augmented Lagrangian*) :**
-   Couplage direct avec l'équation d'état acoustique :
-   $$\nabla \cdot \mathbf{u} + \frac{1}{\rho c_s^2} \frac{\partial p}{\partial t} = 0$$
-   Le terme de pénalisation discrétisé s'enrichit de la célérité du son $c_s$ :
-   $$\mathcal{A}_{C-AAL}(\mathbf{u}) = \mathcal{A}(\mathbf{u}) - r \nabla \left( \nabla \cdot \mathbf{u} + \frac{p^{n+1} - p^n}{\rho c_s^2 \Delta t} \right)$$
+2. **Terme de divergence pénalisée dans $A \mathbf{x}$ (sur face $u_{i,j}$) :**
+   $$-\left( r_{\text{eff}, i,j} D_{i,j} - r_{\text{eff}, i-1,j} D_{i-1,j} \right) \Delta y$$
+   où $D_{i,j} = \frac{u_{i+1,j} - u_{i,j}}{\Delta x} + \frac{v_{i,j+1} - v_{i,j}}{\Delta y}$ (en mode `C-AAL` ou `MONOLITHIC` compressible, la ligne de pression inclut également $+\frac{\chi_T}{\Delta t} p^{n+1} \Delta x \Delta y$).
+
+3. **Actualisation duale d'Uzawa :**
+   $$p_{i,j}^{m+1} = p_{i,j}^m - r_{\text{eff}, i,j} \left[ D_{i,j}^{*, m+1} + \frac{\chi_{T,i,j}}{\Delta t}(p_{i,j}^m - p_{i,j}^n) \right]$$
 
 ### 4.3.2. Localisation dans le Code Source
 
-- **C++17 :**
-  - Fichier : `COVOF_2D-C++/src/NavierStokesSolver.cpp`
-  - Méthodes : `applyAugmentedLagrangianPenalty()`, `updateUzawaPressure()`
-  - Lignes de code : Lignes 410 à 495.
-- **Fortran 2018 :**
-  - Fichier : `COVOF_2D-FORTRAN/src/module_navier_stokes.f90`
-  - Routines : `subroutine ns_apply_augmented_lagrangian(...)`, `subroutine ns_update_pressure_uzawa(...)`
-  - Lignes de code : Lignes 512 à 620.
-
-### 4.3.3. Analyse de l'Implémentation
-
-```fortran
-! Application de l'opérateur -r * grad(div(u)) sur la composante u
-do j = 2, ny - 1
-    do i = 2, nx
-        ! Calcul de la divergence au centre des mailles Est (i) et Ouest (i-1)
-        div_east = (u(i+1, j) - u(i, j)) * idx + (v(i, j+1) - v(i, j)) * idy
-        div_west = (u(i, j) - u(i-1, j)) * idx + (v(i-1, j+1) - v(i-1, j)) * idy
-        
-        if (config%use_caal) then
-            div_east = div_east + (p(i, j) - p_old(i, j)) / (rho(i, j) * cs2 * dt)
-            div_west = div_west + (p(i-1, j) - p_old(i-1, j)) / (rho(i-1, j) * cs2 * dt)
-        end if
-        
-        grad_div = (div_east - div_west) * idx
-        Ax_u(i, j) = Ax_u(i, j) - config%r_penalty * grad_div
-    end do
-end do
-```
+- **C++17 :** `COVOF_2D-C++/src/NavierStokesSolver.cpp` $\rightarrow$ `compute_adaptative_r_al` (lignes 841–927), `update_pressure_al` (lignes 929–951), `apply_system_matrix` (lignes 361–365).
+- **Fortran 2018 :** `COVOF_2D-FORTRAN/src/module_navier_stokes.f90` $\rightarrow$ `ns_compute_adaptative_r_al` (lignes 1125–1241), `ns_update_pressure_al` (lignes 1242–1286).
 
 ---
 
-## 4.4. Traitement des Obstacles et Milieux Poreux par Pénalisation de Darcy-Brinkman
+## 4.4. Pénalisation d'Obstacles Immergés (Darcy-Brinkman)
 
 ### 4.4.1. Équation Discrète Exacte
 
-Pour modéliser des parois rigides immergées ou des matrices poreuses sans recourir à des maillages non structurés déformables, l'équation de Darcy-Brinkman introduit une force de traînée volumique :
-$$
-\mathbf{F}_{\text{Brinkman}} = - \frac{\mu}{K} \chi_T (\mathbf{u} - \mathbf{u}_{\text{solid}})
-$$
-où :
-- $K$ est la perméabilité intrinsèque du milieu ($K \to 0$ pour un solide parfait, $K \to \infty$ pour un fluide libre).
-- $\chi_T \in [0, 1]$ est la fonction caractéristique d'occupation de l'obstacle.
-
-Dans l'assemblage implicite du système linéaire, ce terme ajoute une contribution positive directe sur la diagonale principale :
-$$
-\left( \frac{\rho}{\Delta t} + \frac{\mu_{i+1/2, j}}{K} \chi_{T, i+1/2, j} \right) u_{i+1/2, j}^{n+1} = \text{RHS}_u + \frac{\mu_{i+1/2, j}}{K} \chi_{T, i+1/2, j} u_{\text{solid}}
-$$
+Pour toute face $u_{i,j}$ (ou $v_{i,j}$) détectée dans un obstacle (`BOX` ou `CYLINDER`) de perméabilité $\mathcal{K}$ :
+- Si $\mathcal{K} \le 10^{-12}$ (solide imperméable) : la ligne de la matrice est remplacée par la condition de Dirichlet homogène $\left(\frac{\alpha_{\text{time}} \rho_u}{\Delta t} \Delta x \Delta y\right) \delta u_{i,j} = 0$.
+- Si $\mathcal{K} > 10^{-12}$ (milieu poreux) : ajout implicite du terme de Darcy $+\frac{\mu_u}{\mathcal{K}} \Delta x \Delta y \, \delta u_{i,j}$ à l'opérateur et à la diagonale `diag_u` / `u_aP`.
 
 ### 4.4.2. Localisation dans le Code Source
 
-- **C++17 :**
-  - Fichier : `COVOF_2D-C++/src/NavierStokesSolver.cpp`
-  - Méthode : `NavierStokesSolver::applyBrinkmanPenalization(...)`
-  - Lignes de code : Lignes 510 à 560.
-- **Fortran 2018 :**
-  - Fichier : `COVOF_2D-FORTRAN/src/module_navier_stokes.f90`
-  - Routine : `subroutine ns_apply_brinkman_drag(...)`
-  - Lignes de code : Lignes 640 à 690.
+- **C++17 :** `COVOF_2D-C++/include/covof/NavierStokesSolver.hpp` (`is_point_in_obstacle`, `is_u_face_in_obstacle`, `get_u_obstacle_perm`, lignes 101–202) et `src/NavierStokesSolver.cpp` (lignes 278–287 et 376–382).
+- **Fortran 2018 :** `COVOF_2D-FORTRAN/src/module_mesh.f90` (`is_in_obstacle`, lignes 203–222) et `module_navier_stokes.f90` (`is_u_face_in_obstacle`, `is_v_face_in_obstacle`, lignes 82–131).
 
 ---
 
@@ -204,94 +118,91 @@ $$
 
 ### 4.5.1. Équation Discrète Exacte
 
-L'advection de la fraction volumique $C \in [0, 1]$ est régie par l'équation de transport conservative :
-$$
-\frac{\partial C}{\partial t} + \nabla \cdot (C \mathbf{u}) = C (\nabla \cdot \mathbf{u})
-$$
+1. **Reconstruction affine par morceaux (`InterfaceSegment` : $n_x x + n_y y + \alpha = 0$ orienté vers $C = 0$) :**
+   - `reconstruct_plic` : normale de Youngs $3\times 3$ pondérée $[1, 2, 1]$.
+   - `reconstruct_elvira` : sélection du candidat minimisant l'erreur volumique $L_2$ sur le bloc $3\times 3$ parmi 6 fonctions de hauteur horizontales et verticales.
+   - `compute_alpha` : bisection exacte sur l'intervalle $[\min_{4\text{ coins}} (-\mathbf{n}\cdot\mathbf{x}), \max_{4\text{ coins}} (-\mathbf{n}\cdot\mathbf{x})]$ utilisant l'aire polygonale exacte `cut_box_area` (clipping de Sutherland-Hodgman + formule de Gauss/Shoelace).
 
-Pour éliminer toute diffusion numérique d'interface, l'algorithme géométrique en deux étapes se décompose comme suit :
-1. **Reconstruction PLIC (*Piecewise Linear Interface Calculation*) :**
-   Dans chaque maille mixte ($0 < C_{i,j} < 1$), l'interface est approchée par un segment de droite :
-   $$\mathbf{n} \cdot \mathbf{x} + \alpha = 0$$
-   où le vecteur normal unitaire $\mathbf{n} = -\frac{\nabla C}{\|\nabla C\|}$ est évalué par l'opérateur de Youngs ou ELVIRA (pochoir $3 \times 3$), et $\alpha$ est calculé par inversion analytique de la fraction volumique sous le plan.
-2. **Advection Conservatrice de Weymouth-Yue (2010) :**
-   L'advection dimensionnelle alternée (balayage $X$ puis $Y$) calcule le volume géométrique de fluide transitant à travers chaque face :
-   $$C_{i,j}^{n+1} = C_{i,j}^n - \frac{\Delta t}{\Delta x} \left( F_{i+1/2, j}^{\text{WY}} - F_{i-1/2, j}^{\text{WY}} \right) - \frac{\Delta t}{\Delta y} \left( G_{i, j+1/2}^{\text{WY}} - G_{i, j-1/2}^{\text{WY}} \right) + C_{i,j}^n \Delta t (\nabla \cdot \mathbf{u})_{i,j}$$
-   Le dernier terme compense exactement la divergence numérique locale et assure que $C \in [0, 1]$ rigoureusement sans écrêtage artificiel.
+2. **Advection conservative de Weymouth & Yue (2010) avec splitting alterné de Strang :**
+   - En début de pas : $C_{d,i,j} = 1$ si $C_{i,j}^n \ge 0.5$, sinon $0$.
+   - Passe X : $C_{i,j}^* = C_{i,j}^n - \frac{f_{x, i+1, j} - f_{x, i, j}}{\Delta x \Delta y} + C_{d,i,j} \frac{\Delta t}{\Delta x}(u_{i+1,j} - u_{i,j})$ (sans écrêtage intermédiaire : `clamp_out = false`).
+   - Passe Y : $C_{i,j}^{n+1} = C_{i,j}^* - \frac{f_{y, i, j+1} - f_{y, i, j}}{\Delta x \Delta y} + C_{d,i,j} \frac{\Delta t}{\Delta y}(v_{i,j+1} - v_{i,j})$ (avec écrêtage final `[0, 1]`).
 
 ### 4.5.2. Localisation dans le Code Source
 
 - **C++17 :**
-  - Fichiers : `COVOF_2D-C++/src/InterfaceReconstruction.cpp`, `COVOF_2D-C++/src/InterfaceTracker.cpp`
-  - Méthodes : `InterfaceReconstruction::reconstructPLIC()`, `InterfaceTracker::advectWeymouthYue()`
-  - Lignes de code : Lignes 45 à 220 (`InterfaceReconstruction.cpp`) et Lignes 80 à 310 (`InterfaceTracker.cpp`).
+  - `COVOF_2D-C++/src/InterfaceReconstruction.cpp` : `cut_box_area` (l. 37), `compute_alpha` (l. 106), `clip_segment_in_cell` (l. 147), `reconstruct_plic` (l. 252), `reconstruct_elvira` (l. 321), `reconstruct_lvira` (l. 436).
+  - `COVOF_2D-C++/src/InterfaceTracker.cpp` : `advect` (l. 849–894), `advect_weymouth_yue` (l. 1148–1327).
 - **Fortran 2018 :**
-  - Fichiers : `COVOF_2D-FORTRAN/src/module_interface_reconstruction.f90`, `COVOF_2D-FORTRAN/src/module_interface_tracking.f90`
-  - Routines : `subroutine plic_reconstruct_2d(...)`, `subroutine vof_advect_weymouth_yue(...)`
-  - Lignes de code : Lignes 60 à 250 (`module_interface_reconstruction.f90`) et Lignes 95 à 380 (`module_interface_tracking.f90`).
+  - `COVOF_2D-FORTRAN/src/module_interface_reconstruction.f90` : `cut_box_area` (l. 33), `compute_alpha` (l. 105), `clip_segment_in_cell` (l. 152), `reconstruct_elvira` (l. 346).
+  - `COVOF_2D-FORTRAN/src/module_interface_vof.f90` : `advect_vof` (l. 792), `advect_vof_weymouth_yue` (l. 1162).
 
 ---
 
-## 4.6. Tension de Surface CSF (*Continuum Surface Force*) et Courbure $\kappa$
+## 4.6. Méthode Hybride FC-WY-CVI-Marker (Variante B Exacte sur Boîtes MAC)
 
-### 4.6.1. Équation Discrète Exacte
+### 4.6.1. Formulation Mathématique Discrète
 
-La force de tension de surface volumique introduite par Brackbill et al. s'écrit :
-$$
-\mathbf{F}_{\text{CSF}} = \sigma \kappa (\mathbf{x}) \nabla C
-$$
-où :
-- $\sigma$ est le coefficient de tension superficielle ($\text{N}\cdot\text{m}^{-1}$).
-- $\kappa$ est la courbure moyenne locale :
-  $$\kappa = - \nabla \cdot \mathbf{n} = - \left( \frac{\partial n_x}{\partial x} + \frac{\partial n_y}{\partial y} \right)$$
-- $\mathbf{n} = \frac{\nabla \tilde{C}}{\|\nabla \tilde{C}\|}$ est la normale calculée sur un champ de fraction volumique lissé par filtre gaussien ou moyenne pondérée :
-  $$\tilde{C}_{i,j} = \frac{1}{16} \begin{bmatrix} 1 & 2 & 1 \\ 2 & 4 & 2 \\ 1 & 2 & 1 \end{bmatrix} * C_{i,j}$$
+Pour tout point matériel $(x_p, y_p)$ localisé dans la cellule $(i, j)$, la **Variante B exacte** (Wang et al., 2015 ; Pusok et al., 2017) définit deux boîtes décalées distinctes restant strictement dans le halo `(0:nx+1, 0:ny+1)` :
+- Boîte horizontale $u$ : $j_u = (y_p < y_j^c) \;?\; j-1 : j$, $\xi_u = \frac{x_p - x_i^f}{\Delta x}$, $\eta_u = \frac{y_p - y_{j_u}^c}{\Delta y}$.
+- Boîte verticale $v$ : $i_v = (x_p < x_i^c) \;?\; i-1 : i$, $\xi_v = \frac{x_p - x_{i_v}^c}{\Delta x}$, $\eta_v = \frac{y_p - y_j^f}{\Delta y}$.
 
-Sur la grille MAC, la projection de la force sur la face horizontale $u_{i+1/2, j}$ utilise la moyenne de courbure et le gradient discret de $C$ :
-$$
-F_{\text{CSF}, x, i+1/2, j} = \sigma \left( \frac{\kappa_{i,j} + \kappa_{i+1, j}}{2} \right) \left( \frac{C_{i+1, j} - C_{i, j}}{\Delta x} \right)
-$$
+Avec $\Delta u_S = u_{i+1, j_u} - u_{i, j_u}$, $\Delta u_N = u_{i+1, j_u+1} - u_{i, j_u+1}$, $\Delta v_W = v_{i_v, j+1} - v_{i_v, j}$ et $\Delta v_E = v_{i_v+1, j+1} - v_{i_v+1, j}$ :
+
+$$u_{\text{CVI}} = u_{\text{bilin}}(\xi_u, \eta_u) + \frac{\Delta x}{2 \Delta y} \xi_u (1 - \xi_u)(\Delta v_E - \Delta v_W)$$
+$$v_{\text{CVI}} = v_{\text{bilin}}(\xi_v, \eta_v) + \frac{\Delta y}{2 \Delta x} \eta_v (1 - \eta_v)(\Delta u_N - \Delta u_S)$$
+
+L'advection temporelle utilise le schéma RK2 de Heun (prédicteur $\mathbf{x}_p^*$ avec $\mathbf{u}^n$ puis correcteur avec $\mathbf{u}^{n+1}$ ou le champ courant en mode cinématique), suivie de la migration MPI 2 passes, de l'élagage par sous-octants et de l'ajustement parabolique pondéré dans le repère tourné $(\tau, \eta)$ :
+
+$$\min_{a,b,c} \sum_{p=1}^{M} w_p \left(a \tau_p^2 + b \tau_p + c - \eta_p\right)^2 \quad \text{sous } \mathbf{n}_p \cdot \mathbf{n}^{\text{ref}} \ge 0.5 \implies \kappa_{i,j}^{\text{marker}} = \frac{2a}{(1 + b^2)^{3/2}}$$
 
 ### 4.6.2. Localisation dans le Code Source
 
-- **C++17 :**
-  - Fichier : `COVOF_2D-C++/src/InterfaceReconstruction.cpp`
-  - Méthode : `InterfaceReconstruction::computeCurvature(const std::vector<double>& c, std::vector<double>& kappa)`
-  - Lignes de code : Lignes 240 à 315.
-- **Fortran 2018 :**
-  - Fichier : `COVOF_2D-FORTRAN/src/module_interface_reconstruction.f90`
-  - Routine : `subroutine compute_curvature_csf(c, kappa, mesh)`
-  - Lignes de code : Lignes 270 à 365.
+- **C++17 :** `COVOF_2D-C++/src/InterfaceMarkers.cpp` :
+  - `init_from_vof` (l. 16–109)
+  - `interpolate_velocity_cvi` (l. 123–185)
+  - `advect_rk2` (l. 239–495, incluant routage MPI aller-retour à 4 passes)
+  - `migrate_mpi` (l. 497–679, migration X puis Y)
+  - `prune_and_reseed` (l. 681–935)
+  - `compute_curvature_from_markers` (l. 937–1384, incluant halo $2.5 h$ et lissage tangentiel)
+  - `write_vtk` (l. 1390–1459)
+- **Fortran 2018 :** `COVOF_2D-FORTRAN/src/module_markers.f90` :
+  - `init_markers_from_vof` (l. 110), `interpolate_velocity_cvi` (l. 232), `advect_markers_rk2` (l. 327), `migrate_markers_mpi` (l. 763), `prune_and_reseed_markers` (l. 995), `compute_curvature_from_markers` (l. 1277), `write_markers_vtk` (l. 1785).
+- **Couplage dans VOF et CSF :**
+  - C++17 : `InterfaceTracker::advect` (`InterfaceTracker.cpp`, l. 887–893), `compute_curvature_and_CSF` (l. 658–733), `apply_marker_normals_to_segments` (l. 736–847).
+  - Fortran 2018 : `module_interface_vof.f90` $\rightarrow$ `advect_vof` (l. 792+), `compute_curvature_and_csf` (l. 627+).
+
+### 4.6.3. Analyse de l'Implémentation CVI (`InterfaceMarkers.cpp`, lignes 145–185)
+
+```cpp
+int j_u = (yp < mesh.yc(j)) ? (j - 1) : j;
+int i_v = (xp < mesh.xc(i)) ? (i - 1) : i;
+
+double xi_u  = std::clamp((xp - mesh.xu(i))   / dx, 0.0, 1.0);
+double eta_u = std::clamp((yp - mesh.yc(j_u)) / dy, 0.0, 1.0);
+double xi_v  = std::clamp((xp - mesh.xc(i_v)) / dx, 0.0, 1.0);
+double eta_v = std::clamp((yp - mesh.yv(j))   / dy, 0.0, 1.0);
+// ... lecture des 4 sommets MAC u_{i..i+1, j_u..j_u+1} et v_{i_v..i_v+1, j..j+1} ...
+double corr_u = 0.5 * (dx / dy) * xi_u  * (1.0 - xi_u)  * (dv_e - dv_w);
+double corr_v = 0.5 * (dy / dx) * eta_v * (1.0 - eta_v) * (du_n - du_s);
+up = u_bilin + corr_u;
+vp = v_bilin + corr_v;
+```
+
+Notice sur les conventions de signes : dans `InterfaceReconstruction`, les segments PLIC $n_x^{\text{PLIC}} x + n_y^{\text{PLIC}} y + \alpha = 0$ ont leur normale orientée vers $C = 0$ ($-\nabla C / \|\nabla C\|$), tandis que les marqueurs et le modèle CSF orientent $\mathbf{n}_p$ vers $C = 1$ ($+\nabla C / \|\nabla C\|$). À chaque ensemencement et lors de l'injection `apply_marker_normals_to_segments`, le signe est rigoureusement inversé (`mk.nx = -seg.nx`, `snx = -fields.marker_nx[idx]`).
 
 ---
 
-## 4.7. Préconditionneur Triangulaire par Blocs avec Approximation SBP (BT-SBP)
+## 4.7. Lissage SVOF Helmholtz et Préconditionneur Bloc Triangulaire BT-SBP
 
-### 4.7.1. Équation Discrète Exacte
+### 4.7.1. Lissage SVOF Helmholtz (`smooth_svof_helmholtz`)
 
-Le système couplé complet de Navier-Stokes discrétisé se met sous la forme bloc :
-$$
-\begin{bmatrix} A_u & 0 & G_x \\ 0 & A_v & G_y \\ D_x & D_y & -C_p \end{bmatrix} \begin{bmatrix} \mathbf{u} \\ \mathbf{v} \\ \mathbf{p} \end{bmatrix} = \begin{bmatrix} \mathbf{f}_u \\ \mathbf{f}_v \\ \mathbf{f}_p \end{bmatrix}
-$$
-où $A_u, A_v$ sont les blocs cinétiques d'advection-diffusion, $G = [G_x, G_y]^T$ est le gradient discret, $D = [D_x, D_y]$ est la divergence discrète, et $C_p$ représente la matrice de compressibilité éventuelle (nulle en incompressible pur).
+- **Équation discrète :** $(1 + a_E + a_W + a_N + a_S) C_{s,i,j} - \sum_{\text{nb}} a_{\text{nb}} C_{s,\text{nb}} = C_{i,j}$ avec $a_{E,W} = k \Delta y / \Delta x$, $a_{N,S} = k \Delta x / \Delta y$ (annulés sur les bords physiques de Neumann homogène) et 25 balayages Gauss-Seidel avant/arrière synchronisés en MPI.
+- **Localisation :** `InterfaceTracker.cpp` (l. 288–380) et `module_interface_vof.f90` (l. 387–478).
 
-Le préconditionneur bloc triangulaire supérieur BT-SBP applique l'opérateur :
-$$
-\mathcal{P}_{BT}^{-1} = \begin{bmatrix} \hat{A}_u^{-1} & 0 & -\hat{A}_u^{-1} G_x \hat{S}^{-1} \\ 0 & \hat{A}_v^{-1} & -\hat{A}_v^{-1} G_y \hat{S}^{-1} \\ 0 & 0 & -\hat{S}^{-1} \end{bmatrix}
-$$
-où $\hat{A}_u = \text{diag}(A_u)$ et le complément de Schur $\hat{S} \approx D \hat{A}^{-1} G + C_p$ est approché par un opérateur de Poisson enrichi pour la pression :
-$$
-\hat{S} \approx \nabla \cdot \left( \frac{\Delta t}{\rho} \nabla \right)
-$$
-Ce complément de Schur est résolu de manière approchée par quelques cycles de multigrille ou de relaxations SSOR.
+### 4.7.2. Préconditionneur Triangulaire par Blocs BT-SBP
 
-### 4.7.2. Localisation dans le Code Source
-
-- **C++17 :**
-  - Fichier : `COVOF_2D-C++/src/Preconditioner.cpp`
-  - Méthode : `BlockTriangularPreconditioner::apply(...)`
-  - Lignes de code : Lignes 185 à 290.
-- **Fortran 2018 :**
-  - Fichier : `COVOF_2D-FORTRAN/src/module_preconditioners.f90`
-  - Routine : `subroutine precond_apply_bt_sbp(r_u, r_v, r_p, z_u, z_v, z_p, mesh, config)`
-  - Lignes de code : Lignes 210 à 335.
+- **Équation discrète :** Pour le système monolithique $\begin{pmatrix} F_u & 0 & G_x \\ 0 & F_v & G_y \\ D_x & D_y & -C_p \end{pmatrix}$, `BlockTriangularPreconditioner` résout d'abord le complément de Schur $S \mathbf{r}_p = \mathbf{z}_p$ (8 balayages de Gauss-Seidel symétrique sur les coefficients $a_W, a_E = \Delta y^2 / u_{aP}$, $a_S, a_N = \Delta x^2 / v_{aP}$, $a_P = \sum a_{\text{nb}} + \frac{\chi_T}{\Delta t}\Delta x\Delta y + 10^{-12}\Delta x\Delta y$, avec retrait du mode constant en incompressible), puis calcule $\text{rhs}_u = \mathbf{z}_u - G_x \mathbf{r}_p$, $\text{rhs}_v = \mathbf{z}_v - G_y \mathbf{r}_p$ et résout $F_u \mathbf{r}_u = \text{rhs}_u$ et $F_v \mathbf{r}_v = \text{rhs}_v$ par 4 balayages SSOR.
+- **Localisation :**
+  - C++17 : `COVOF_2D-C++/src/Preconditioner.cpp` $\rightarrow$ `BlockTriangularPreconditioner::update` (l. 210–382) et `apply` (l. 384–579).
+  - Fortran 2018 : `COVOF_2D-FORTRAN/src/module_navier_stokes.f90` $\rightarrow$ `ns_assemble_preconditioner_blocks` (l. 1287–1585) et `module_linear_solvers.f90` $\rightarrow$ `apply_preconditioner` (l. 47–489).

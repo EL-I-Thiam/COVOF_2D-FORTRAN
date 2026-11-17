@@ -516,6 +516,24 @@ contains
           end do
        end if
     end if
+
+    ! Raccordement des vitesses fantômes aux coins physiques pour l'interpolation CVI
+    if (.not. homogeneous) then
+       if (mesh%neighbor_east == MPI_PROC_NULL .and. cfg%bc_right%btype /= BC_PERIODIC) then
+          if (mesh%neighbor_south == MPI_PROC_NULL .and. cfg%bc_bottom%btype /= BC_PERIODIC) then
+             fields%u(nx+1, 0) = fields%u(nx+1, 1)
+             fields%v(nx+1, 0) = fields%v(nx, 0)
+          end if
+          if (mesh%neighbor_north == MPI_PROC_NULL .and. cfg%bc_top%btype /= BC_PERIODIC) then
+             fields%u(nx+1, ny+1) = fields%u(nx+1, ny)
+             fields%v(nx+1, ny+1) = fields%v(nx, ny+1)
+          end if
+       end if
+       if (mesh%neighbor_west == MPI_PROC_NULL .and. cfg%bc_left%btype /= BC_PERIODIC .and. &
+           mesh%neighbor_north == MPI_PROC_NULL .and. cfg%bc_top%btype /= BC_PERIODIC) then
+          fields%v(0, ny+1) = fields%v(1, ny+1)
+       end if
+    end if
   end subroutine apply_velocity_bc
 
   ! [Procédure/Module] subroutine apply_thermal_bc

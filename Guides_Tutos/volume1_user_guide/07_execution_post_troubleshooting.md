@@ -1,137 +1,156 @@
 # Exécution, Post-Traitement et Dépannage
 
-## Lancement d'une Simulation et Gestion du Calcul
+## Lancement d'une Simulation en Ligne de Commande
 
-Le lancement d'une simulation avec **COVOF 2D** est conçu pour être direct, rapide et unifié entre les deux implémentations C++17 et Fortran 2018.
+Les exécutables **C++17** (`covof2d_cpp` et son lien `covof2d`) et **Fortran 2018** (`covof2d_fortran`) acceptent exactement la même interface en ligne de commande et fonctionnent en **MPI pur** (aucun thread OpenMP).
 
-### Lancement en Ligne de Commande
-
-Les deux exécutables acceptent le chemin vers le fichier de configuration JSON comme argument unique en ligne de commande :
+### Syntaxe d'Exécution
 
 ```bash
-# Exécution séquentielle C++ :
+# Exécution séquentielle (1 processus MPI) :
 ./COVOF_2D-C++/bin/covof2d_cpp chemin/vers/mon_cas.json
-
-# Exécution séquentielle Fortran :
 ./COVOF_2D-FORTRAN/bin/covof2d_fortran chemin/vers/mon_cas.json
 
-# Exécution parallèle distribuée MPI (exemple sur 4 processus) :
+# Exécution parallèle distribuée MPI (exemple sur 4 rangs MPI) :
 mpirun -np 4 ./COVOF_2D-C++/bin/covof2d_cpp chemin/vers/mon_cas.json
 mpirun -np 4 ./COVOF_2D-FORTRAN/bin/covof2d_fortran chemin/vers/mon_cas.json
+
+# Affichage de l'aide intégrée :
+./COVOF_2D-C++/bin/covof2d_cpp --help
+./COVOF_2D-FORTRAN/bin/covof2d_fortran --help
 ```
 
-Si aucun argument n'est fourni, les deux solveurs recherchent par défaut un fichier nommé `config.json` dans le répertoire d'exécution courant. En cas d'absence de ce fichier, ils affichent une notice d'aide claire récapitulant les options d'usage et les cas d'exemples.
+Si aucun argument n'est fourni sur la ligne de commande, les deux programmes tentent de charger le fichier par défaut `cases/cavity.json`. En cas d'échec d'ouverture du fichier JSON, le rang 0 affiche un message d'erreur et déclenche `MPI_Abort(MPI_COMM_WORLD, 1)`.
 
 ---
 
-## Interprétation des Journaux de Convergence (Logs)
+## Interprétation des Journaux Console (`main.cpp` / `Config::print()` / `Simulation::run()`)
 
-Dès son initialisation, COVOF 2D affiche une bannière technique récapitulant les paramètres de la simulation : maillage local et global, topologie des processus MPI, propriétés thermodynamiques, choix des solveurs et pas de temps initial.
+Dès le lancement, seul le processus maître (`rank == 0`) affiche l'en-tête d'accueil, le résumé complet de la configuration (`Config::print()` en C++), puis l'en-tête de la boucle temporelle.
 
-### Exemple de Journal Console au Démarrage
+### Exemple Réel de Sortie Console (C++17)
 
 ```text
 ================================================================================
-   COVOF 2D — Solveur CFD Navier-Stokes Incompressible Parallèle (C++17 / MPI)   
+   COVOF 2D — Solveur CFD Navier-Stokes Incompressible Parallèle (C++17/MPI)   
 ================================================================================
-[INFO] Lecture de la configuration : case_dambreak.json
-[INFO] Topologie MPI 2D active     : 4 processus (Px = 2, Py = 2)
-[INFO] Maillage global             : 128 x 256 mailles (Lx = 0.1 m, Ly = 0.2 m)
-[INFO] Maillage local par rang     : 64 x 128 mailles (dx = 7.8125e-04 m, dy = 7.8125e-04 m)
-[INFO] Modèle d'écoulement         : Diphasique VOF-PLIC (rho1=1000, rho2=1.2, mu1=1e-3, mu2=1.8e-5)
-[INFO] Couplage Navier-Stokes      : AAL (Adaptative Augmented Lagrangian, Vincent et al. 2004)
-[INFO] Solveur Linéaire            : BiCGSTAB(2) avec préconditionneur JACOBI (tol = 1.0e-06)
+  Nombre de processus MPI  : 4
+  Fichier de configuration : rising_bubble.json
 ================================================================================
-  Step        Time [s]        dt [s]    Iter_NS         Res_U        Res_Div         CFL
---------------------------------------------------------------------------------------
-     1     5.00000e-04   5.00000e-04         12   1.45821e-07   8.91420e-06     0.0124
-     2     1.00000e-03   5.00000e-04         14   2.11045e-07   7.23410e-06     0.0241
-    10     5.00000e-03   5.00000e-04         15   3.45120e-07   4.12050e-06     0.0895
-    50     2.50000e-02   5.00000e-04         18   5.12040e-07   2.89120e-06     0.2450
+========================================================
+       COVOF 2D PARALLELE - CONFIGURATION DU CAS         
+========================================================
+ Mode calcul : NAVIER_STOKES
+ Maillage : 64 x 128 cellules (Lx = 1 m, Ly = 2 m)
+ dx = 0.015625 m, dy = 0.015625 m
+ Physique : Diphasique | Convection : Oui | Tension de surface : Oui
+ Fluide 1 : rho=1000 kg/m3, mu=10 Pa.s
+ Fluide 2 : rho=100 kg/m3, mu=1 Pa.s
+ Tension superficielle sigma = 24.5 N/m
+ VOF : Advection=WEYMOUTH_YUE | Reconstruction=ELVIRA | Marqueurs CVI=CVI_RK2 (N_init=4, Courbure=Oui, NormalesPLIC=Oui)
+ Gravite : g = (0, -0.98) m/s^2
+   Schema temporel : GEAR | Linearisation convective : ADAMS_BASHFORTH | Lissage SVOF : Oui (k=0.500000)
+ Temps : dt = 0.001 s, t_final = 3 s
+ Solveur : MONOLITHIC | BiCGSTAB(2), tol=1e-10, max_iter=1000, r_al=500, uzawa_iter=1
+ Sorties : Dossier 'output/bulle_cvi', intervalle VTK=50
+========================================================
+
+>>> DEMARRAGE DU CALCUL COVOF 2D PARALLELE <<<
+Pas     Temps [s]     dt [s]      Iter Krylov Vitesse Max     Div Max         
+-------------------------------------------------------------------------------------
+10      0.01000       1.000e-03   14          1.2410e-02      3.1842e-11      
+20      0.02000       1.000e-03   15          2.4635e-02      2.9410e-11      
+...
+------------------------------------------------------------------------------
+>>> SIMULATION COVOF 2D TERMINEE AVEC SUCCES A t = 3.00000 s <<<
+Fichiers de visualisation VTK et CSV disponibles dans : output/bulle_cvi
 ```
 
-### Signification des Colonnes du Journal
+*(Note : en Fortran, la bannière de démarrage de boucle affiche `>>> DEMARRAGE DU CALCUL COVOF 2D FORTRAN 2018 PARALLELE <<<` et inclut systématiquement la colonne `Nu Moyen`, qui vaut `0.0000` lorsque `enable_energy = false` ; en C++, la colonne `Nu Moyen` n'est affichée que si `enable_energy = true`.)*
 
-- `Step` : Numéro de l'itération temporelle courante $n$.
-- `Time [s]` : Temps physique total simulé écoulé depuis le début du calcul $t = \sum \Delta t$.
-- `dt [s]` : Valeur du pas de temps d'avancement $\Delta t$ utilisé pour le pas courant.
-- `Iter_NS` : Nombre cumulé d'itérations effectuées par le solveur linéaire de Krylov (ex. BiCGSTAB2 ou MINRES) sur l'ensemble des sous-itérations d'Uzawa du pas.
-- `Res_U` : Norme relative euclidienne du résidu du système linéaire de quantité de mouvement à la convergence.
-- `Res_Div` : Norme infinie maximale du résidu de continuité $\|\nabla \cdot \mathbf{u}^{n+1}\|_\infty$ sur l'ensemble du domaine de calcul $[\text{s}^{-1}]$.
-- `CFL` : Nombre de Courant-Friedrichs-Lewy convectif maximal observé sur la grille : $\max_{i, j} \left( \frac{|u|\Delta t}{\Delta x} + \frac{|v|\Delta t}{\Delta y} \right)$.
+### Signification des Colonnes de la Boucle Temporelle
 
-### Fichier d'Historique de Convergence CSV
-
-En parallèle de la sortie console, le solveur enregistre à chaque pas de temps une ligne dans le fichier `output/convergence.csv`, permettant le tracé dynamique en cours de calcul des courbes de résidus et du suivi du bilan de masse global.
+| Colonne | Signification Physique et Numérique |
+| :--- | :--- |
+| `Pas` | Indice de l'itération temporelle courante (`step`). |
+| `Temps [s]` | Temps physique cumulé $t = \sum \Delta t$ $[\text{s}]$. |
+| `dt [s]` | Pas de temps effectif $\Delta t$ utilisé à l'itération courante $[\text{s}]$. |
+| `Iter Krylov` | Nombre cumulé d'itérations du solveur linéaire (`total_iters`) sur toutes les itérations d'Uzawa du pas. |
+| `Vitesse Max` | Norme maximale de vitesse observée sur la grille globale (`global_max_u`, $[\text{m}\cdot\text{s}^{-1}]$). |
+| `Div Max` | Divergence discrète maximale $\max_{i,j} \left|\frac{u_{i+1,j}-u_{i,j}}{\Delta x} + \frac{v_{i,j+1}-v_{i,j}}{\Delta y}\right|$ $[\text{s}^{-1}]$. |
+| `Nu Moyen` | Nombre de Nusselt moyen à la paroi chaude $x=0$ (si `enable_energy = true`, ou toujours affiché en Fortran). |
 
 ---
 
-## Visualisation et Extraction de Données
+## Fichiers de Sortie, Visualisation ParaView et Post-Traitement
 
-COVOF 2D produit des sorties volumiques au standard ouvert **XML VTK Rectilinear Grid**, optimisé pour les maillages cartésiens et directement exploitable sous **ParaView**, **VisIt** ou par les scripts Python de traitement d'images et de données scientifiques.
+Tous les fichiers générés sont placés dans le répertoire `output.output_dir` en utilisant le préfixe `output.case_name` (noté `<case>` ci-dessous).
 
-### Structure des Fichiers XML VTK Générés
+### 1. Historique Temporel CSV : `<case>_history.csv`
 
-Lorsqu'un pas d'écriture est franchi (selon la fréquence `output.frequency`), le répertoire `output/` reçoit :
+Écrit à chaque pas de temps lorsque `output.write_csv_history = true` (`VTKWriter.cpp` / `module_vtk_writer.f90`).
 
-1. **Les fichiers de sous-domaines `.vtr` (*VTK Rectilinear Grid*) :**
-   Chaque processus MPI de rang $p$ écrit de manière autonome son sous-domaine local sans goulot d'étranglement centralisé :
-   `output/nom_00100_piece_0.vtr`, `output/nom_00100_piece_1.vtr`, etc.
-   Ces fichiers contiennent les tableaux de coordonnées 1D $x(i)$, $y(j)$ et les champs volumiques au format binaire ou base64 :
-   - `Velocity` : vecteur vitesse $(u, v, 0)$ aux centres ou interpolé aux nœuds.
-   - `Pressure` : champ scalaire de pression $p$.
-   - `VOF_Color` : fraction volumique de liquide $C \in [0, 1]$.
-   - `Density` et `Viscosity` : champs de masse volumique $\rho$ et viscosité $\mu$.
-   - `Temperature` : champ thermique $T$ (si l'énergie est activée).
+- **Format C++ (9 colonnes) :**
+  `step,time,dt,center_of_mass_y,rise_velocity,bubble_volume,kinetic_energy,max_u,max_div`
+- **Format Fortran (11 colonnes) :**
+  `step,time,dt,center_of_mass_y,rise_velocity,bubble_volume,kinetic_energy,max_u,max_div,avg_rho_gas,avg_p_gas`
 
-2. **Le fichier maître `.pvtr` (*Parallel VTK Rectilinear Grid*) :**
-   Le processus de rang maître (rang 0) génère un fichier XML léger pointant vers les différentes pièces `.vtr` associées à chaque rang :
-   ```xml
-   <?xml version="1.0"?>
-   <VTKFile type="PRectilinearGrid" version="0.1" byte_order="LittleEndian">
-     <PRectilinearGrid WholeExtent="0 128 0 256 0 0" GhostLevel="0">
-       <PCoordinates>
-         <PDataArray type="Float64" Name="XCoordinates"/>
-         <PDataArray type="Float64" Name="YCoordinates"/>
-         <PDataArray type="Float64" Name="ZCoordinates"/>
-       </PCoordinates>
-       <PCellData Scalars="Pressure,VOF_Color" Vectors="Velocity">
-         <PDataArray type="Float64" Name="Velocity" NumberOfComponents="3"/>
-         <PDataArray type="Float64" Name="Pressure"/>
-         <PDataArray type="Float64" Name="VOF_Color"/>
-       </PCellData>
-       <Piece Extent="0 64 0 128 0 0" Source="dambreak_00100_piece_0.vtr"/>
-       <Piece Extent="64 128 0 128 0 0" Source="dambreak_00100_piece_1.vtr"/>
-       <Piece Extent="0 64 128 256 0 0" Source="dambreak_00100_piece_2.vtr"/>
-       <Piece Extent="64 128 128 256 0 0" Source="dambreak_00100_piece_3.vtr"/>
-     </PRectilinearGrid>
-   </VTKFile>
-   ```
+Définition exacte des métriques calculées sur l'indicateur de la phase 2 (`1.0 - C`) :
+- `center_of_mass_y` : ordonnée du barycentre de la phase 2, $y_c = \frac{\int y (1-C)\,d\Omega}{\int (1-C)\,d\Omega}$.
+- `rise_velocity` : vitesse verticale moyenne de la phase 2, $v_c = \frac{\int v (1-C)\,d\Omega}{\int (1-C)\,d\Omega}$.
+- `bubble_volume` : aire totale (volume 2D) de la phase 2, $\int (1-C)\,d\Omega$.
+- `kinetic_energy` : énergie cinétique discrète aux nœuds de pression, $\frac{1}{2}\sum_{i,j}\rho_{i,j}\left(\frac{u_{i,j}^2 + u_{i+1,j}^2}{2} + \frac{v_{i,j}^2 + v_{i,j+1}^2}{2}\right)\Delta x \Delta y$.
+- `max_u`, `max_div` : vitesse maximale au centre des mailles et divergence discrète maximale.
+- `avg_rho_gas`, `avg_p_gas` (Fortran) : masse volumique gaz et pression moyenne dans la phase $1-C$ (pour suivi compressible).
 
-3. **Le fichier de collection temporelle `.pvd` (*ParaView Data*) :**
-   Ce fichier liste la séquence temporelle complète, permettant à ParaView de charger l'animation en un seul clic :
-   ```xml
-   <?xml version="1.0"?>
-   <VTKFile type="Collection" version="0.1">
-     <Collection>
-       <DataSet timestep="0.000" file="dambreak_00000.pvtr"/>
-       <DataSet timestep="0.010" file="dambreak_00020.pvtr"/>
-       <DataSet timestep="0.020" file="dambreak_00040.pvtr"/>
-     </Collection>
-   </VTKFile>
-   ```
+### 2. Champs Volumiques Parallèles XML VTK : `.vtr` et `.pvtr`
+
+Écrits au pas `0`, tous les `output.vtk_interval` pas, et au pas final :
+
+1. **Pièces locales par rang MPI :** `<case>_p<rank>_<step:06d>.vtr` (ex. `rising_bubble_p0_000050.vtr`). Chaque processus écrit son propre sous-domaine `RectilinearGrid` avec ses coordonnées `XCoordinates`, `YCoordinates`, `ZCoordinates`.
+2. **Fichier maître parallèle :** `<case>_<step:06d>.pvtr` (ex. `rising_bubble_000050.pvtr`), écrit par le rang 0 et référençant l'ensemble des `<Piece Extent="..." Source="<case>_p<rank>_<step:06d>.vtr"/>`.
+
+Les tableaux `<CellData>` exportés dans chaque `.vtr` et `.pvtr` sont exactement :
+- `PhaseIndicator` : fraction volumique brute $C_{i,j}$
+- `PhaseIndicator_Smoothed` : fraction volumique lissée SVOF $C_{s,i,j}$ (présente si `C_s` est alloué/non vide)
+- `Pressure` : pression $p_{i,j}$
+- `Density` : masse volumique $\rho_{i,j}$
+- `Viscosity` : viscosité dynamique $\mu_{i,j}$
+- `Divergence` : divergence discrète $(\nabla_h \cdot \mathbf{u})_{i,j}$
+- `Temperature` : température $T_{i,j}$
+- `Curvature` : courbure locale $\kappa_{i,j}$
+- `Velocity` : vecteur vitesse $(u_c, v_c, 0.0)$ à 3 composantes interpolé aux centres de mailles
+
+### 3. Nuage de Marqueurs Lagrangiens CVI : `<case>_markers_<step:06d>.vtk`
+
+Lorsque `vof.use_markers = true` et `vof.write_markers_vtk = true`, les rangs MPI rassemblent par `MPI_Gatherv` vers le rang 0 l'ensemble des marqueurs actifs et écrivent un fichier VTK Legacy ASCII `DATASET POLYDATA` (`InterfaceMarkers::write_vtk` / `write_markers_vtk`) :
+- `POINTS <N> double` : coordonnées $(x_p, y_p, 0.0)$
+- `VERTICES <N> <2N>` : sommets ponctuels pour affichage direct dans ParaView
+- `POINT_DATA <N>` contenant :
+  - `VECTORS MarkerNormal double` : normale unitaire $(n_{x,p}, n_{y,p}, 0.0)$ orientée vers $C=1$
+  - `SCALARS MarkerCurvature double 1` : courbure locale $\kappa_p$ portée par le marqueur
+
+### 4. Sorties Analytiques Spécifiques aux Modes de Vérification
+
+Selon la configuration (`mode` ou `test_case`), les routines dédiées de `Simulation.cpp` et `module_simulation.f90` exportent automatiquement des fichiers CSV de métrologie exacte dans `output_dir` :
+
+| Cas / Mode | Fichiers Générés | Colonnes Principales |
+| :--- | :--- | :--- |
+| `mode = "LAPLACIAN"` (`CAS_3_1`, `CAS_3_2_NEUMANN`) | `laplacian_error.csv`, `solver_history.csv`, `solution_field_2d.csv`, `profile_x_mid.csv`, `profile_y_mid.csv`, `solution_field.vtk` | `nx,ny,dx,dy,iters,err_l1,err_l2,err_linf` et `iter,residual` |
+| `test_case = "CAS_3_7"` / `"POISEUILLE"` | `poiseuille_error.csv`, `profile_u_y.csv`, `profile_p_x.csv`, `solution_field_2d.csv`, `solution_field.vtk` | `nx,ny,dx,dy,iters,err_l1,err_l2,err_linf,err_grad_p,cpu_time` |
+| `test_case = "CAS_3_8"` / `"CAS_3_8_POISEUILLE_UNSTEADY"` | `poiseuille_unsteady_error.csv`, `profile_u_y.csv`, `solution_field_2d.csv`, `solution_field.vtk` | `nx,ny,dx,dy,total_step,final_time,err_l1,err_l2,err_linf,cpu_time` |
+| `mode = "VORTEX_ADVECTION"` | `vortex_error.csv` (+ `.vtr`/`.pvtr` et `_markers_*.vtk`) | `nx,ny,dt,T,advection,reconstruction,limiter,err_l1,err_l2,err_linf,mass_init,mass_final,mass_conservation` |
 
 ### Exploitation sous ParaView
 
-1. **Chargement :** Ouvrir le fichier `.pvd` dans ParaView et cliquer sur **Apply**.
-2. **Visualisation de l'interface liquide/gaz :**
-   Appliquer le filtre **Contour** sur le champ scalaire `VOF_Color` avec la valeur seuil $C = 0.5$. La surface ainsi extraite représente fidèlement la frontière matérielle entre les deux phases.
-3. **Vecteurs vitesse et lignes de courant :**
-   Appliquer le filtre **Glyph** (flèches 2D orientées selon `Velocity`) ou **Stream Tracer** pour visualiser les tourbillons de recirculation dans la cavité ou le sillage d'obstacle.
+1. **Champs volumiques :** Dans ParaView, ouvrir le groupe temporel `<case>_*.pvtr` et cliquer sur **Apply**.
+2. **Iso-contour d'interface VOF :** Appliquer le filtre **Cell Data to Point Data**, puis **Contour** sur `PhaseIndicator` avec la valeur `0.5`.
+3. **Visualisation des marqueurs CVI :** Ouvrir simultanément le groupe `<case>_markers_*.vtk`, appliquer une taille de point visible (*Point Size = 4*) ou le filtre **Glyph** orienté selon `MarkerNormal` et coloré par `MarkerCurvature`.
+4. **Vecteurs et lignes de courant :** Utiliser **Glyph** ou **Stream Tracer** sur le champ vectoriel `Velocity`.
 
-### Script Python d'Extraction Automatisée et de Tracé de Profils
+### Scripts Python de Post-Traitement (`pyvista`, `numpy`, `matplotlib`)
 
-Voici un script Python complet (`extract_profiles.py`) s'appuyant sur les bibliothèques scientifiques `numpy`, `matplotlib` et `pyvista` pour extraire et tracer les profils de vitesse au centre du domaine :
+#### Script 1 : Extraction de Profils et Superposition des Marqueurs depuis `.pvtr` et `_markers_*.vtk`
 
 ```python
 #!/usr/bin/env python3
@@ -140,63 +159,83 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pyvista as pv
 
-def extract_mid_profile(pvtr_file):
-    # Chargement du fichier parallèle VTK
-    reader = pv.get_reader(pvtr_file)
-    data = reader.read()
-
-    # Définition de la ligne d'échantillonnage verticale au centre X = Lx / 2
+def plot_fields_and_markers(pvtr_file, markers_vtk=None):
+    data = pv.get_reader(pvtr_file).read()
     bounds = data.bounds  # [xmin, xmax, ymin, ymax, zmin, zmax]
     x_mid = 0.5 * (bounds[0] + bounds[1])
-    p_start = [x_mid, bounds[2], 0.0]
-    p_end   = [x_mid, bounds[3], 0.0]
 
-    # Extraction des données le long du segment
-    sampled_line = data.sample_over_line(p_start, p_end, resolution=500)
-    
-    y_coords = sampled_line.points[:, 1]
-    u_velocity = sampled_line['Velocity'][:, 0]
-    pressure = sampled_line['Pressure']
+    # 1. Extraction d'un profil vertical au centre X = Lx / 2
+    line = data.sample_over_line([x_mid, bounds[2], 0.0],
+                                 [x_mid, bounds[3], 0.0], resolution=400)
+    y = line.points[:, 1]
+    u = line["Velocity"][:, 0]
+    p = line["Pressure"]
 
-    # Tracé graphique haute définition
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5), dpi=300)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5), dpi=200)
+    axes[0].plot(u, y, "b-", lw=2, label="u(x_mid, y)")
+    axes[0].set_xlabel("Vitesse horizontale u [m/s]")
+    axes[0].set_ylabel("Ordonnée y [m]")
+    axes[0].grid(True, ls="--", alpha=0.6)
+    axes[0].legend()
 
-    ax1.plot(u_velocity, y_coords, 'b-', lw=2, label='COVOF 2D')
-    ax1.set_xlabel('Vitesse horizontale u [m/s]')
-    ax1.set_ylabel('Hauteur y [m]')
-    ax1.set_title(f'Profil de Vitesse à x = {x_mid:.3f} m')
-    ax1.grid(True, ls='--', alpha=0.7)
-    ax1.legend()
+    axes[1].plot(p, y, "r-", lw=2, label="p(x_mid, y)")
+    axes[1].set_xlabel("Pression p [Pa]")
+    axes[1].set_ylabel("Ordonnée y [m]")
+    axes[1].grid(True, ls="--", alpha=0.6)
+    axes[1].legend()
 
-    ax2.plot(pressure, y_coords, 'r-', lw=2, label='Pression hydrodynamique')
-    ax2.set_xlabel('Pression p [Pa]')
-    ax2.set_ylabel('Hauteur y [m]')
-    ax2.set_title(f'Profil de Pression à x = {x_mid:.3f} m')
-    ax2.grid(True, ls='--', alpha=0.7)
-    ax2.legend()
+    if markers_vtk is not None:
+        mk = pv.read(markers_vtk)
+        print(f"Nombre de marqueurs CVI actifs : {mk.n_points}")
+        print(f"Courbure moyenne |kappa|       : {np.mean(np.abs(mk['MarkerCurvature'])):.4f} m^-1")
 
     plt.tight_layout()
-    plt.savefig('profil_vertical_covof2d.png')
-    print("Graphique sauvegardé avec succès dans profil_vertical_covof2d.png")
+    plt.savefig("covof_postproc_profiles.png")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python3 extract_profiles.py <fichier.pvtr>")
+        print("Usage: python3 postproc.py <case_000050.pvtr> [case_markers_000050.vtk]")
         sys.exit(1)
-    extract_mid_profile(sys.argv[1])
+    mk_arg = sys.argv[2] if len(sys.argv) > 2 else None
+    plot_fields_and_markers(sys.argv[1], mk_arg)
+```
+
+#### Script 2 : Suivi de l'Historique CSV (`<case>_history.csv`)
+
+```python
+#!/usr/bin/env python3
+import sys
+import numpy as np
+import matplotlib.pyplot as plt
+
+csv_path = sys.argv[1]
+data = np.genfromtxt(csv_path, delimiter=",", names=True)
+
+fig, ax = plt.subplots(1, 2, figsize=(10, 4), dpi=200)
+ax[0].plot(data["time"], data["rise_velocity"], "k-", lw=1.8)
+ax[0].set_xlabel("Temps [s]")
+ax[0].set_ylabel("Vitesse d'ascension [m/s]")
+ax[0].grid(True, ls="--", alpha=0.6)
+
+ax[1].semilogy(data["time"], np.maximum(data["max_div"], 1e-16), "m-", lw=1.8)
+ax[1].set_xlabel("Temps [s]")
+ax[1].set_ylabel("Divergence max [s^-1]")
+ax[1].grid(True, ls="--", alpha=0.6)
+
+plt.tight_layout()
+plt.savefig("history_diagnostics.png")
 ```
 
 ---
 
-## Guide Complet de Dépannage (Troubleshooting)
-
-Le tableau suivant présente une matrice exhaustive des anomalies numériques potentielles, leurs causes sous-jacentes et les actions correctives recommandées :
+## Guide Complet de Dépannage (*Troubleshooting*)
 
 | Symptôme Observé | Cause Physique / Numérique Probable | Action Corrective Recommandée |
 | :--- | :--- | :--- |
-| **Divergence du solveur de Krylov (`Iter_NS` atteint `max_iter`, résidu NaN)** | 1. Pas de temps $\Delta t$ trop grand violant la condition CFL visqueuse ou convective.<br>2. Paramètre de pénalité de Lagrangien $r_{\text{al}}$ excessif détériorant le conditionnement spectral.<br>3. Absence de préconditionneur sur maillage fin. | 1. Réduire $\Delta t$ ou activer `time.adaptative_dt = true` avec `time.cfl = 0.3`.<br>2. Activer le mode adaptatif `solver.type = "AAL"` au lieu d'une valeur scalaire fixe `r_al`.<br>3. Activer `solver.preconditioner = "JACOBI"` ou `"BLOCK_TRIANGULAR"`. |
-| **Résidu de continuité élevé ($\|\nabla \cdot \mathbf{u}\|_\infty > 10^{-3}$)** | Nombre insuffisant d'itérations d'Uzawa pour assurer la fermeture de l'incompressibilité. | Augmenter `solver.uzawa_iter` à $3$ ou $5$, et abaisser `solver.uzawa_tol` à $1.0\times 10^{-5}$. |
-| **Courants parasites / Déformation artificielle de l'interface diphasique** | Mauvaise résolution de la courbure $\kappa$ dans le modèle CSF lorsque le maillage est trop grossier par rapport au rayon de courbure. | S'assurer que le diamètre de goutte ou bulle comporte au moins $20$ à $30$ cellules de calcul ($2R/\Delta x \ge 25$). Vérifier que le pas de temps respecte la limite d'ondes capillaires $\Delta t \le \sqrt{\frac{\rho \Delta x^3}{4\pi\sigma}}$. |
-| **Oscillations de vitesse en damier (*checkerboard*)** | Présence d'un schéma convectif d'ordre 2 centré sans maillage suffisant ($Re_\Delta > 2$). | Basculer `convection.convective_scheme = "UPWIND"` ou raffiner le maillage localement pour ramener le nombre de Reynolds de maille sous la limite de Peclet $Pe \le 2$. |
-| **Blocage ou dépassement de temps (*Timeout*) lors de l'exécution MPI** | 1. Décomposition de domaine incompatible avec les dimensions du maillage (mailles locales nulles : `nx_local = 0`).<br>2. Blocage sur barrière collective lors d'un calcul thermique ou projection. | 1. Vérifier que $N_x \ge 4 \times P_x$ et $N_y \ge 4 \times P_y$.<br>2. S'assurer que le communicateur MPI cartésien a été initialisé sans rangs orphelins. |
-| **Perte de conservation de la masse globale de fluide** | Schéma d'advection VOF non conservatif ou pas de temps violant la condition de conservation volumique. | Vérifier que `physics.vof_model` est configuré sur `"PLIC"` et que le pas de temps respecte $u \Delta t / \Delta x \le 0.5$. |
+| **Divergence de Krylov (`Iter Krylov` = `max_iter`, `NaN` dans les logs)** | 1. Pas de temps $\Delta t$ violant la CFL convective ou capillaire ($\Delta t_\sigma$).<br>2. Saut $\rho_1/\rho_2$ ou $\mu_1/\mu_2$ brutal sans lissage SVOF.<br>3. Préconditionneur inadapté au mode `MONOLITHIC`. | 1. Activer `time.adaptive_dt = true` avec `time.cfl_max = 0.35`.<br>2. Activer `physics.enable_svof_smoothing = true` (`svof_filter_width = 0.5`).<br>3. Avec `solver.type = "MONOLITHIC"`, utiliser impérativement `solver.precond_type = "BLOCK_TRIANGULAR"`. |
+| **Divergence maximale `Div Max` élevée ($> 10^{-4}$)** | Trop peu d'itérations d'Uzawa en mode AL/AAL ou tolérance linéaire trop relâchée. | Passer `solver.type = "MONOLITHIC"` (ou `"AAL"` avec `uzawa_iter = 5`, `uzawa_tol = 1.0e-8`) et abaisser `solver.tol` à `1.0e-9` ou `1.0e-10`. |
+| **Courants parasites intenses autour d'une goutte statique** | Courbure CSF bruitée par différentiation finie de $C$. | Activer la méthode hybride CVI-Marqueurs (`vof.use_markers = true`, `vof.marker_curvature = true`, `vof.marker_advection_scheme = "CVI_RK2"`) et la reconstruction `"ELVIRA"`. |
+| **Fragmentation d'un filament mince ou d'une jupe de bulle** | Sous-résolution sous-maille ($\delta < \Delta x$) ou perte de cohérence de normale. | Activer `vof.use_markers = true`, `vof.marker_normals_plic = true` et `vof.advection_method = "WEYMOUTH_YUE"` avec `cfl_vof <= 0.35`. |
+| **Oscillations spatiales en damier dans les zones à fort gradient** | Schéma convectif `CENTERED` utilisé alors que $Re_\Delta > 2$. | Basculer `physics.convective_scheme = "UPWIND"` ou `"TVD_SUPERBEE"`, ou raffiner `(mesh.nx, mesh.ny)`. |
+| **Dépassement ou blocage MPI lors du lancement** | Nombre de processus MPI incompatible avec `nx`, `ny`, ou rangs bloqués sur barrière suite à une erreur JSON. | Vérifier que $N_x / P_x \ge 2$ et $N_y / P_y \ge 2$, et contrôler le JSON (clés exactes, pas de virgule traînante en fin de bloc). |
+| **Clé JSON ignorée silencieusement** | Utilisation d'un ancien nom de clé (ex. `physics.rho1`, `time.t_end`, `thermal.*`, `convection.*`, `NO_SLIP`). | Consulter le Chapitre 6 : utiliser `physics.fluid1.rho`, `time.t_final`, `physics.enable_energy`, `physics.convective_*`, `DIRICHLET`, `FREE_SLIP`, `BOX`. |

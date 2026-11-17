@@ -2207,8 +2207,8 @@ contains
        ! Affectation et calcul numérique
        if (t + dt > T_period) dt = T_period - t
 
-       ! Affectation et calcul numérique
-       cos_factor = cos(PI * t / T_period)
+       ! Évaluation au point-milieu t + 0.5*dt pour précision temporelle d'ordre 2 (VOF & Marqueurs)
+       cos_factor = cos(PI * (t + 0.5_dp * dt) / T_period)
 
        ! Imposer le champ de vitesse analytique sur les faces décalées
        do j = 1, this%mesh%ny_local
@@ -2248,6 +2248,7 @@ contains
        call sync_u(this%mesh, this%fields%u)
        ! Appel de sous-programme modulaire
        call sync_v(this%mesh, this%fields%v)
+       call apply_velocity_bc(this%fields, this%mesh, this%config, .false.)
 
        ! Advection TVD Superbee de la fraction volumique C
        call this%tracker%advect(this%mesh, this%fields, dt)
@@ -2256,7 +2257,7 @@ contains
        t = t + dt
 
        ! Affectation et calcul numérique
-       if (mod(step, this%config%vtk_interval) == 0 .or. t >= T_period .or. &
+       if (mod(step, this%config%vtk_interval) == 0 .or. t >= T_period - 1.0e-12_dp .or. &
            abs(t - 0.5_dp * T_period) < 0.5_dp * dt) then
           ! Appel de sous-programme modulaire
           call this%vtk_writer%write_step(this%mesh, this%fields, step, t)
@@ -2266,7 +2267,7 @@ contains
        end if
 
        ! Évaluation de la condition logique
-       if (this%mesh%rank == 0 .and. (mod(step, this%config%log_interval) == 0 .or. t >= T_period)) then
+       if (this%mesh%rank == 0 .and. (mod(step, this%config%log_interval) == 0 .or. t >= T_period - 1.0e-12_dp)) then
           write(*, '(A,I0,A,F8.4,A,F8.4,A)') &
             ! Affectation et calcul numérique
             "  [Vortex] Pas ", step, " | t = ", t, " s / ", T_period, " s"

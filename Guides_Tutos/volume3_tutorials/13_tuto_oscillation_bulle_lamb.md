@@ -1,66 +1,62 @@
 # Tutoriel 13 : Oscillations Capillaires Amorties d'une Bulle de Gaz (Théorie de Lamb)
 
-Ce tutoriel met en œuvre une bulle initialement déformée en ellipse selon le mode n=2 sous l'action combinée de la tension superficielle et de la dissipation visqueuse. La fréquence propre d'oscillation et le taux d'amortissement sont confrontés à la théorie linéaire exacte de Lamb.
+Ce tutoriel met en œuvre une bulle de gaz initialement déformée en ellipse selon le mode quadrupolaire $n = 2$ dans un métal liquide dense, sous l'action combinée de la tension superficielle et de la dissipation visqueuse. La fréquence propre d'oscillation et l'amortissement sont confrontés à la théorie linéaire de Rayleigh-Lamb.
 
 ---
 
 ## 1. Objectifs Pédagogiques et Modules Logiciels Activés
 
 ### 1.1 Compétences Acquises
-- Comprendre les fondements physiques et les équations aux dérivées partielles gouvernant l'écoulement.
-- Configurer les paramètres numériques et conditions aux limites sur grille cartésienne décalée MAC.
-- Exécuter le cas test avec les exécutables C++17 et Fortran 2018 (séquentiel et OpenMP).
-- Quantifier avec rigueur la précision par rapport à la solution analytique exacte ($L_2$, $L_\infty$).
-- Produire et exploiter les visualisations scientifiques volumiques sous ParaView.
+- Comprendre la dynamique inertio-capillaire d'une bulle oscillante à fort rapport de masse volumique ($\rho_1/\rho_2 \approx 5950$).
+- Configurer une bulle elliptique explicite (`"axis_a"`, `"axis_b"`, `"pert_amp": 0.0`) et la régularisation CSF (`enable_diffusion_smoothing`).
+- Exécuter le cas test en parallèle MPI pur avec `covof2d_cpp` et `covof2d_fortran`.
+- Extraire dynamiquement les demi-axes $a(t), b(t)$, la fréquence d'oscillation $f_{\mathrm{num}}$ et le bilan énergétique depuis les `.vtr` et `*_history.csv`.
+- Visualiser les cycles d'oscillation et la pression capillaire sous ParaView.
 
 ### 1.2 Modules Logiciels Sollicités
-- **Moteur C++17 :** `Mesh2D`, `FlowFields`, `WeymouthYueVOF`, `CSFModel`, `NavierStokesSolver`.
-- **Moteur Fortran 2018 :** `module_mesh`, `module_flow_fields`, `module_vof`, `module_csf`, `module_navier_stokes`.
+- **Moteur C++17 (`COVOF_2D-C++`) :** `Config`, `Mesh2D`, `FlowFields`, `MpiComm`, `InterfaceTracker`, `InterfaceReconstruction`, `NavierStokesSolver`, `BiCGSTAB2Solver`, `BlockTriangularPreconditioner`, `VTKWriter`, `Simulation`.
+- **Moteur Fortran 2018 (`COVOF_2D-FORTRAN`) :** `module_config`, `module_json`, `module_mesh`, `module_fields`, `module_mpi_comm`, `module_interface_vof`, `module_interface_reconstruction`, `module_navier_stokes`, `module_linear_solvers`, `module_vtk_writer`, `module_simulation`.
 
 ---
 
 ## 2. Formulation Physique et Solution Analytique Exacte
 
-Équations Physiques et Configuration
+### 2.1 Équations Physiques et Configuration
+Ce cas valide la dynamique instationnaire du couplage entre l'inertie diphasique à fort rapport de densité ($\rho_1/\rho_2 \approx 5950$), la dissipation visqueuse et la force de tension superficielle CSF lors des oscillations libres d'une bulle initialement elliptique.
 
-Ce douzième cas valide la dynamique instationnaire du couplage entre l'inertie diphasique à fort rapport de densité ($\rho_1/\rho_2 \approx 5950$), la dissipation visqueuse et la force de tension superficielle CSF lors des oscillations libres d'une bulle de gaz initialement elliptique.
+Dans une cavité carrée $\Omega = [0, 0.1] \times [0, 0.1]\,\mathrm{m}^2$ sans gravité ($\mathbf{g} = \mathbf{0}$) avec parois à glissement libre (`FREE_SLIP`), une bulle d'air ($\rho_2 = 1.17683\,\mathrm{kg/m}^3$, $\mu_2 = 1.85\times 10^{-5}\,\mathrm{Pa\cdot s}$) est centrée en $(0.05, 0.05)\,\mathrm{m}$ dans un métal liquide dense ($\rho_1 = 7000\,\mathrm{kg/m}^3$, $\mu_1 = 4.0\times 10^{-3}\,\mathrm{Pa\cdot s}$) avec $\sigma = 1.8\,\mathrm{N/m}$. À $t=0$, la bulle de rayon équivalent $R_0 = 0.02\,\mathrm{m}$ est déformée sur le mode $n=2$ avec une excentricité $\varepsilon = 0.20$ :
+$$a_0 = R_0 (1 + \varepsilon) = 0.024\,\mathrm{m}, \qquad b_0 = \frac{R_0}{1 + \varepsilon} \approx 0.0166666667\,\mathrm{m} \qquad (a_0 b_0 = R_0^2).$$
 
-Dans une cavité carrée $\Omega = [0, 0.1] \times [0, 0.1]\,\mathrm{m}^2$ sans gravité ($\mathbf{g} = \mathbf{0}$) avec parois à glissement libre (`FREE_SLIP`), une bulle d'air ($\rho_2 = 1.17683\,\mathrm{kg/m}^3$, $\mu_2 = 1.85\times 10^{-5}\,\mathrm{Pa\cdot s}$) est centrée en $(0.05, 0.05)\,\mathrm{m}$ dans un métal liquide dense ($\rho_1 = 7000\,\mathrm{kg/m}^3$, $\mu_1 = 4.0\times 10^{-3}\,\mathrm{Pa\cdot s}$) avec $\sigma = 1.8\,\mathrm{N/m}$. À $t=0$, la bulle de rayon équivalent $R_0 = 0.02\,\mathrm{m}$ est déformée sur le mode quadrupolaire $n=2$ ($a_0 = R_0(1+\varepsilon)$, $b_0 = R_0/(1+\varepsilon)$, avec $\varepsilon = 0.20$).
-
-#### Relation de dispersion capillaire linéaire
-La pulsation propre $\omega_n$ et la fréquence $f_{\mathrm{th}}$ du mode $n=2$ en milieu infini valent :
-$$\omega_n^2 = \frac{(n^3 - n)\,\sigma}{(\rho_1 + \rho_2)\,R_0^3} \implies \omega_2 = \sqrt{\frac{6\,\sigma}{(\rho_1 + \rho_2)\,R_0^3}}, \qquad f_{\mathrm{th}} = \frac{\omega_2}{2\pi} = 5.70632\,\mathrm{s}^{-1} \quad (T_{\mathrm{th}} = 0.17524\,\mathrm{s}).$$
-Sur les grilles $32^2 \dots 512^2$ en cavité confinée, la fréquence numérique croît de $4.368\,\mathrm{Hz}$ ($32^2$), $4.792\,\mathrm{Hz}$ ($64^2$), $4.952\,\mathrm{Hz}$ ($128^2$), $4.990\,\mathrm{Hz}$ ($256^2$) à $5.038\,\mathrm{Hz}$ ($512^2$).
-
----
+### 2.2 Relation de Dispersion Capillaire Linéaire
+En milieu infini non visqueux, la pulsation propre $\omega_n$ et la fréquence $f_{\mathrm{th}}$ du mode $n = 2$ de Rayleigh-Lamb cylindrique valent :
+$$\omega_n^2 = \frac{(n^3 - n)\,\sigma}{(\rho_1 + \rho_2)\,R_0^3} \implies \omega_2 = \sqrt{\frac{6\,\sigma}{(\rho_1 + \rho_2)\,R_0^3}}, \qquad f_{\mathrm{th}} = \frac{\omega_2}{2\pi} \approx 5.70632\,\mathrm{Hz} \quad (T_{\mathrm{th}} \approx 0.17524\,\mathrm{s}).$$
+En cavité carrée confinée ($L / R_0 = 5$) et pour une amplitude finie $\varepsilon = 0.20$, l'effet de confinement pariétal abaisse légèrement la fréquence d'oscillation effective par rapport à la valeur en domaine infini, tandis que l'énergie cinétique $E_k(t)$ oscille à la fréquence double $2 f_{\mathrm{num}}$.
 
 ---
 
 ## 3. Paramètres Physiques, Numériques et Discrétisation
 
-Physiques, Numériques et Matrice des Jeux de Paramètres
+### 3.1 Matrice des Jeux de Paramètres
 
 | Catégorie | Paramètre | Valeur / Spécification |
 | :----------------------- | :----------------------- | :------------------------------------------------------- |
-| Domaine et bulle initiale | $[0, L]^2$, $(x_c, y_c)$, $R_0$, $\varepsilon$ | $L = 0.1\,\mathrm{m}$, centre $(0.05, 0.05)\,\mathrm{m}$, $R_0 = 0.02\,\mathrm{m}$, $\varepsilon \in \{0.05, 0.20\}$ |
-| Fluide 1 (Métal liquide) | $\rho_1, \mu_1, \chi_{T,1}$ | $\rho_1 = 7000.0\,\mathrm{kg/m}^3$, $\mu_1 = 4.0\times 10^{-3}\,\mathrm{Pa\cdot s}$, $\chi_{T,1} = 10^{-9}\,\mathrm{Pa}^{-1}$ |
-| Fluide 2 (Gaz / Air) | $\rho_2, \mu_2, \chi_{T,2}$ | $\rho_2 = 1.17683\,\mathrm{kg/m}^3$, $\mu_2 = 1.85\times 10^{-5}\,\mathrm{Pa\cdot s}$, $\chi_{T,2} = 9.8692327\times 10^{-6}\,\mathrm{Pa}^{-1}$ |
-| Tension superficielle et lissage | $\sigma$, `enable_diffusion_smoothing` | $\sigma = 1.8\,\mathrm{N/m}$, `enable_diffusion_smoothing: true`, `diffusion_smoothing_steps` $\in \{2, 3\}$ |
-| Séquence de grilles et $\Delta t$ | $N \in \{32, 64, 128, 256, 512\}$ | $\Delta t = 2.5\times 10^{-4}\,\mathrm{s}$, $t_{\mathrm{final}} = 0.6\,\mathrm{s}$ (plus de 3 périodes complètes) |
-| Solveurs et schémas VOF | `solver` \& `vof` | `AUGMENTED_LAGRANGIAN`, `ADAPTATIVE_AUGMENTED_LAGRANGIAN`, `MONOLITHIC` ; `WEYMOUTH_YUE+PLIC`, `CIAM+PLIC` |
-
----
+| Domaine et bulle initiale | $[0, L]^2$, $(x_c, y_c)$, $a_0, b_0$ | $L = 0.1\,\mathrm{m}$, centre $(0.05, 0.05)\,\mathrm{m}$, $R_0 = 0.02\,\mathrm{m}$, $a_0 = 0.024\,\mathrm{m}$, $b_0 = 0.0166666667\,\mathrm{m}$ (`pert_amp = 0.0`) |
+| Fluide 1 (Métal liquide) | $\rho_1, \mu_1$ | $\rho_1 = 7000.0\,\mathrm{kg/m}^3$, $\mu_1 = 4.0\times 10^{-3}\,\mathrm{Pa\cdot s}$ |
+| Fluide 2 (Air) | $\rho_2, \mu_2$ | $\rho_2 = 1.17683\,\mathrm{kg/m}^3$, $\mu_2 = 1.85\times 10^{-5}\,\mathrm{Pa\cdot s}$ |
+| Tension superficielle et lissage | $\sigma$, `enable_diffusion_smoothing` | $\sigma = 1.8\,\mathrm{N/m}$, `enable_diffusion_smoothing: true`, `diffusion_smoothing_steps: 3` |
+| Séquence de grilles et $\Delta t$ | $N \in \{32, 64, 128, 256, 512\}$ | $\Delta t = 2.5\times 10^{-4}\,\mathrm{s}$ (ou adapté selon $\Delta t_{\mathrm{cap}}$ sur grille fine), $t_{\mathrm{final}} = 0.6\,\mathrm{s}$ |
+| Solveurs et schémas VOF | `solver` & `vof` | `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (`AAL`), `AUGMENTED_LAGRANGIAN`, `MONOLITHIC` ; `WEYMOUTH_YUE+PLIC`, `CIAM+PLIC` |
 
 ---
 
 ## 4. Fichier de Configuration JSON Pas à Pas
 
-de Fichiers `.json` (C++17 et Fortran 2018)
+### 4.1 Prototype `case/cpp/cas_13_oscillation_bulle_n128.json`
+*(Pour Fortran 2018, placer une copie dans `case/fortran/` avec `"output_dir": "output/fortran/n128"`.)*
 
-### Prototype `case/cpp/cas_13_oscillation_bulle_n128.json`
-*(Pour le moteur Fortran, remplacer `output/cpp/` par `output/fortran/` dans `output_dir`)*
 ```json
 {
+  "case_name": "cas_13_oscillation_bulle_n128",
   "mode": "NAVIER_STOKES",
   "mesh": {
     "nx": 128,
@@ -78,7 +74,7 @@ de Fichiers `.json` (C++17 et Fortran 2018)
     "sigma": 1.8,
     "gx": 0.0,
     "gy": 0.0,
-    "fluid1": { "rho": 7000.0, "mu": 4.0e-3 },
+    "fluid1": { "rho": 7000.0,  "mu": 4.0e-3 },
     "fluid2": { "rho": 1.17683, "mu": 1.85e-5 }
   },
   "initial_condition": {
@@ -87,7 +83,8 @@ de Fichiers `.json` (C++17 et Fortran 2018)
     "center_y": 0.05,
     "radius": 0.02,
     "axis_a": 0.024,
-    "axis_b": 0.0166666667
+    "axis_b": 0.0166666667,
+    "pert_amp": 0.0
   },
   "time": {
     "dt": 0.00025,
@@ -120,56 +117,104 @@ de Fichiers `.json` (C++17 et Fortran 2018)
     "cfl_vof": 0.3
   },
   "output": {
-    "output_dir": "VALIDATION_TOTALE/validation_cas_13_oscillation_bulle_capillaire/output/cpp/n128",
+    "output_dir": "output/cpp/n128",
     "case_name": "cas_13_oscillation_bulle_n128",
     "vtk_interval": 20,
     "log_interval": 5,
     "write_csv_history": true
   }
 }
-
 ```
-
----
 
 ---
 
 ## 5. Procédure d'Exécution (Moteurs C++17 et Fortran 2018)
 
-L'exécution s'effectue indifféremment à l'aide du binaire C++17 (`covof2d_cpp`) ou du binaire Fortran 2018 (`covof2d_fortran`), garantissant une stricte équivalence des résultats numériques.
+Les deux moteurs utilisent **MPI pur** (`mpirun -np 4`).
 
 ```bash
-# 1. Se placer dans le répertoire du cas
-cd VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_13_oscillation_bulle_capillaire
+# 1. Créer les répertoires de sortie relatifs courts
+mkdir -p output/cpp/n128 output/fortran/n128
 
-# 2. Exécution avec le moteur C++17 (Séquentiel)
-../../../COVOF_2D-C++/bin/covof2d_cpp case/cpp/cas_13_config.json
+# 2. Exécution parallèle MPI avec le moteur C++17
+mpirun -np 4 /chemin/vers/COVOF_2D-C++/bin/covof2d_cpp case/cpp/cas_13_oscillation_bulle_n128.json
 
-# 3. Exécution avec le moteur C++17 (Parallèle OpenMP)
-export OMP_NUM_THREADS=4
-../../../COVOF_2D-C++/bin/covof2d_cpp case/cpp/cas_13_config.json
-
-# 4. Exécution avec le moteur Fortran 2018 (Séquentiel)
-../../../COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_13_config.json
-
-# 5. Exécution avec le moteur Fortran 2018 (Parallèle OpenMP)
-export OMP_NUM_THREADS=4
-../../../COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_13_config.json
-
+# 3. Exécution parallèle MPI avec le moteur Fortran 2018
+mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_13_oscillation_bulle_n128.json
 ```
 
 ---
 
 ## 6. Analyse Quantitative, Script Python et Visualisation ParaView
 
-### 6.1 Critères de Vérification et Tolérances
-à Mener (Précision, Intégrité et Performance)
+### 6.1 Critères de Vérification, Formules Exactes et Tolérances
+1. **Fréquence d'oscillation $f_{\mathrm{num}}$ et amortissement visqueux :**
+   Extraire la série temporelle d'énergie cinétique $E_k(t)$ depuis `*_history.csv` et les demi-axes $a(t), b(t)$ depuis les fichiers `.vtr` (à partir des moments géométriques d'ordre 2 de $1 - C$). Déterminer la période d'oscillation $T_{\mathrm{num}}$ par détection des maxima de $a(t)$ (ou à partir de la demi-période des pics de $E_k(t)$) et vérifier la convergence de $f_{\mathrm{num}} = 1/T_{\mathrm{num}}$ avec le raffinement du maillage.
+2. **Conservation du volume de la bulle et stabilité à haut rapport de densité ($\rho_1/\rho_2 \approx 5950$) :**
+   Vérifier par sommation de $(1-C)\Delta x\Delta y$ dans les `.vtr` que $|V(t_{\mathrm{final}}) - V(0)| / V(0) < 10^{-4}$ avec `WEYMOUTH_YUE+PLIC`.
+3. **Parité C++17 / Fortran 2018 :**
+   Vérifier la superposition des courbes $E_k(t)$, $a(t)$ et $b(t)$ entre `covof2d_cpp` et `covof2d_fortran`.
 
-1. **Fréquence d'oscillation quadrupolaire $f_{\mathrm{num}}$ et convergence en maillage :** Extraire les demi-axes horizontal $a(t)$ et vertical $b(t)$ du contour $C=0.5$ ainsi que l'énergie cinétique $E_k(t)$ dans `*_history.csv`. Vérifier la convergence de $f_{\mathrm{num}}$ sur $32^2 \dots 512^2$ ($4.368 \to 4.792 \to 4.952 \to 4.990 \to 5.038\,\mathrm{Hz}$ pour $\varepsilon=0.20$).
-2. **Robustesse du couplage vitesse-pression à haut rapport de densité ($\rho_1/\rho_2 \approx 5950$) :** Comparer `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (`k_aal=100`), `AUGMENTED_LAGRANGIAN` ($r_{\mathrm{al}}=1000$) et `MONOLITHIC` avec `GEAR` vs `EULER`. Vérifier le gain d'itérations procuré par `AAL` et `BLOCK_TRIANGULAR`.
-3. **Conservation du volume de la bulle et parité C++17 / Fortran 2018 :** Vérifier que l'erreur relative sur l'aire de la bulle reste $< 10^{-4}$ avec `WEYMOUTH_YUE+PLIC` et que les courbes $a(t), b(t), E_k(t)$ C++ et Fortran se superposent.
+### 6.2 Fichiers Réellement Générés dans `output_dir`
+- `<case_name>_history.csv` (`9` colonnes en C++ / `11` colonnes en Fortran).
+- `<case_name>_<step:06d>.pvtr` et `<case_name>_p<rank>_<step:06d>.vtr` : `PhaseIndicator`, `Pressure`, `Density`, `Viscosity`, `Divergence`, `Temperature`, `Curvature`, `Velocity`.
 
----
+### 6.3 Script Python de Vérification Dynamique
 
-### 6.2 Résultats Attendus et Visualisation ParaView
+```python
+#!/usr/bin/env python3
+"""Vérification dynamique du Tutoriel 13 (Oscillation de bulle / Lamb)."""
+import csv
+import math
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
+def estimate_freq_from_ke(csv_path: str) -> float:
+    t_vals, ke_vals = [], []
+    with Path(csv_path).open(newline="") as f:
+        for r in csv.DictReader(f):
+            t_vals.append(float(r["time"]))
+            ke_vals.append(float(r["kinetic_energy"]))
+    peaks = [t_vals[i] for i in range(1, len(ke_vals) - 1)
+             if ke_vals[i] > ke_vals[i - 1] and ke_vals[i] >= ke_vals[i + 1] and ke_vals[i] > 1e-8]
+    if len(peaks) < 3:
+        return float("nan")
+    dt_peaks = [(peaks[i + 1] - peaks[i]) for i in range(len(peaks) - 1)]
+    t_half = sum(dt_peaks) / len(dt_peaks)
+    return 1.0 / (2.0 * t_half)  # E_k oscille à 2*f
+
+def bubble_axes_from_pvtr(pvtr_path: str):
+    pvtr = Path(pvtr_path)
+    root = ET.parse(pvtr).getroot()
+    m0, mxx, myy = 0.0, 0.0, 0.0
+    for piece in root.findall(".//Piece"):
+        vtr = ET.parse(pvtr.parent / piece.attrib["Source"]).getroot()
+        ext = [int(v) for v in piece.attrib["Extent"].split()]
+        nx_l, ny_l = ext[1] - ext[0], ext[3] - ext[2]
+        xc = [float(v) for v in vtr.find(".//DataArray[@Name='XCoordinates']").text.split()]
+        yc = [float(v) for v in vtr.find(".//DataArray[@Name='YCoordinates']").text.split()]
+        C = [float(v) for v in vtr.find(".//DataArray[@Name='PhaseIndicator']").text.split()]
+        for j in range(ny_l):
+            y = 0.5 * (yc[j] + yc[j + 1])
+            dy = yc[j + 1] - yc[j]
+            for i in range(nx_l):
+                x = 0.5 * (xc[i] + xc[i + 1])
+                dx = xc[i + 1] - xc[i]
+                w = (1.0 - C[j * nx_l + i]) * dx * dy
+                m0 += w
+                mxx += w * (x - 0.05) ** 2
+                myy += w * (y - 0.05) ** 2
+    return 2.0 * math.sqrt(mxx / m0), 2.0 * math.sqrt(myy / m0), m0
+
+if __name__ == "__main__":
+    f_th = math.sqrt(6.0 * 1.8 / ((7000.0 + 1.17683) * 0.02 ** 3)) / (2.0 * math.pi)
+    csv_f = Path("output/cpp/n128/cas_13_oscillation_bulle_n128_history.csv")
+    if csv_f.exists():
+        f_num = estimate_freq_from_ke(str(csv_f))
+        print(f"Fréquence numérique f_num = {f_num:.4f} Hz (théorie milieu infini = {f_th:.4f} Hz)")
+```
+
+### 6.4 Visualisation sous ParaView
+1. Ouvrir la série `<case_name>_..pvtr` dans ParaView (**File -> Open**).
+2. Appliquer le filtre **Contour** sur `PhaseIndicator = 0.5` et colorer le fond par `Pressure` pour observer l'inversion alternée de la surpression aux pôles horizontaux puis verticaux.
+3. Afficher les vecteurs **Glyph** de `Velocity` pour visualiser l'écoulement quadripolaire interne et externe.

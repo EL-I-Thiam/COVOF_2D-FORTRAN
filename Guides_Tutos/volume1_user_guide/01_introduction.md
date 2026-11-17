@@ -2,152 +2,158 @@
 
 ## Présentation et Philosophie de COVOF 2D
 
-Le code **COVOF 2D** (*Coupled Volume-Of-Fluid 2D*) est un environnement logiciel de recherche et d'ingénierie avancée dédié à la simulation numérique directe (DNS) et à la modélisation à haute fidélité des écoulements de fluides complexes, incompressibles ou faiblement compressibles, monophasiques ou diphasiques à surface libre. Issu des développements méthodologiques conduits dans le lignage des codes académiques de référence du laboratoire **I2M (UMR CNRS 5295, Université de Bordeaux)** — en particulier les plateformes **Thétis** et **Fugu** — et enrichi par les avancées récentes sur les méthodes monolithiques totalement couplées et les formulations adaptatives de Lagrangien augmenté, COVOF 2D constitue un banc d'essai et un outil de production scientifique de premier plan.
+Le code **COVOF 2D** (*Coupled Volume-Of-Fluid 2D*) est un environnement logiciel de recherche et d'ingénierie avancée dédié à la simulation numérique directe (DNS) et à la modélisation à haute fidélité des écoulements de fluides complexes, incompressibles ou faiblement compressibles (*All-Mach*), monophasiques ou diphasiques à interface nette. Issu des développements méthodologiques conduits dans le lignage des codes académiques de référence du laboratoire **I2M (UMR CNRS 5295, Université de Bordeaux)** — en particulier les formulations monolithiques couplées, le Lagrangien augmenté adaptatif (**AAL / C-AAL**), le lissage rhéologique **SVOF** (*Smoothed VOF*) et la méthode hybride **FC-WY-CVI-Marker** — COVOF 2D constitue simultanément un banc d'essai algorithmique rigoureux et un outil de production scientifique.
 
 ### Paradigme de Conception : L'Architecture Duale Jumelle C++17 / Fortran 2018
 
-Contrairement aux logiciels CFD traditionnels reposant sur un seul langage ou intégrant du code hérité (*legacy code*) au sein d'un emballage hétérogène, COVOF 2D est structuré selon un principe novateur de **double implémentation miroir intégrale** :
+Contrairement aux logiciels CFD traditionnels reposant sur un seul langage ou encapsulant du code hérité via des passerelles opaques, COVOF 2D est structuré selon un principe de **double implémentation miroir intégrale et indépendante** :
 
-1. **La branche `COVOF_2D-C++`** : Écrite en C++ moderne conforme au standard **ISO C++17**, elle privilégie une conception modulaire orientée objet avec gestion stricte des ressources par RAII (*Resource Acquisition Is Initialization*), polymorphisme dynamique pour les solveurs de Krylov et préconditionneurs, et encapsulation des structures de données topologiques et physiques.
-2. **La branche `COVOF_2D-FORTRAN`** : Écrite en **Fortran 2018**, elle implémente rigoureusement les mêmes algorithmes au sein de modules fortement typés (`implicit none` systématique, précision double standardisée `real(c_double)` issue de `iso_c_binding`), exploitant la disposition mémoire native par colonnes (*column-major*) et la vectorisation optimale des boucles imbriquées.
+1. **La branche `COVOF_2D-C++` (15 en-têtes `.hpp`, 13 sources `.cpp`) :** Écrite en C++ moderne conforme au standard **ISO C++17**, elle privilégie une conception modulaire orientée objet au sein de l'espace de nommage `covof`, avec gestion RAII des tampons (`std::vector<double>`), polymorphisme dynamique pour les solveurs de Krylov (`LinearSolverBase`, `SolverFactory`) et les préconditionneurs (`PreconditionerBase`, `PreconditionerFactory`), et matrice creuse locale CSR (`CSRMatrix`) pour les blocs de préconditionnement. Elle produit l'exécutable `bin/covof2d_cpp` (et le lien symbolique `bin/covof2d`).
+2. **La branche `COVOF_2D-FORTRAN` (16 fichiers sources `.f90`) :** Écrite en **ISO Fortran 2018**, elle implémente rigoureusement les mêmes opérateurs discrets au sein de 15 modules fortement typés (`implicit none`, encapsulation `private` par défaut, double précision IEEE 754 `dp = selected_real_kind(15, 307)`) et du programme principal `covof2d_main.f90`. Elle exploite l'ordonnancement mémoire natif *column-major* `(0:nx+1, 0:ny+1)` pour la vectorisation SIMD des boucles internes. Elle produit l'exécutable `bin/covof2d_fortran`.
 
-Cette architecture duale n'a pas pour but de faire cohabiter des fragments de code non vérifiés, mais de garantir une **parité numérique stricte (bit-à-bit)** entre deux représentations logicielles indépendantes. Les deux exécutables :
-- Partagent la même spécification du format d'entrée JSON (`template_parametres_covof2d.json`).
-- Génèrent des résultats spatio-temporels identiques exportés au format standardisé XML VTK Rectilinear Grid (`.vtr` pour les sous-domaines locaux et `.pvtr` pour la vue globale assemblée sous ParaView).
-- Utilisent une décomposition cartésienne 2D équivalente via la bibliothèque standard **MPI** (*Message Passing Interface*).
-- Permettent aux chercheurs et aux ingénieurs de confronter les performances, l'empreinte mémoire et la portabilité des deux écosystèmes logiciels majeurs du calcul scientifique haute performance (HPC).
+Cette architecture duale vise la **parité numérique stricte** entre deux implémentations autonomes :
+- Les deux exécutables lisent le **même fichier de configuration JSON** (tolérant les commentaires `//` en ligne).
+- Les deux branches partagent la **même décomposition de domaine cartésienne 2D en MPI pur** (`MPI_Cart_create`, sans OpenMP), avec une couche unique de cellules fantômes (*halo*) de largeur 1 (`0:nx_local+1`, `0:ny_local+1`).
+- Les deux solveurs exportent les **mêmes formats de sortie normalisés** : maillages rectilignes XML VTK parallèles (`<case_name>_p<rank>_<step:06d>.vtr` et fichier maître `<case_name>_<step:06d>.pvtr`), nuage de marqueurs VTK PolyData (`<case_name>_markers_<step:06d>.vtk`) et historique temporel CSV (`<case_name>_history.csv`).
 
-```
-              +-------------------------------------+
-              |    Fichier de Configuration JSON    |
-              | (template_parametres_covof2d.json)  |
-              +-------------------------------------+
-                                 |
-                 +---------------+---------------+
-                 |                               |
-                 v                               v
-  +-------------------------------+ +-------------------------------+
-  | Exécutable C++17              | | Exécutable Fortran 2018       |
-  | bin/covof2d_cpp               | | bin/covof2d_fortran           |
-  +-------------------------------+ +-------------------------------+
-  | - Orchestration OO            | | - Orchestration Modulaire     |
-  | - Grille MAC (Mesh.hpp)       | | - Grille MAC (module_mesh)    |
-  | - Opérateur NS (NavierStokes) | | - Opérateur NS (module_ns)    |
-  | - VOF-PLIC (InterfaceTracker) | | - VOF-PLIC (module_vof)       |
-  | - Krylov & Schur (LinSolver)  | | - Krylov & Schur (module_solv)|
-  | - MPI Cartésien 2D (MpiComm)  | | - MPI Cartésien (module_mpi)  |
-  +-------------------------------+ +-------------------------------+
-                 |                               |
-                 +---------------+---------------+
-                                 |
-                                 v
-              +-------------------------------------+
-              | Sorties Numériques Unifiées         |
-              | - Fichiers XML VTK (.vtr, .pvtr)    |
-              | - Journaux de Convergence (.csv)    |
-              | - Diagnostics Visuels ParaView      |
-              +-------------------------------------+
+```text
+              +---------------------------------------------+
+              |        Fichier de Configuration JSON        |
+              |     (mon_cas.json, commentaires // admis)   |
+              +---------------------------------------------+
+                                     |
+                     +---------------+---------------+
+                     |                               |
+                     v                               v
+  +-------------------------------------+ +-------------------------------------+
+  | Exécutable C++17 (MPI pur)          | | Exécutable Fortran 2018 (MPI pur)   |
+  | COVOF_2D-C++/bin/covof2d_cpp        | | COVOF_2D-FORTRAN/bin/covof2d_fortran|
+  +-------------------------------------+ +-------------------------------------+
+  | - Config, Mesh2D, FlowFields, EOS   | | - module_config, module_mesh,       |
+  | - NavierStokesSolver + CSRMatrix    | |   module_fields, module_eos         |
+  | - InterfaceTracker +                | | - module_navier_stokes            |
+  |   InterfaceReconstruction           | | - module_interface_vof +            |
+  | - InterfaceMarkers (CVI-RK2)        | |   module_interface_reconstruction   |
+  | - LinearSolver & Preconditioner     | | - module_markers (CVI-RK2)          |
+  | - MpiComm & VTKWriter               | | - module_linear_solvers             |
+  |                                     | | - module_mpi_comm & module_vtk_writer|
+  +-------------------------------------+ +-------------------------------------+
+                     |                               |
+                     +---------------+---------------+
+                                     |
+                                     v
+              +---------------------------------------------+
+              | Sorties Numériques Unifiées                 |
+              | - Champs volumiques : <case>_<step>.pvtr    |
+              |   + sous-domaines   : <case>_p<r>_<step>.vtr|
+              | - Marqueurs CVI     : <case>_markers_*.vtk  |
+              | - Métriques         : <case>_history.csv    |
+              | - Erreurs analytiques (laplacian/poiseuille/|
+              |   vortex_error.csv, profiles CSV)           |
+              +---------------------------------------------+
 ```
 
 ### Domaines d'Application Visés
 
-COVOF 2D est conçu pour traiter un spectre étendu de configurations de mécanique des fluides et de thermique appliquée :
-- **Hydrodynamique à surface libre et écoulements diphasiques :** Rupture de barrage (*dam break*), ballottement de réservoirs (*sloshing*), impact et étalement de gouttes, dynamique capillaire et coalescence de bulles, instabilités interfaciales de Rayleigh-Taylor, Kelvin-Helmholtz et Plateau-Rayleigh.
-- **Microfluidique et dynamique capillaire :** Écoulements dominés par les forces de tension superficielle, formation de jets, instabilité de rupture de filets fluides, oscillation de gouttes selon le mode propre de Rayleigh-Lamb.
-- **Convection thermique et transferts couplés :** Convection naturelle dans des cavités fermées différentiellement chauffées, convection de Rayleigh-Bénard, panaches thermiques instationnaires sous approximation de Boussinesq.
-- **Écoulements en milieux poreux et corps immergés :** Écoulements autour d'obstacles solides rigides ou poreux modélisés sans remaillage par pénalisation de Brinkman-Navier-Stokes (cylindre circulaire, plaque mince, marche descendante).
-- **Acoustique numérique et régimes All-Mach :** Ondes de pression acoustiques à bas nombre de Mach, compression de bulles sous saut thermodynamique, régulation par méthode C-AAL barotrope.
+COVOF 2D couvre un large spectre de configurations académiques et industrielles en mécanique des fluides 2D et transferts couplés :
+
+- **Hydrodynamique diphasique à forts contrastes ($\rho_1/\rho_2 \sim 10^3$, $\mu_1/\mu_2 \sim 10^5$) :** Rupture de barrage (*dam break*), chute libre d'un cylindre dense, instabilités de Rayleigh-Taylor et de Kelvin-Helmholtz sur nappe liquide mince, ascension de bulles déformables à jupes fines, flambement de jets visqueux injectés (`JET_INLET`).
+- **Dynamique capillaire et microfluidique :** Équilibre de Young-Laplace sur goutte statique, oscillations capillaires amorties de Lamb, réduction drastique des courants parasites et suivi sous-maille des ligaments par la méthode hybride **FC-WY-CVI-Marker**.
+- **Écoulements faiblement compressibles et acoustique *All-Mach* :** Propagation d'ondes acoustiques et compression de bulles ou poches de gaz sous loi d'état linéaire, gaz parfait ou *Noble-Abel Stiffened Gas* (**NASG**) avec couplage **C-AAL** et transport inertiel **SSP-RK3**.
+- **Convection thermique et approximation de Boussinesq :** Cavités différentiellement chauffées, panaches thermiques et instabilités de Rayleigh-Bénard avec calcul automatique du nombre de Nusselt moyen à la paroi chaude.
+- **Écoulements en milieux poreux et obstacles immergés :** Modélisation d'obstacles rectangulaires (`BOX`) ou cylindriques (`CYLINDER`) fixes sans remaillage par pénalisation volumique de Darcy-Brinkman (marche descendante, sillage de cylindre, plaque mince, milieu poreux).
 
 ---
 
 ## Matrice Complète des Capacités Physiques et Numériques
 
-Le tableau suivant récapitule l'ensemble des modules physiques, algorithmes spatio-temporels, solveurs linéaires et modèles constitutifs implémentés et validés dans COVOF 2D.
+Le tableau ci-dessous recense l'ensemble des modèles, discrétisations, solveurs et options réellement implémentés et vérifiés dans les sources C++17 et Fortran 2018 de COVOF 2D.
 
-| Catégorie | Fonctionnalité / Modèle | Options Disponibles | Description et Références |
+| Catégorie | Fonctionnalité / Modèle | Mots-Clés / Options Exactes | Description Technique et Références |
 | :--- | :--- | :--- | :--- |
-| **Topologie & Maillage** | Type de grille | Grille Cartésienne Structurée Uniforme 2D | Maillage décalé MAC (*Marker-and-Cell*, Harlow & Welch 1965) |
-| | Gestion des bords | Cellules fantômes (*Ghost cells*) | Couche de 1 à 2 mailles fantômes pour les CL d'ordre 2 |
-| | Parallélisme spatial | Décomposition de domaine MPI 2D | Topologie cartésienne virtuelle `MPI_Cart_create` avec voisins E, W, N, S |
-| **Régimes Physiques** | Incompressible | Monophasique & Diphasique | $\nabla \cdot \mathbf{u} = 0$, conservation exacte de la masse |
-| | Faiblement compressible | Bas-Mach / All-Mach | Modèle barotrope $\chi_T \frac{\partial p}{\partial t} + \nabla \cdot \mathbf{u} = 0$ (El Ouafa et al. 2024) |
-| | Thermique | Boussinesq / Rayleigh-Bénard | Terme de flottabilité $\rho \mathbf{g} \beta (T - T_{\text{ref}})$ |
-| | Milieux poreux | Modèle de Darcy-Brinkman | Terme de traînée poreuse $-\frac{\mu}{K}\mathbf{u}$ pénalisé à $K \to 0$ pour corps solide |
-| **Suivi d'Interface** | Modèle cinématique | VOF-PLIC Géométrique | Reconstruction linéaire par morceaux (*Piecewise Linear Interface Calculation*) |
-| | Calcul des normales | Youngs (1982) / Elvira | Dérivées spatiales 2D de la fraction volumique $C$ |
-| | Advection VOF | Weymouth & Yue (2010) | Schéma eulerien conservatif à séparation d'opérateurs 1D sans accumulation |
-| | Tension superficielle | Modèle CSF (Brackbill et al. 1992) | Force volumique $\mathbf{f}_\sigma = \sigma \kappa \nabla C$, courbure $\kappa = -\nabla \cdot \mathbf{n}$ |
-| **Couplage Vitesse-Pression** | Lagrangien Augmenté Standard | `AUGMENTED_LAGRANGIAN` | Pénalité $r \nabla(\nabla \cdot \mathbf{u})$ et boucle d'Uzawa $p^{k+1} = p^k - r \nabla \cdot \mathbf{u}$ |
-| | Lagrangien Adaptatif Incompressible | `AAL` | Choix spatial adaptatif $r(t, M)$ basé sur les temps caractéristiques (Vincent 2004) |
-| | Lagrangien Compressible Bas-Mach | `C-AAL` | Extension acoustique $r_{\text{eff}} = \frac{r}{1 + r \chi_T / \Delta t}$ (El Ouafa 2024) |
-| | Résolution Monolithique | `MONOLITHIC` / `FULLY_COUPLED` | Système couplé point-selle global $\begin{pmatrix} A & B^T \\ B & -C_p \end{pmatrix} \begin{pmatrix} \mathbf{u} \\ p \end{pmatrix} = \begin{pmatrix} \mathbf{f} \\ g \end{pmatrix}$ |
-| | Projection Standard | `STANDARD_PROJECTION` | Schéma à pas fractionnaire de Chorin-Temam (équation de Poisson en pression) |
-| **Schémas Convectifs** | Advection de quantité de mouvement | `UPWIND` (Ordre 1) | Monotone, inconditionnellement stable mais diffusif |
-| | | `CENTERED` (Ordre 2) | Précision spatiale $\mathcal{O}(\Delta x^2)$, non diffusif mais sujet aux oscillations de Peclet |
-| | | `NEWTON` | Linéarisation complète de Newton pour convergence robuste en monolithique |
-| | | `ADAMS_BASHFORTH` (AB2) | Extrapolation temporelle d'ordre 2 des vitesses convectives |
-| **Intégration Temporelle** | Schémas temporels | `EULER_EXPLICIT` (Ordre 1) | Schéma basique pour l'analyse des petits pas de temps |
-| | | `GEAR` / `BDF2` (Ordre 2) | Schéma à trois niveaux temporels implicite stable pour Navier-Stokes |
-| | | `SSP_RK3` (Ordre 3) | Runge-Kutta à préservation de stabilité forte pour les fronts raides |
-| **Solveurs Linéaires** | Algorithmes de Krylov Matrix-Free | `BICGSTAB2` | BiCGSTAB d'ordre 2 (Sleijpen & van der Vorst 1993) |
-| | | `BICGSTAB` | BiCGSTAB standard (van der Vorst 1992) |
-| | | `CG` / `CONJUGATE_GRADIENT` | Gradient Conjugué symétrique (Hestenes & Stiefel 1952) |
-| | | `GMRES` | Generalized Minimal Residual redémarré (Saad & Schultz 1986) |
-| | | `MINRES` | Minimum Residual pour opérateurs symétriques indéfinis (Paige & Saunders 1975) |
-| | Solveur Direct Exact | `DIRECT` / `MUMPS` / `LAPACK` | Factorisation LU dense `dgetrf` / `dgetrs` avec mise en cache optimisée |
-| **Préconditionneurs** | Méthodes parallèles | `JACOBI` / `DIAGONAL` | Inversion locale de la diagonale enrichie (visqueuse + AL + Brinkman + Newton) |
-| | | `SSOR` / `GAUSS_SEIDEL` | Balayage avant/arrière symétrique avec facteur de relaxation $\omega = 1.0$ |
-| | | `ILU0` | Factorisation incomplète Incomplete LU sans remplissage |
-| | | `BLOCK_TRIANGULAR` / `BT_SBP` | Préconditionneur par blocs avec complément de Schur approché (El Ouafa 2023) |
-| | | `CUSTOM` | Hook développeur permettant l'injection dynamique d'un opérateur externe |
+| **Topologie & Maillage** | Grille de calcul | Grille Cartésienne Structurée Uniforme 2D | Maillage décalé MAC (*Marker-and-Cell*, Harlow & Welch 1965) sur $[0, L_x] \times [0, L_y]$ |
+| | Cellules fantômes | 1 couche périphérique (`0..nx+1`, `0..ny+1`) | `nx_ghost = nx_local + 2`, `ny_ghost = ny_local + 2` |
+| | Parallélisme distribué | MPI pur 2D (`MPI_Cart_create`) | Partitionnement automatique $(P_x, P_y)$ via `MPI_Dims_create` ; 4 voisins cardinaux (`MPI_Isend`/`MPI_Irecv`) |
+| **Modes d'Exécution** | Navier-Stokes complet | `mode = "NAVIER_STOKES"` | Boucle instationnaire couplée (monophasique, diphasique, thermique, compressible) |
+| | Vérification elliptique | `mode = "LAPLACIAN"` | Résolution analytique $-\Delta \psi = f$ (Dirichlet `CAS_3_1` et Neumann `CAS_3_2_NEUMANN`) |
+| | Cinématique d'interface | `mode = "VORTEX_ADVECTION"` | Tourbillon cisaillé réversible de Rider-Kothe sans résolution dynamique |
+| **Régimes & Thermodynamique** | Incompressible | `compressible = false` | Contrainte solénoïdale $\nabla \cdot \mathbf{u} = 0$ |
+| | Compressible *All-Mach* | `compressible = true` ou `flow_regime = "ALL_MACH"` | Continuité barotrope $\chi_T \partial_t p + \nabla \cdot \mathbf{u} = 0$ + énergie totale $\rho e$ (El Ouafa et al., *Fluids* 2024) |
+| | Lois d'état (`eos`) | `INCOMPRESSIBLE`, `LINEAR`, `IDEAL_GAS`, `NASG` | Compressibilité isotherme $\chi_T$, $\rho(p,T)$ et vitesse du son $c_s$ (`EOS.hpp` / `module_eos.f90`) |
+| | Thermique (Boussinesq) | `enable_energy = true` | Équation en température $T$ avec flottabilité $-\rho_0 \beta (T - T_{\text{ref}})\mathbf{g}$ (ou énergie totale si compressible) |
+| | Obstacles & Milieux poreux | `obstacles = [{type: "BOX" | "CYLINDER"}]` | Pénalisation de Darcy-Brinkman $-\frac{\mu}{K}\mathbf{u}$ ($K \le 10^{-12}$ : solide rigide adhérent) |
+| **Suivi d'Interface VOF & Marqueurs** | Reconstruction géométrique | `PLIC`, `ELVIRA`, `LVIRA`, `SLIC`, `NONE` | Reconstruction affine $n_x x + n_y y + \alpha = 0$ sur pochoir $3\times 3$ |
+| | Advection VOF | `WEYMOUTH_YUE`, `CIAM`, `VOF_TVD` | Splitting alterné de Strang ; correction exacte de dilatation $C_{d,i,j}$ (Weymouth & Yue 2010) |
+| | Limiteurs TVD/NVD | `SUPERBEE`, `VAN_LEER`, `MUSCL`, `HRIC`, `NONE` | Actifs uniquement avec `advection_method = "VOF_TVD"` |
+| | Lissage rhéologique SVOF | `enable_svof_smoothing`, `svof_filter_width` | Filtre de Helmholtz $(I - D\Delta) C_s = C$ ($D = k \Delta x \Delta y$) pour $\rho(C_s), \mu(C_s), \mu_{\text{node}}(C_s)$ |
+| | Lissage capillaire diffusif | `enable_diffusion_smoothing`, `diffusion_smoothing_steps` | Diffusion parabolique explicite $\widetilde{C}$ pour la courbure CSF |
+| | Marqueurs CVI non connectés | `vof.use_markers`, `CVI_RK2`, `BILINEAR_RK2` | Nuage lagrangien non connecté ; CVI Variante B ($\nabla \cdot \mathbf{u}_{\text{CVI}} \equiv D_{i,j}$), RK2-Heun, migration MPI 2 passes, courbure parabolique $(\tau, \eta)$ |
+| | Tension superficielle | `enable_surface_tension`, `sigma` | Force volumique CSF équilibrée (*Balanced-Force*) $\mathbf{f}_\sigma = \sigma \kappa \nabla C$ |
+| **Couplage Vitesse-Pression** | Lagrangien Augmenté Standard | `AUGMENTED_LAGRANGIAN` | Pénalité scalaire $r_{\text{al}} \nabla(\nabla \cdot \mathbf{u})$ et boucle d'Uzawa |
+| | Lagrangien Adaptatif | `AAL` / `ADAPTATIVE_AUGMENTED_LAGRANGIAN` | Champ local $r(t, M)$ selon les 7 échelles physiques (Vincent et al. 2004, Éq. 14) |
+| | Lagrangien Compressible | `C-AAL` | Pénalité acoustique régularisée $r_{\text{eff}} = \frac{r}{1 + r \chi_T / \Delta t}$ (El Ouafa et al. 2024) |
+| | Monolithique | `MONOLITHIC` / `FULLY_COUPLED` / `FC` | Système point-selle couplé vitesse-pression sans pénalité |
+| | Projection Standard | `STANDARD_PROJECTION` / `PROJECTION` | Schéma fractionnaire de Chorin-Temam (prédiction + Poisson en pression + projection) |
+| **Convection & Temps** | Schémas convectifs | `UPWIND`, `CENTERED`, `TVD_SUPERBEE` | Discrétisation spatiale des flux de quantité de mouvement |
+| | Linéarisation convective | `PICARD`, `ADAMS_BASHFORTH` (`AB2`), `NEWTON` | Traitement du terme $(\mathbf{u}\cdot\nabla)\mathbf{u}$ dans le système implicite |
+| | Schémas temporels | `EULER`, `GEAR` / `BDF2` + `enable_ssp_rk3_momentum` | Euler implicite (ordre 1), BDF2/Gear (ordre 2, $\alpha_{\text{time}}=1.5$), transport inertiel SSP-RK3 |
+| **Solveurs & Préconditionneurs** | Solveurs linéaires | `BICGSTAB2`, `BICGSTAB`, `CG`, `GMRES`, `MINRES`, `DIRECT` | Implémentations Krylov *matrix-free* + LU directe LAPACK `dgetrf`/`dgetrs` (passerelles `MUMPS`/`PETSC`/`HYPRE` en C++) |
+| | Préconditionneurs | `JACOBI`, `SSOR`, `ILU0`, `BLOCK_TRIANGULAR` (`BT_SBP`), `CUSTOM`, `NONE` | Préconditionnement diagonal enrichi, SSOR, ILU(0) et bloc triangulaire à complément de Schur |
 
 ---
 
 ## Architecture Fonctionnelle Vue par l'Utilisateur
 
-L'utilisation de COVOF 2D s'articule autour d'un flux de travail unifié et standardisé en quatre étapes séquentielles :
+L'exploitation de COVOF 2D suit un flux de travail unifié, identique pour les exécutables C++17 et Fortran 2018 :
 
+```text
++-------------------------------------------------------------------------+
+| 1. PRÉ-TRAITEMENT ET CONFIGURATION                                      |
+| - Définition du domaine [0, Lx] x [0, Ly] et de la grille (nx, ny)      |
+| - Choix du régime (incompressible, compressible All-Mach, Boussinesq)   |
+| - Propriétés fluid1 / fluid2 (rho, mu, Cp, k_thermal, eos, chi_T...)    |
+| - Paramétrage VOF (WEYMOUTH_YUE + PLIC/ELVIRA, SVOF, Marqueurs CVI-RK2) |
+| - Conditions initiales (initial_condition), CL (boundary_conditions)    |
+| - Solveur (MONOLITHIC / AAL / C-AAL / AL, BiCGSTAB2, BT_SBP / JACOBI)   |
++-------------------------------------------------------------------------+
+                                     |
+                                     v
++-------------------------------------------------------------------------+
+| 2. EXÉCUTION DU CALCUL (Séquentiel ou MPI pur)                          |
+| - C++17       : mpirun -np P ./COVOF_2D-C++/bin/covof2d_cpp cas.json    |
+| - Fortran 2018: mpirun -np P ./COVOF_2D-FORTRAN/bin/covof2d_fortran ... |
+| - Partitionnement cartésien MPI 2D, allocation des halos (0..nx+1)      |
+| - Boucle temporelle : [SSP-RK3] -> VOF+CVI-Markers -> AL/NS -> Énergie  |
++-------------------------------------------------------------------------+
+                                     |
+                                     v
++-------------------------------------------------------------------------+
+| 3. CONTRÔLE EN TEMPS RÉEL (Monitoring)                                  |
+| - Bannière synthétique Config::print() au démarrage (rang 0)            |
+| - Tableau console périodique (log_interval) : Pas, Temps, dt, Iter,     |
+|   Vitesse Max, Div Max, [Nu Moyen]                                      |
+| - Série temporelle CSV : <output_dir>/<case_name>_history.csv           |
++-------------------------------------------------------------------------+
+                                     |
+                                     v
++-------------------------------------------------------------------------+
+| 4. POST-TRAITEMENT ET VISUALISATION PARAVIEW / PYTHON                   |
+| - Champs volumiques : <case_name>_<step:06d>.pvtr + *_p<rank>_*.vtr     |
+| - Nuage de marqueurs : <case_name>_markers_<step:06d>.vtk (POLYDATA)    |
+| - Diagnostics analytiques (modes dédiés) : laplacian_error.csv,         |
+|   poiseuille_error.csv, vortex_error.csv, profile_*.csv                 |
++-------------------------------------------------------------------------+
 ```
-+--------------------------------------------------------------------+
-| 1. PRÉ-TRAITEMENT ET CONFIGURATION                                 |
-| - Définition de la physique (viscosités, masses volumiques, sigma) |
-| - Spécification de la grille MAC (nx, ny, dimensions lx, ly)       |
-| - Définition des conditions initiales (interfaces VOF, vitesses)   |
-| - Paramétrage des conditions aux limites (parois, entrées, sorties)|
-| - Édition du fichier maître JSON : config.json                     |
-+--------------------------------------------------------------------+
-                                   |
-                                   v
-+--------------------------------------------------------------------+
-| 2. EXÉCUTION DU CALCUL (Séquentiel ou Parallèle MPI)               |
-| - Commande séquentielle : ./bin/covof2d_cpp config.json            |
-| - Commande parallèle   : mpirun -np 4 ./bin/covof2d_fortran config |
-| - Initialisation des structures et topologie cartésienne MPI       |
-| - Boucle temporelle Navier-Stokes + VOF + Énergie + Uzawa          |
-+--------------------------------------------------------------------+
-                                   |
-                                   v
-+--------------------------------------------------------------------+
-| 3. CONTRÔLE EN TEMPS RÉEL (Monitoring)                             |
-| - Affichage console (pas de temps, temps physique, résidus L2)     |
-| - Enregistrement de l'historique de convergence (convergence.csv)  |
-| - Surveillance des critères de stabilité CFL convectif et diffusif |
-+--------------------------------------------------------------------+
-                                   |
-                                   v
-+--------------------------------------------------------------------+
-| 4. POST-TRAITEMENT ET VALORISATION                                 |
-| - Fichiers de champs volumiques XML VTK Rectilinear (.vtr, .pvtr)  |
-| - Visualisation sous ParaView (vitesse, pression, fraction VOF)    |
-| - Scripts d'analyse Python (profils de vitesse, bilans de masse)   |
-+--------------------------------------------------------------------+
-```
 
-### Organisation des Fichiers et Conventions d'Exécution
+### Organisation Réelle du Dépôt `PROJET_COVOF-2D`
 
-À la racine de l'espace de travail, les répertoires et fichiers principaux sont structurés comme suit :
+À la racine `/Users/elhadjiibrahimathiam/Documents/PROJET_COVOF-2D/`, l'arborescence de travail est organisée comme suit :
 
-- `COVOF_2D-C++/` : Répertoire source du code C++17 (fichiers d'en-tête dans `include/covof/`, sources dans `src/`, exécutable dans `bin/covof2d_cpp`).
-- `COVOF_2D-FORTRAN/` : Répertoire source du code Fortran 2018 (sources dans `src/`, exécutable dans `bin/covof2d_fortran`).
-- `VALIDATION_TOTALE/` : Répertoire exhaustif regroupant les 24 cas-tests académiques de validation, avec leurs spécifications détaillées (`.md`), leurs fichiers JSON de configuration prêts à l'emploi et leurs scripts Python d'analyse comparative.
-- `output/` : Répertoire généré automatiquement lors de l'exécution, recevant les fichiers `.vtr`, `.pvtr`, les fichiers `.pvd` de série temporelle et les fichiers `.csv` de convergence.
+- `COVOF_2D-C++/` : Code source C++17 (`include/covof/` : 15 fichiers `.hpp` ; `src/` : 13 fichiers `.cpp`), `CMakeLists.txt`, et binaires compilés dans `bin/` (`covof2d_cpp` et lien `covof2d`).
+- `COVOF_2D-FORTRAN/` : Code source Fortran 2018 (`src/` : 16 fichiers `.f90`), `CMakeLists.txt`, et binaire compilé dans `bin/covof2d_fortran`.
+- `VALIDATION_TOTALE/` : Dossier maître de vérification et validation regroupant :
+  - `Run_Valide-CASES/` : 14 cas de validation analytique et canonique pilotés par `run_all_validations.sh` (`validation_cas_1_laplacian` à `validation_cas_14_instabilite_interface_gravitaire`).
+  - `Run_CASES/` : Campagnes avancées (`validation_cas_9_50x100_newton_dual_code`, `validation_cas_10_liquid_sheet`, `validation_cas_14_marche_descendante` à `validation_cas_19_convection_poreux_darcy_brinkman`, `validation_cas_21_ascension_bulle_2d`, `validation_cas_24_viscous_jet_buckling`) ainsi que le sous-dossier `Run_FC-WY-CVI-Marker/` dédié aux 8 campagnes hybrides CVI-Marqueurs et au script `verify_cvi_markers.py`.
+  - `Theoritical_Description/` : Descriptions théoriques des 24 cas de validation et rapport consolidé `Validation_Description.pdf`.
+- `Guides_Tutos/` : Suite documentaire complète (Volumes I, II et III, script `verify_cvi_markers.py` dans `Run_FC-WY-CVI-Marker/`, synthèses théoriques `SYNTHESE_METHODE_FC_WY_CVI_MARQUEURS.pdf` et `FEUILLE_DE_ROUTE_IMPLEMENTATION_COVOF_CVI_MARQUEURS.pdf`).
+- `output/` : Répertoire de sortie par défaut généré lors des simulations si `output.output_dir` vaut `"output"`.
