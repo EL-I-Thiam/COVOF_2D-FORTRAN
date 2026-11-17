@@ -134,6 +134,7 @@ module module_config
      real(dp) :: ic_u = 0.0_dp, ic_v = 0.0_dp
      ! Déclaration de variable locale / paramètre de calcul
      real(dp) :: ic_center_x = 0.5_dp, ic_center_y = 0.5_dp, ic_radius = 0.25_dp
+     real(dp) :: ic_axis_a = 0.0_dp, ic_axis_b = 0.0_dp
      ! Déclaration de variable locale / paramètre de calcul
      real(dp) :: ic_box_x0 = 0.0_dp, ic_box_y0 = 0.0_dp, ic_box_x1 = 0.5_dp, ic_box_y1 = 0.5_dp
      ! Déclaration de variable locale / paramètre de calcul
@@ -525,6 +526,15 @@ contains
     call json_get_real(buf, "initial_conditions.center_y", cfg%ic_center_y, cfg%ic_center_y)
     call json_get_real(buf, "initial_condition.radius", cfg%ic_radius, 0.25_dp)
     call json_get_real(buf, "initial_conditions.radius", cfg%ic_radius, cfg%ic_radius)
+    call json_get_real(buf, "initial_condition.axis_a", cfg%ic_axis_a, 0.0_dp)
+    call json_get_real(buf, "initial_conditions.axis_a", cfg%ic_axis_a, cfg%ic_axis_a)
+    call json_get_real(buf, "initial_condition.axis_b", cfg%ic_axis_b, 0.0_dp)
+    call json_get_real(buf, "initial_conditions.axis_b", cfg%ic_axis_b, cfg%ic_axis_b)
+    if (cfg%ic_axis_a <= 0.0_dp .and. cfg%ic_pert_amp > 0.0_dp .and. cfg%ic_radius > 0.0_dp .and. &
+        (cfg%ic_type == IC_BUBBLE .or. cfg%ic_type == IC_DROPLET)) then
+       cfg%ic_axis_a = cfg%ic_radius * (1.0_dp + cfg%ic_pert_amp)
+       cfg%ic_axis_b = cfg%ic_radius / (1.0_dp + cfg%ic_pert_amp)
+    end if
     call json_get_real(buf, "initial_condition.box_x0", cfg%ic_box_x0, 0.0_dp)
     call json_get_real(buf, "initial_conditions.box_x0", cfg%ic_box_x0, cfg%ic_box_x0)
     call json_get_real(buf, "initial_condition.box_y0", cfg%ic_box_y0, 0.0_dp)

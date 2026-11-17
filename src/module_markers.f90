@@ -136,7 +136,8 @@ contains
 
     is_circular_ic = (cfg%ic_type == IC_DROPLET .or. cfg%ic_type == IC_BUBBLE .or. &
                       cfg%ic_type == IC_CYLINDER .or. cfg%ic_type == IC_VORTEX_SHEAR) .and. &
-                     (cfg%ic_radius > 0.0_dp)
+                     (cfg%ic_radius > 0.0_dp) .and. &
+                     (cfg%ic_axis_a <= 0.0_dp .or. cfg%ic_axis_b <= 0.0_dp .or. abs(cfg%ic_axis_a - cfg%ic_axis_b) < 1.0e-9_dp)
 
     do j = 1, ny
        ymin = y_face(mesh, j)

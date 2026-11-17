@@ -85,30 +85,28 @@ contains
              fields%C(i, j) = 1.0_dp
 
           case (IC_DROPLET)
-             if (cfg%use_markers) then
+             if (cfg%use_markers .or. (cfg%ic_axis_a > 0.0_dp .and. cfg%ic_axis_b > 0.0_dp)) then
                 x_min = x_face(mesh, i)
                 x_max = x_face(mesh, i + 1)
                 y_min = y_face(mesh, j)
                 y_max = y_face(mesh, j + 1)
-                d_mid = hypot(x - cfg%ic_center_x, y - cfg%ic_center_y)
-                diag = 0.5_dp * hypot(mesh%dx, mesh%dy)
-                if (d_mid + diag <= cfg%ic_radius) then
-                   fields%C(i, j) = 1.0_dp
-                else if (d_mid - diag >= cfg%ic_radius) then
-                   fields%C(i, j) = 0.0_dp
-                else
-                   count_out = 0
-                   do sj = 0, 15
-                      ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
-                      do si = 0, 15
-                         xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                count_out = 0
+                do sj = 0, 15
+                   ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
+                   do si = 0, 15
+                      xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                      if (cfg%ic_axis_a > 0.0_dp .and. cfg%ic_axis_b > 0.0_dp) then
+                         if (((xs - cfg%ic_center_x)/cfg%ic_axis_a)**2 + ((ys - cfg%ic_center_y)/cfg%ic_axis_b)**2 <= 1.0_dp) then
+                            count_out = count_out + 1
+                         end if
+                      else
                          if (hypot(xs - cfg%ic_center_x, ys - cfg%ic_center_y) <= cfg%ic_radius) then
                             count_out = count_out + 1
                          end if
-                      end do
+                      end if
                    end do
-                   fields%C(i, j) = real(count_out, dp) / 256.0_dp
-                end if
+                end do
+                fields%C(i, j) = real(count_out, dp) / 256.0_dp
              else
                 ! Affectation et calcul numérique
                 dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
@@ -128,55 +126,33 @@ contains
              end if
 
           case (IC_CYLINDER, IC_BUBBLE)
-             dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
-             if (cfg%ic_type == IC_CYLINDER .or. trim(cfg%reconstruction_method) == "PLIC") then
+             if (cfg%ic_type == IC_CYLINDER .or. trim(cfg%reconstruction_method) == "PLIC" .or. &
+                 (cfg%ic_axis_a > 0.0_dp .and. cfg%ic_axis_b > 0.0_dp)) then
                 x_min = x_face(mesh, i)
                 x_max = x_face(mesh, i + 1)
                 y_min = y_face(mesh, j)
                 y_max = y_face(mesh, j + 1)
 
-                d00 = hypot(x_min - cfg%ic_center_x, y_min - cfg%ic_center_y)
-                d10 = hypot(x_max - cfg%ic_center_x, y_min - cfg%ic_center_y)
-                d01 = hypot(x_min - cfg%ic_center_x, y_max - cfg%ic_center_y)
-                d11 = hypot(x_max - cfg%ic_center_x, y_max - cfg%ic_center_y)
-
-                if (d00 <= cfg%ic_radius .and. d10 <= cfg%ic_radius .and. &
-                    d01 <= cfg%ic_radius .and. d11 <= cfg%ic_radius) then
-                   fields%C(i, j) = 0.0_dp ! Intérieur cylindre / bulle : fluide 2
-                else if (d00 >= cfg%ic_radius .and. d10 >= cfg%ic_radius .and. &
-                         d01 >= cfg%ic_radius .and. d11 >= cfg%ic_radius) then
-                   d_mid = hypot(x - cfg%ic_center_x, y - cfg%ic_center_y)
-                   diag = 0.5_dp * hypot(mesh%dx, mesh%dy)
-                   if (d_mid > cfg%ic_radius + diag) then
-                      fields%C(i, j) = 1.0_dp ! Extérieur : fluide 1 (air)
-                   else
-                      count_out = 0
-                      do sj = 0, 15
-                         ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
-                         do si = 0, 15
-                            xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
-                            if (hypot(xs - cfg%ic_center_x, ys - cfg%ic_center_y) > cfg%ic_radius) then
-                               count_out = count_out + 1
-                            end if
-                         end do
-                      end do
-                      fields%C(i, j) = real(count_out, dp) / 256.0_dp
-                   end if
-                else
-                   count_out = 0
-                   do sj = 0, 15
-                      ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
-                      do si = 0, 15
-                         xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                count_out = 0
+                do sj = 0, 15
+                   ys = y_min + (real(sj, dp) + 0.5_dp) * (mesh%dy / 16.0_dp)
+                   do si = 0, 15
+                      xs = x_min + (real(si, dp) + 0.5_dp) * (mesh%dx / 16.0_dp)
+                      if (cfg%ic_axis_a > 0.0_dp .and. cfg%ic_axis_b > 0.0_dp) then
+                         if (((xs - cfg%ic_center_x)/cfg%ic_axis_a)**2 + ((ys - cfg%ic_center_y)/cfg%ic_axis_b)**2 > 1.0_dp) then
+                            count_out = count_out + 1
+                         end if
+                      else
                          if (hypot(xs - cfg%ic_center_x, ys - cfg%ic_center_y) > cfg%ic_radius) then
                             count_out = count_out + 1
                          end if
-                      end do
+                      end if
                    end do
-                   fields%C(i, j) = real(count_out, dp) / 256.0_dp
-                end if
+                end do
+                fields%C(i, j) = real(count_out, dp) / 256.0_dp
              else
                 ! Évaluation de la condition logique diffuse standard
+                dist = sqrt((x - cfg%ic_center_x)**2 + (y - cfg%ic_center_y)**2) - cfg%ic_radius
                 if (dist < -eps) then
                    fields%C(i, j) = 0.0_dp
                 else if (dist > eps) then
