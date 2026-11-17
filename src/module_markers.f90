@@ -560,10 +560,12 @@ contains
 
   !=============================================================================
   ! Routine : prune_and_reseed_markers
-  ! Rôle    : - Supprime les marqueurs tombés dans des cellules pures loins de
-  !             l'interface
+  ! Rôle    : - Supprime les marqueurs tombés dans des cellules pures ou orphelins
   !           - Limite la sur-concentration (> marker_max_per_cell)
-  !           - Ré-ensemence les mailles d'interface (1e-4 < C < 1-1e-4) vides
+  !           - Ré-ensemence les mailles d'interface avec FILTRAGE GÉOMÉTRIQUE STRICT :
+  !             Interdit l'injection si la cellule ne possède pas une normale PLIC univoque
+  !             cohérente avec le front principal (continuité, présence biphasique,
+  !             gradient seuil, cohérence angulaire et longueur minimale de segment).
   !=============================================================================
   subroutine prune_and_reseed_markers(cloud, mesh, cfg, fields)
     type(marker_cloud_t), intent(inout) :: cloud
@@ -571,10 +573,12 @@ contains
     type(config_t),       intent(in)    :: cfg
     type(flow_fields_t),  intent(in)    :: fields
 
-    type(interface_segment_t), allocatable :: segments(:, :)
     integer  :: p, i, j, k, di, dj, nx, ny, n_per_cell, max_per_cell, new_count
     real(dp) :: c_val, xmin, xmax, ymin, ymax, x1, y1, x2, y2, s
-    logical  :: valid, has_mixed_nb
+    logical  :: valid, has_mixed_nb, has_marker_nb, normal_coherent
+    real(dp) :: c_min_nb, c_max_nb, c_nb
+    real(dp) :: c_mm, c_0m, c_pm, c_m0, c_p0, c_mp, c_0p, c_pp
+    real(dp) :: mx, my, nrm, snx, sny, alpha, h, min_grad, seg_len, dot_prod
 
     if (.not. cfg%use_markers) return
 
@@ -582,6 +586,8 @@ contains
     ny = mesh%ny_local
     n_per_cell = max(2, cfg%markers_per_cell)
     max_per_cell = max(n_per_cell + 2, cfg%marker_max_per_cell)
+    h = max(mesh%dx, mesh%dy)
+    min_grad = 0.25_dp / h
 
     if (.not. allocated(cloud%count_in_cell)) then
        allocate(cloud%count_in_cell(0:nx+1, 0:ny+1))
@@ -589,20 +595,26 @@ contains
     cloud%count_in_cell = 0
 
     ! 1. Élagage des marqueurs hors de la bande d'interface ou en surnombre
+    ! Tolérance d'interface resserrée : si C <= 0.02 ou C >= 0.98, et aucun voisin 3x3 mixte franc (0.05 < C < 0.95),
+    ! le marqueur est orphelin et doit être impérativement éliminé.
     do p = 1, cloud%count
        if (.not. cloud%list(p)%active) cycle
        i = cloud%list(p)%i_cell
        j = cloud%list(p)%j_cell
+       if (i < 1 .or. i > nx .or. j < 1 .or. j > ny) then
+          cloud%list(p)%active = .false.
+          cycle
+       end if
        c_val = fields%C(i, j)
 
-       if (c_val <= 0.01_dp .or. c_val >= 1.0_dp - 0.01_dp) then
-          ! Vérifier si un voisin immédiat 3x3 est mixte
+       if (c_val <= 0.02_dp .or. c_val >= 0.98_dp) then
+          ! Vérifier si un voisin immédiat 3x3 est mixte franc (0.05 < C < 0.95)
           has_mixed_nb = .false.
           do dj = -1, 1
              do di = -1, 1
                 if (di == 0 .and. dj == 0) cycle
                 if (i+di >= 0 .and. i+di <= nx+1 .and. j+dj >= 0 .and. j+dj <= ny+1) then
-                   if (fields%C(i+di, j+dj) > 0.01_dp .and. fields%C(i+di, j+dj) < 1.0_dp - 0.01_dp) then
+                   if (fields%C(i+di, j+dj) > 0.05_dp .and. fields%C(i+di, j+dj) < 0.95_dp) then
                       has_mixed_nb = .true.
                       exit
                    end if
@@ -623,41 +635,103 @@ contains
        end if
     end do
 
-    ! 2. Ré-ensemencement des cellules mixtes dépourvues de marqueurs
-    allocate(segments(0:nx+1, 0:ny+1))
-    call reconstruct_elvira(mesh, fields%C, segments)
-
+    ! 2. Ré-ensemencement local avec FILTRAGE GÉOMÉTRIQUE STRICT :
+    !    Interdire l'injection de marqueurs dès que la cellule ne possède pas une normale PLIC univoque
+    !    cohérente avec le front principal, pour empêcher toute apparition de marqueurs orphelins.
     do j = 1, ny
        ymin = y_face(mesh, j)
        ymax = y_face(mesh, j + 1)
        do i = 1, nx
           c_val = fields%C(i, j)
-          if (c_val > 0.05_dp .and. c_val < 0.95_dp .and. cloud%count_in_cell(i, j) == 0) then
-             xmin = x_face(mesh, i)
-             xmax = x_face(mesh, i + 1)
-             call clip_segment_in_cell(xmin, xmax, ymin, ymax, &
-                                       segments(i, j)%nx, segments(i, j)%ny, segments(i, j)%alpha, &
-                                       x1, y1, x2, y2, valid)
-             if (valid) then
-                call ensure_capacity(cloud, cloud%count + n_per_cell + 16)
-                do k = 1, n_per_cell
-                   s = (real(k, dp) - 0.5_dp) / real(n_per_cell, dp)
-                   cloud%count = cloud%count + 1
-                   cloud%list(cloud%count)%x      = x1 + s * (x2 - x1)
-                   cloud%list(cloud%count)%y      = y1 + s * (y2 - y1)
-                   cloud%list(cloud%count)%nx     = -segments(i, j)%nx
-                   cloud%list(cloud%count)%ny     = -segments(i, j)%ny
-                   cloud%list(cloud%count)%kappa  = 0.0_dp
-                   cloud%list(cloud%count)%i_cell = i
-                   cloud%list(cloud%count)%j_cell = j
-                   cloud%list(cloud%count)%active = .true.
-                end do
-                cloud%count_in_cell(i, j) = n_per_cell
+
+          ! Condition 2.1 : Cellule mixte franche (seuil resserré 0.05 < C < 0.95) dépourvue de marqueurs
+          if (c_val <= 0.05_dp .or. c_val >= 0.95_dp .or. cloud%count_in_cell(i, j) > 0) cycle
+
+          ! Condition 2.2 : Continuité avec le front principal existant
+          ! Une cellule ne peut être ré-ensemencée que si elle est contiguë à des marqueurs actifs existants
+          has_marker_nb = .false.
+          c_min_nb = 1.0_dp
+          c_max_nb = 0.0_dp
+          do dj = -1, 1
+             do di = -1, 1
+                if (di == 0 .and. dj == 0) cycle
+                if (i+di >= 0 .and. i+di <= nx+1 .and. j+dj >= 0 .and. j+dj <= ny+1) then
+                   if (cloud%count_in_cell(i+di, j+dj) > 0) has_marker_nb = .true.
+                   c_nb = fields%C(i+di, j+dj)
+                   if (c_nb < c_min_nb) c_min_nb = c_nb
+                   if (c_nb > c_max_nb) c_max_nb = c_nb
+                end if
+             end do
+          end do
+          if (.not. has_marker_nb) cycle ! Cellule isolée du front principal : INTERDIT
+
+          ! Condition 2.3 : Présence obligatoire des deux phases dans le voisinage 3x3 (vrai saut d'interface)
+          if (c_min_nb > 0.45_dp .or. c_max_nb < 0.55_dp) cycle
+
+          ! Condition 2.4 : Normale univoque par gradient de Youngs avec magnitude suffisante
+          c_mm = fields%C(i - 1, j - 1)
+          c_0m = fields%C(i,     j - 1)
+          c_pm = fields%C(i + 1, j - 1)
+          c_m0 = fields%C(i - 1, j    )
+          c_p0 = fields%C(i + 1, j    )
+          c_mp = fields%C(i - 1, j + 1)
+          c_0p = fields%C(i,     j + 1)
+          c_pp = fields%C(i + 1, j + 1)
+
+          mx = -((c_pp + 2.0_dp * c_p0 + c_pm) - (c_mp + 2.0_dp * c_m0 + c_mm)) / (8.0_dp * mesh%dx)
+          my = -((c_pp + 2.0_dp * c_0p + c_mp) - (c_pm + 2.0_dp * c_0m + c_mm)) / (8.0_dp * mesh%dy)
+          nrm = hypot(mx, my)
+
+          if (nrm < min_grad) cycle ! Gradient diffus ou non univoque : INTERDIT
+
+          snx = mx / nrm
+          sny = my / nrm
+
+          ! Condition 2.5 : Cohérence angulaire de la normale avec les marqueurs du front principal (n . n_nb >= 0.5)
+          ! Empêche toute normale PLIC aberrante ou discordante
+          normal_coherent = .false.
+          do p = 1, cloud%count
+             if (.not. cloud%list(p)%active) cycle
+             if (abs(cloud%list(p)%i_cell - i) <= 1 .and. abs(cloud%list(p)%j_cell - j) <= 1) then
+                ! Dans COVOF : mk%nx pointe vers +grad C (-snx)
+                dot_prod = (-snx) * cloud%list(p)%nx + (-sny) * cloud%list(p)%ny
+                if (dot_prod >= 0.5_dp) then
+                   normal_coherent = .true.
+                   exit
+                end if
              end if
-          end if
+          end do
+          if (.not. normal_coherent) cycle ! Normale discordante avec le front principal : INTERDIT
+
+          ! Condition 2.6 : Découpage PLIC et longueur minimale de segment
+          xmin = x_face(mesh, i)
+          xmax = x_face(mesh, i + 1)
+          alpha = compute_alpha(xmin, xmax, ymin, ymax, snx, sny, c_val)
+
+          call clip_segment_in_cell(xmin, xmax, ymin, ymax, &
+                                    snx, sny, alpha, &
+                                    x1, y1, x2, y2, valid)
+          if (.not. valid) cycle
+
+          seg_len = hypot(x2 - x1, y2 - y1)
+          if (seg_len < 0.15_dp * h) cycle ! Segment dégénéré : INTERDIT
+
+          call ensure_capacity(cloud, cloud%count + n_per_cell + 16)
+          do k = 1, n_per_cell
+             s = (real(k, dp) - 0.5_dp) / real(n_per_cell, dp)
+             cloud%count = cloud%count + 1
+             cloud%list(cloud%count)%x      = x1 + s * (x2 - x1)
+             cloud%list(cloud%count)%y      = y1 + s * (y2 - y1)
+             cloud%list(cloud%count)%nx     = -snx
+             cloud%list(cloud%count)%ny     = -sny
+             cloud%list(cloud%count)%kappa  = 0.0_dp
+             cloud%list(cloud%count)%i_cell = i
+             cloud%list(cloud%count)%j_cell = j
+             cloud%list(cloud%count)%active = .true.
+          end do
+          cloud%count_in_cell(i, j) = n_per_cell
        end do
     end do
-    deallocate(segments)
 
     ! 3. Compactage en place du tableau de marqueurs
     new_count = 0
