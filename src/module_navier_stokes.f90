@@ -923,19 +923,25 @@ contains
           val = val - grad_p
         end if
 
-        ! Évaluation de la condition logique
+        ! Évaluation de la condition logique (cohérente avec l'extrapolation quadratique 3 points dans module_mpi_comm)
         if (j == mesh%ny_local .and. mesh%is_boundary_top .and. cfg%bc_top%btype == BC_DIRICHLET) then
           ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
           mu_N = fields%mu_node(i, j + 1)
-          ! Affectation et calcul numérique
-          val = val + mu_N * (2.0_dp * cfg%bc_top%u / dy) * dx
+          if (mesh%ny_local >= 2) then
+             val = val + mu_N * ((8.0_dp / 3.0_dp) * cfg%bc_top%u / dy) * dx
+          else
+             val = val + mu_N * (2.0_dp * cfg%bc_top%u / dy) * dx
+          end if
         end if
         ! Évaluation de la condition logique
         if (j == 1 .and. mesh%is_boundary_bottom .and. cfg%bc_bottom%btype == BC_DIRICHLET) then
           ! Calcul de la viscosité dynamique locale (harmonique aux nœuds)
           mu_S = fields%mu_node(i, j)
-          ! Affectation et calcul numérique
-          val = val + mu_S * (2.0_dp * cfg%bc_bottom%u / dy) * dx
+          if (mesh%ny_local >= 2) then
+             val = val + mu_S * ((8.0_dp / 3.0_dp) * cfg%bc_bottom%u / dy) * dx
+          else
+             val = val + mu_S * (2.0_dp * cfg%bc_bottom%u / dy) * dx
+          end if
         end if
 
         ! Affectation et calcul numérique
