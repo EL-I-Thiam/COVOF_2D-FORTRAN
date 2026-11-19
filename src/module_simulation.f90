@@ -59,6 +59,30 @@ module module_simulation
 contains
 
   !-----------------------------------------------------------------------------
+  ! Solution analytique exacte Cas 3.1 : partie polynomiale + série exponentielle
+  !-----------------------------------------------------------------------------
+  pure function eval_cas_3_1_exact(xp, yp, a, b, f_src) result(psi)
+    real(dp), intent(in) :: xp, yp, a, b, f_src
+    real(dp) :: psi, d, s_far, c0, w, m, lam, e_d, ratio
+    integer  :: k
+
+    psi = 0.5_dp * f_src * xp * (xp - a)
+    d = min(yp, b - yp)
+    s_far = b - d
+    c0 = (4.0_dp * f_src * a * a) / (PI**3)
+    w = 0.0_dp
+    do k = 0, 999
+       m = real(2 * k + 1, dp)
+       lam = m * PI / a
+       e_d = exp(-lam * d)
+       if (e_d < 1.0e-16_dp .and. k > 20) exit
+       ratio = (e_d + exp(-lam * s_far)) / (1.0_dp + exp(-lam * b))
+       w = w + (c0 / (m * m * m)) * sin(lam * xp) * ratio
+    end do
+    psi = psi + w
+  end function eval_cas_3_1_exact
+
+  !-----------------------------------------------------------------------------
   ! Initialisation complète de la simulation à partir du fichier JSON
   !-----------------------------------------------------------------------------
   function sim_init(this, comm, config_file) result(success)
@@ -96,6 +120,22 @@ contains
     ! Appel de sous-programme modulaire
     call init_mesh(this%mesh, comm, this%config%nx, this%config%ny, &
                    this%config%lx, this%config%ly, periodic_x, periodic_y)
+
+    if (this%mesh%rank == 0 .and. this%config%linear_solver == LINEAR_MINRES) then
+       if (((trim(this%config%mode) == "NAVIER_STOKES") .and. &
+            (this%config%enable_convection .or. this%config%compressible .or. &
+             this%config%solver_type == SOLVER_MONOLITHIC .or. &
+             this%config%solver_type == SOLVER_STANDARD_PROJECTION .or. &
+             this%config%solver_type == SOLVER_AAL .or. &
+             this%config%solver_type == SOLVER_CAAL)) .or. &
+           (this%config%use_precond .and. &
+            (this%config%precond_type == PRECOND_BLOCK_TRIANGULAR .or. &
+             this%config%precond_type == PRECOND_ILU0 .or. &
+             this%config%precond_type == PRECOND_SSOR))) then
+          write(*, '(A)') " [AVERTISSEMENT CRITIQUE] Solveur MINRES selectionne avec operateur ou preconditionneur non symetrique."
+          write(*, '(A)') "                          Convergence non garantie : preferez BICGSTAB2 ou GMRES."
+       end if
+    end if
 
     ! 3. Allocation des champs décalés MAC
     call this%fields%allocate(this%mesh)
@@ -1436,24 +1476,7 @@ contains
           ! Affectation et calcul numérique
           yp = real(j + 1, dp) * dy
           ! Affectation et calcul numérique
-          psi_ex = 0.0_dp
-
-          ! Boucle d'itération numérique
-          do k2 = 0, 59
-             ! Boucle d'itération numérique
-             do k1 = 0, 59
-                ! Affectation et calcul numérique
-                n1 = real(2 * k1 + 1, dp)
-                ! Affectation et calcul numérique
-                n2 = real(2 * k2 + 1, dp)
-                ! Affectation et calcul numérique
-                num = 16.0_dp * this%config%source_term * sin(n1 * PI * xp / a) * sin(n2 * PI * yp / b)
-                ! Affectation et calcul numérique
-                den = (PI**4) * n1 * n2 * ((n1 / a)**2 + (n2 / b)**2)
-                ! Affectation et calcul numérique
-                psi_ex = psi_ex - num / den
-             end do
-          end do
+          psi_ex = eval_cas_3_1_exact(xp, yp, a, b, this%config%source_term)
 
           ! Affectation et calcul numérique
           row = j * n_int_x + i + 1
@@ -1517,16 +1540,7 @@ contains
              else
                 row = (j - 1) * n_int_x + (i - 1) + 1
                 psi_num_2d(i, j) = x(row)
-                psi_ex = 0.0_dp
-                do k2 = 0, 59
-                   n2 = real(2 * k2 + 1, dp)
-                   do k1 = 0, 59
-                      n1 = real(2 * k1 + 1, dp)
-                      num = 16.0_dp * this%config%source_term * sin(n1 * PI * xp / a) * sin(n2 * PI * yp / b)
-                      den = (PI**4) * n1 * n2 * ((n1 / a)**2 + (n2 / b)**2)
-                      psi_ex = psi_ex - num / den
-                   end do
-                end do
+                psi_ex = eval_cas_3_1_exact(xp, yp, a, b, this%config%source_term)
                 psi_ex_2d(i, j) = psi_ex
                 err_2d(i, j) = abs(x(row) - psi_ex)
              end if

@@ -13,8 +13,9 @@ module module_linear_solvers
   use module_config, only: config_t
   use module_mesh, only: mesh_2d_t
   use module_fields, only: flow_fields_t
-  use module_mpi_comm, only: global_dot_product, global_norm2
+  use module_mpi_comm, only: global_dot_product, global_norm2, global_sum, sync_cell_scalar, sync_u, sync_v
   use module_navier_stokes, only: navier_stokes_t, is_u_face_in_obstacle, is_v_face_in_obstacle
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_nan, ieee_is_finite
   implicit none
   private
 
@@ -57,14 +58,14 @@ contains
     real(dp), intent(out)             :: dst(:)
 
     ! Déclaration de variable locale / paramètre de calcul
-    integer :: i, j, dof, nu, nv, np, n, u_nx, v_ny, sweep
+    integer :: i, j, dof, nu, nv, np, n, nx, ny, u_nx, v_ny, sweep
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp) :: d, val, grad_p, mean_rp
+    real(dp) :: d, val, grad_p, mean_rp, sum_loc, w_schur
     ! Déclaration de variable locale / paramètre de calcul
-    logical :: is_wall
+    logical :: is_wall, need_sync
     ! Déclaration de variable locale / paramètre de calcul
-    real(dp), allocatable :: rp_2d(:, :), zp_2d(:, :)
-    real(dp), allocatable :: ru(:), rv(:), rhs_u(:), rhs_v(:)
+    real(dp), allocatable :: rp_2d(:, :), zp_2d(:, :), ru_2d(:, :), rv_2d(:, :)
+    real(dp), allocatable :: rhs_u(:), rhs_v(:)
 
     ! Affectation et calcul numérique
     n = ns%n_owned_total
@@ -133,133 +134,72 @@ contains
         end do
       end if
 
-    case (PRECOND_SSOR)
-      ! Balayage SSOR avant / arrière avec omega = 1.0
-      do i = 1, nu
-        ! Affectation et calcul numérique
-        d = ns%diag_u(i)
-        ! Affectation et calcul numérique
-        if (abs(d) < 1.0e-15_dp) d = 1.0_dp
-        ! Affectation et calcul numérique
-        dst(i) = src(i) / d
-      end do
-      ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
-      do i = 1, nv
-        ! Affectation et calcul numérique
-        d = ns%diag_v(i)
-        ! Affectation et calcul numérique
-        if (abs(d) < 1.0e-15_dp) d = 1.0_dp
-        ! Affectation et calcul numérique
-        dst(nu + i) = src(nu + i) / d
-      end do
-      ! Évaluation de la condition logique
-      if (cfg%solver_type == SOLVER_MONOLITHIC) then
-        ! Boucle spatiale selon l'axe horizontal X (accès contigu colonne-major)
-        do i = 1, np
-          ! Affectation et calcul numérique
-          d = ns%diag_p(i)
-          ! Affectation et calcul numérique
-          if (abs(d) < 1.0e-15_dp) d = 1.0_dp
-          ! Affectation et calcul numérique
-          dst(nu + nv + i) = src(nu + nv + i) / d
-        end do
-      end if
+    case (PRECOND_SSOR, PRECOND_BLOCK_TRIANGULAR)
+      nx = mesh%nx_local
+      ny = mesh%ny_local
+      u_nx = nx
+      if (mesh%is_boundary_right) u_nx = u_nx + 1
+      v_ny = ny
+      if (mesh%is_boundary_top) v_ny = v_ny + 1
+      need_sync = (mesh%size > 1) .or. (.not. mesh%is_boundary_left) .or. (.not. mesh%is_boundary_right) .or. &
+                  (.not. mesh%is_boundary_bottom) .or. (.not. mesh%is_boundary_top)
 
-    case (PRECOND_BLOCK_TRIANGULAR)
-      if (cfg%solver_type == SOLVER_MONOLITHIC) then
-        u_nx = mesh%nx_local
-        if (mesh%is_boundary_right) u_nx = u_nx + 1
-        v_ny = mesh%ny_local
-        if (mesh%is_boundary_top) v_ny = v_ny + 1
-
-        allocate(rp_2d(mesh%nx_local, mesh%ny_local))
-        allocate(zp_2d(mesh%nx_local, mesh%ny_local))
-
-        do j = 1, mesh%ny_local
-          do i = 1, mesh%nx_local
-            zp_2d(i, j) = src(nu + nv + (j - 1) * mesh%nx_local + i)
+      if (cfg%precond_type == PRECOND_SSOR) then
+        allocate(rhs_u(nu), rhs_v(nv), ru_2d(0:nx+1, 0:ny+1), rv_2d(0:nx+1, 0:ny+1))
+        rhs_u(1:nu) = src(1:nu)
+        rhs_v(1:nv) = src(nu + 1 : nu + nv)
+        call ssor_solve_u(ns, mesh, u_nx, ny, rhs_u, ru_2d, 2, 1.0_dp, need_sync)
+        call ssor_solve_v(ns, mesh, nx, v_ny, rhs_v, rv_2d, 2, 1.0_dp, need_sync)
+        do j = 1, ny
+          do i = 1, u_nx
+            dst((j - 1) * u_nx + i) = ru_2d(i, j)
           end do
         end do
-
-        rp_2d = 0.0_dp
-
-        ! 1. 8 balayages de Gauss-Seidel symétrique sur le complément de Schur S
-        do sweep = 1, 8
-          ! Balayage avant
-          do j = 1, mesh%ny_local
-            do i = 1, mesh%nx_local
-              val = zp_2d(i, j)
-              if (i > 1) then
-                val = val + ns%schur_aW(i, j) * rp_2d(i - 1, j)
-              else if (cfg%bc_left%btype == BC_PERIODIC) then
-                val = val + ns%schur_aW(i, j) * rp_2d(mesh%nx_local, j)
-              end if
-
-              if (i < mesh%nx_local) then
-                val = val + ns%schur_aE(i, j) * rp_2d(i + 1, j)
-              else if (cfg%bc_right%btype == BC_PERIODIC) then
-                val = val + ns%schur_aE(i, j) * rp_2d(1, j)
-              end if
-
-              if (j > 1) then
-                val = val + ns%schur_aS(i, j) * rp_2d(i, j - 1)
-              else if (cfg%bc_bottom%btype == BC_PERIODIC) then
-                val = val + ns%schur_aS(i, j) * rp_2d(i, mesh%ny_local)
-              end if
-
-              if (j < mesh%ny_local) then
-                val = val + ns%schur_aN(i, j) * rp_2d(i, j + 1)
-              else if (cfg%bc_top%btype == BC_PERIODIC) then
-                val = val + ns%schur_aN(i, j) * rp_2d(i, 1)
-              end if
-
-              rp_2d(i, j) = val / ns%schur_aP(i, j)
+        do j = 1, v_ny
+          do i = 1, nx
+            dst(nu + (j - 1) * nx + i) = rv_2d(i, j)
+          end do
+        end do
+        if (cfg%solver_type == SOLVER_MONOLITHIC) then
+          allocate(rp_2d(0:nx+1, 0:ny+1), zp_2d(nx, ny))
+          do j = 1, ny
+            do i = 1, nx
+              zp_2d(i, j) = src(nu + nv + (j - 1) * nx + i)
             end do
           end do
-
-          ! Balayage arrière
-          do j = mesh%ny_local, 1, -1
-            do i = mesh%nx_local, 1, -1
-              val = zp_2d(i, j)
-              if (i > 1) then
-                val = val + ns%schur_aW(i, j) * rp_2d(i - 1, j)
-              else if (cfg%bc_left%btype == BC_PERIODIC) then
-                val = val + ns%schur_aW(i, j) * rp_2d(mesh%nx_local, j)
-              end if
-
-              if (i < mesh%nx_local) then
-                val = val + ns%schur_aE(i, j) * rp_2d(i + 1, j)
-              else if (cfg%bc_right%btype == BC_PERIODIC) then
-                val = val + ns%schur_aE(i, j) * rp_2d(1, j)
-              end if
-
-              if (j > 1) then
-                val = val + ns%schur_aS(i, j) * rp_2d(i, j - 1)
-              else if (cfg%bc_bottom%btype == BC_PERIODIC) then
-                val = val + ns%schur_aS(i, j) * rp_2d(i, mesh%ny_local)
-              end if
-
-              if (j < mesh%ny_local) then
-                val = val + ns%schur_aN(i, j) * rp_2d(i, j + 1)
-              else if (cfg%bc_top%btype == BC_PERIODIC) then
-                val = val + ns%schur_aN(i, j) * rp_2d(i, 1)
-              end if
-
-              rp_2d(i, j) = val / ns%schur_aP(i, j)
+          call ssor_solve_p(ns, mesh, nx, ny, zp_2d, rp_2d, 2, 1.0_dp, need_sync)
+          do j = 1, ny
+            do i = 1, nx
+              dst(nu + nv + (j - 1) * nx + i) = rp_2d(i, j)
             end do
           end do
-        end do
-
-        ! Élimination du mode constant pour stabilité monolithique
-        if (.not. cfg%compressible) then
-          mean_rp = sum(rp_2d) / real(mesh%nx_local * mesh%ny_local, dp)
-          rp_2d = rp_2d - mean_rp
+          deallocate(rp_2d, zp_2d)
         end if
+        deallocate(rhs_u, rhs_v, ru_2d, rv_2d)
+
+      else if (cfg%solver_type == SOLVER_MONOLITHIC) then
+        allocate(rp_2d(0:nx+1, 0:ny+1), zp_2d(nx, ny))
+        do j = 1, ny
+          do i = 1, nx
+            zp_2d(i, j) = src(nu + nv + (j - 1) * nx + i)
+          end do
+        end do
+
+        ! 1. Résolution parallèle MPI du complément de Schur S * r_p = z_p (12 balayages SSOR)
+        w_schur = 1.25_dp
+        call ssor_solve_p(ns, mesh, nx, ny, zp_2d, rp_2d, 12, w_schur, need_sync)
+
+        ! Élimination GLOBALE du mode constant de pression + sync halos pour G * r_p
+        if (.not. cfg%compressible) then
+          sum_loc = sum(rp_2d(1:nx, 1:ny))
+          mean_rp = global_sum(mesh, sum_loc) / real(mesh%nx_global * mesh%ny_global, dp)
+          rp_2d(1:nx, 1:ny) = rp_2d(1:nx, 1:ny) - mean_rp
+        end if
+        if (need_sync) call sync_cell_scalar(mesh, rp_2d)
 
         ! 2. Second membre pour vitesse u : rhs_u = zu - G_u * rp
-        allocate(rhs_u(nu), ru(nu))
-        rhs_u = 0.0_dp
-        do j = 1, mesh%ny_local
+        allocate(rhs_u(nu), ru_2d(0:nx+1, 0:ny+1))
+        do j = 1, ny
           do i = 1, u_nx
             dof = (j - 1) * u_nx + i
             is_wall = (i == 1 .and. mesh%is_boundary_left) .or. &
@@ -268,71 +208,25 @@ contains
             if (is_wall) then
               rhs_u(dof) = src(dof)
             else
-              if (i > 1) then
-                grad_p = (rp_2d(i, j) - rp_2d(i - 1, j)) * mesh%dy
-              else if (cfg%bc_left%btype == BC_PERIODIC) then
-                grad_p = (rp_2d(1, j) - rp_2d(mesh%nx_local, j)) * mesh%dy
-              else
-                grad_p = 0.0_dp
-              end if
+              grad_p = (rp_2d(i, j) - rp_2d(i - 1, j)) * mesh%dy
               rhs_u(dof) = src(dof) - grad_p
             end if
           end do
         end do
 
-        ! 4 balayages de Gauss-Seidel symétrique sur Fu * ru = rhs_u
-        ru = 0.0_dp
-        do sweep = 1, 4
-          ! Forward
-          do j = 1, mesh%ny_local
-            do i = 1, u_nx
-              dof = (j - 1) * u_nx + i
-              val = rhs_u(dof)
-              if (i > 1) then
-                val = val + ns%u_aW(dof) * ru(dof - 1)
-              else if (cfg%bc_left%btype == BC_PERIODIC) then
-                val = val + ns%u_aW(dof) * ru((j - 1) * u_nx + u_nx)
-              end if
-              if (i < u_nx) then
-                val = val + ns%u_aE(dof) * ru(dof + 1)
-              else if (cfg%bc_right%btype == BC_PERIODIC) then
-                val = val + ns%u_aE(dof) * ru((j - 1) * u_nx + 1)
-              end if
-              if (j > 1) val = val + ns%u_aS(dof) * ru(dof - u_nx)
-              if (j < mesh%ny_local) val = val + ns%u_aN(dof) * ru(dof + u_nx)
-              ru(dof) = val / ns%u_aP(dof)
-            end do
-          end do
-          ! Backward
-          do j = mesh%ny_local, 1, -1
-            do i = u_nx, 1, -1
-              dof = (j - 1) * u_nx + i
-              val = rhs_u(dof)
-              if (i > 1) then
-                val = val + ns%u_aW(dof) * ru(dof - 1)
-              else if (cfg%bc_left%btype == BC_PERIODIC) then
-                val = val + ns%u_aW(dof) * ru((j - 1) * u_nx + u_nx)
-              end if
-              if (i < u_nx) then
-                val = val + ns%u_aE(dof) * ru(dof + 1)
-              else if (cfg%bc_right%btype == BC_PERIODIC) then
-                val = val + ns%u_aE(dof) * ru((j - 1) * u_nx + 1)
-              end if
-              if (j > 1) val = val + ns%u_aS(dof) * ru(dof - u_nx)
-              if (j < mesh%ny_local) val = val + ns%u_aN(dof) * ru(dof + u_nx)
-              ru(dof) = val / ns%u_aP(dof)
-            end do
+        call ssor_solve_u(ns, mesh, u_nx, ny, rhs_u, ru_2d, 4, 1.0_dp, need_sync)
+        do j = 1, ny
+          do i = 1, u_nx
+            dst((j - 1) * u_nx + i) = ru_2d(i, j)
           end do
         end do
-        dst(1:nu) = ru(1:nu)
-        deallocate(rhs_u, ru)
+        deallocate(rhs_u, ru_2d)
 
         ! 3. Second membre pour vitesse v : rhs_v = zv - G_v * rp
-        allocate(rhs_v(nv), rv(nv))
-        rhs_v = 0.0_dp
+        allocate(rhs_v(nv), rv_2d(0:nx+1, 0:ny+1))
         do j = 1, v_ny
-          do i = 1, mesh%nx_local
-            dof = (j - 1) * mesh%nx_local + i
+          do i = 1, nx
+            dof = (j - 1) * nx + i
             is_wall = (j == 1 .and. mesh%is_boundary_bottom .and. &
                        (cfg%bc_bottom%btype == BC_DIRICHLET .or. cfg%bc_bottom%btype == BC_FREESLIP)) .or. &
                       (j == v_ny .and. mesh%is_boundary_top .and. &
@@ -341,107 +235,46 @@ contains
             if (is_wall) then
               rhs_v(dof) = src(nu + dof)
             else
-              if (j > 1) then
-                grad_p = (rp_2d(i, j) - rp_2d(i, j - 1)) * mesh%dx
-              else if (cfg%bc_bottom%btype == BC_PERIODIC) then
-                grad_p = (rp_2d(i, 1) - rp_2d(i, mesh%ny_local)) * mesh%dx
-              else
-                grad_p = 0.0_dp
-              end if
+              grad_p = (rp_2d(i, j) - rp_2d(i, j - 1)) * mesh%dx
               rhs_v(dof) = src(nu + dof) - grad_p
             end if
           end do
         end do
 
-        ! 4 balayages de Gauss-Seidel symétrique sur Fv * rv = rhs_v
-        rv = 0.0_dp
-        do sweep = 1, 4
-          ! Forward
-          do j = 1, v_ny
-            do i = 1, mesh%nx_local
-              dof = (j - 1) * mesh%nx_local + i
-              val = rhs_v(dof)
-              if (i > 1) then
-                val = val + ns%v_aW(dof) * rv(dof - 1)
-              else if (cfg%bc_left%btype == BC_PERIODIC) then
-                val = val + ns%v_aW(dof) * rv((j - 1) * mesh%nx_local + mesh%nx_local)
-              end if
-              if (i < mesh%nx_local) then
-                val = val + ns%v_aE(dof) * rv(dof + 1)
-              else if (cfg%bc_right%btype == BC_PERIODIC) then
-                val = val + ns%v_aE(dof) * rv((j - 1) * mesh%nx_local + 1)
-              end if
-              if (j > 1) then
-                val = val + ns%v_aS(dof) * rv(dof - mesh%nx_local)
-              else if (cfg%bc_bottom%btype == BC_PERIODIC) then
-                val = val + ns%v_aS(dof) * rv((v_ny - 1) * mesh%nx_local + i)
-              end if
-              if (j < v_ny) then
-                val = val + ns%v_aN(dof) * rv(dof + mesh%nx_local)
-              else if (cfg%bc_top%btype == BC_PERIODIC) then
-                val = val + ns%v_aN(dof) * rv(i)
-              end if
-              rv(dof) = val / ns%v_aP(dof)
-            end do
-          end do
-          ! Backward
-          do j = v_ny, 1, -1
-            do i = mesh%nx_local, 1, -1
-              dof = (j - 1) * mesh%nx_local + i
-              val = rhs_v(dof)
-              if (i > 1) then
-                val = val + ns%v_aW(dof) * rv(dof - 1)
-              else if (cfg%bc_left%btype == BC_PERIODIC) then
-                val = val + ns%v_aW(dof) * rv((j - 1) * mesh%nx_local + mesh%nx_local)
-              end if
-              if (i < mesh%nx_local) then
-                val = val + ns%v_aE(dof) * rv(dof + 1)
-              else if (cfg%bc_right%btype == BC_PERIODIC) then
-                val = val + ns%v_aE(dof) * rv((j - 1) * mesh%nx_local + 1)
-              end if
-              if (j > 1) then
-                val = val + ns%v_aS(dof) * rv(dof - mesh%nx_local)
-              else if (cfg%bc_bottom%btype == BC_PERIODIC) then
-                val = val + ns%v_aS(dof) * rv((v_ny - 1) * mesh%nx_local + i)
-              end if
-              if (j < v_ny) then
-                val = val + ns%v_aN(dof) * rv(dof + mesh%nx_local)
-              else if (cfg%bc_top%btype == BC_PERIODIC) then
-                val = val + ns%v_aN(dof) * rv(i)
-              end if
-              rv(dof) = val / ns%v_aP(dof)
-            end do
+        call ssor_solve_v(ns, mesh, nx, v_ny, rhs_v, rv_2d, 4, 1.0_dp, need_sync)
+        do j = 1, v_ny
+          do i = 1, nx
+            dst(nu + (j - 1) * nx + i) = rv_2d(i, j)
           end do
         end do
-        dst(nu + 1 : nu + nv) = rv(1:nv)
-        deallocate(rhs_v, rv)
+        deallocate(rhs_v, rv_2d)
 
         ! 4. Pression
-        do j = 1, mesh%ny_local
-          do i = 1, mesh%nx_local
-            dof = nu + nv + (j - 1) * mesh%nx_local + i
-            dst(dof) = rp_2d(i, j)
+        do j = 1, ny
+          do i = 1, nx
+            dst(nu + nv + (j - 1) * nx + i) = rp_2d(i, j)
           end do
         end do
-
         deallocate(rp_2d, zp_2d)
 
       else
-        ! Mode Lagrangien augmenté (C-AAL + BT-SBP) : préconditionnement diagonal enrichi (visqueux + AL + Brinkman + Newton)
-        do i = 1, nu
-          if (allocated(ns%diag_u) .and. abs(ns%diag_u(i)) > 1.0e-15_dp) then
-            dst(i) = src(i) / ns%diag_u(i)
-          else
-            dst(i) = src(i)
-          end if
+        ! Mode Lagrangien augmenté : lissage parallèle sur Fu et Fv
+        allocate(rhs_u(nu), rhs_v(nv), ru_2d(0:nx+1, 0:ny+1), rv_2d(0:nx+1, 0:ny+1))
+        rhs_u(1:nu) = src(1:nu)
+        rhs_v(1:nv) = src(nu + 1 : nu + nv)
+        call ssor_solve_u(ns, mesh, u_nx, ny, rhs_u, ru_2d, 2, 1.0_dp, need_sync)
+        call ssor_solve_v(ns, mesh, nx, v_ny, rhs_v, rv_2d, 2, 1.0_dp, need_sync)
+        do j = 1, ny
+          do i = 1, u_nx
+            dst((j - 1) * u_nx + i) = ru_2d(i, j)
+          end do
         end do
-        do i = 1, nv
-          if (allocated(ns%diag_v) .and. abs(ns%diag_v(i)) > 1.0e-15_dp) then
-            dst(nu + i) = src(nu + i) / ns%diag_v(i)
-          else
-            dst(nu + i) = src(nu + i)
-          end if
+        do j = 1, v_ny
+          do i = 1, nx
+            dst(nu + (j - 1) * nx + i) = rv_2d(i, j)
+          end do
         end do
+        deallocate(rhs_u, rhs_v, ru_2d, rv_2d)
       end if
 
     case (PRECOND_ILU0)
@@ -1217,7 +1050,7 @@ contains
     integer :: n, i, iter
     real(dp) :: beta1, alpha, beta, beta_next, delta, gamma, c_next, s_next
     real(dp) :: c, s, c_old, s_old, phi
-    real(dp), allocatable :: r(:), b_hat(:)
+    real(dp), allocatable :: r(:), b_hat(:), x_best(:)
     real(dp), allocatable :: v_old(:), v(:), v_next(:)
     real(dp), allocatable :: w_oold(:), w_old(:), w(:)
 
@@ -1225,9 +1058,10 @@ contains
     iters = 0
     if (n <= 0) return
 
-    allocate(r(n), b_hat(n))
+    allocate(r(n), b_hat(n), x_best(n))
     allocate(v_old(n), v(n), v_next(n))
     allocate(w_oold(n), w_old(n), w(n))
+    x_best = x
 
     ! Calcul du résidu préconditionné initial : r = P^{-1} b - P^{-1} A x
     call apply_PA(ns, mesh, cfg, fields_old, dt, x, r)
@@ -1239,7 +1073,7 @@ contains
     beta1 = global_norm2(mesh, r, n)
     if (beta1 < 1.0e-12_dp) then
       iters = 0
-      deallocate(r, b_hat, v_old, v, v_next, w_oold, w_old, w)
+      deallocate(r, b_hat, x_best, v_old, v, v_next, w_oold, w_old, w)
       return
     end if
 
@@ -1269,26 +1103,52 @@ contains
 
       delta = c * alpha - s * c_old * beta
       gamma = sqrt(delta * delta + beta_next * beta_next)
-      c_next = delta / (gamma + 1.0e-30_dp)
-      s_next = beta_next / (gamma + 1.0e-30_dp)
+      if (ieee_is_nan(gamma) .or. .not. ieee_is_finite(gamma) .or. gamma < 1.0e-300_dp) then
+        if (mesh%rank == 0) then
+          write(*, '(A,I0,A)') " [ERREUR MINRES] Rupture/instabilite a l'iteration ", iter, &
+                               " (operateur/preconditionneur non symetrique)."
+        end if
+        x = x_best
+        iters = iter
+        deallocate(r, b_hat, x_best, v_old, v, v_next, w_oold, w_old, w)
+        return
+      end if
+      c_next = delta / gamma
+      s_next = beta_next / gamma
 
       do i = 1, n
-        w(i) = (v(i) - (c * s_old * beta) * w_oold(i) - (s * alpha + c * c_old * beta) * w_old(i)) / (gamma + 1.0e-30_dp)
+        w(i) = (v(i) - (c * s_old * beta) * w_oold(i) - (s * alpha + c * c_old * beta) * w_old(i)) / gamma
         x(i) = x(i) + (c_next * phi) * w(i)
       end do
 
       phi = -s_next * phi
+      if (ieee_is_nan(phi) .or. .not. ieee_is_finite(phi) .or. abs(phi) > 1.0e50_dp * (beta1 + 1.0_dp)) then
+        if (mesh%rank == 0) then
+          write(*, '(A,I0,A)') " [ERREUR MINRES] Divergence/NaN detectee a l'iteration ", iter, &
+                               " (restauration du dernier itere borne)."
+        end if
+        x = x_best
+        iters = iter
+        deallocate(r, b_hat, x_best, v_old, v, v_next, w_oold, w_old, w)
+        return
+      end if
+      x_best = x
       if (abs(phi) / beta1 < cfg%tol .or. abs(phi) < 1.0e-13_dp) then
         iters = iter
-        deallocate(r, b_hat, v_old, v, v_next, w_oold, w_old, w)
+        deallocate(r, b_hat, x_best, v_old, v, v_next, w_oold, w_old, w)
         return
       end if
 
       w_oold = w_old
       w_old = w
       v_old = v
+      if (beta_next < 1.0e-300_dp) then
+        iters = iter
+        deallocate(r, b_hat, x_best, v_old, v, v_next, w_oold, w_old, w)
+        return
+      end if
       do i = 1, n
-        v(i) = v_next(i) / (beta_next + 1.0e-30_dp)
+        v(i) = v_next(i) / beta_next
       end do
       beta = beta_next
       c_old = c
@@ -1298,7 +1158,7 @@ contains
     end do
 
     iters = cfg%max_iter
-    deallocate(r, b_hat, v_old, v, v_next, w_oold, w_old, w)
+    deallocate(r, b_hat, x_best, v_old, v, v_next, w_oold, w_old, w)
   end subroutine solve_minres
 
   !-----------------------------------------------------------------------------
@@ -1411,5 +1271,135 @@ contains
        print *, "ERREUR DGETRS: info =", info
     end if
   end subroutine solve_direct
+
+  !-----------------------------------------------------------------------------
+  ! Helpers privés SSOR parallèles MPI pour Schur, Fu et Fv
+  !-----------------------------------------------------------------------------
+  subroutine ssor_solve_p(ns, mesh, nx, ny, zp_2d, rp_2d, n_sweeps, omega, need_sync)
+    type(navier_stokes_t), intent(in) :: ns
+    type(mesh_2d_t), intent(in)       :: mesh
+    integer, intent(in)               :: nx, ny, n_sweeps
+    real(dp), intent(in)              :: zp_2d(nx, ny), omega
+    real(dp), intent(out)             :: rp_2d(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    logical, intent(in)               :: need_sync
+    integer  :: sweep, i, j
+    real(dp) :: val, d
+
+    rp_2d = 0.0_dp
+    do sweep = 1, n_sweeps
+      if (need_sync .and. sweep > 1) call sync_cell_scalar(mesh, rp_2d)
+      do j = 1, ny
+        do i = 1, nx
+          d = ns%schur_aP(i, j)
+          if (abs(d) < 1.0e-30_dp) d = 1.0_dp
+          val = zp_2d(i, j)
+          if (ns%schur_aW(i, j) /= 0.0_dp) val = val + ns%schur_aW(i, j) * rp_2d(i - 1, j)
+          if (ns%schur_aE(i, j) /= 0.0_dp) val = val + ns%schur_aE(i, j) * rp_2d(i + 1, j)
+          if (ns%schur_aS(i, j) /= 0.0_dp) val = val + ns%schur_aS(i, j) * rp_2d(i, j - 1)
+          if (ns%schur_aN(i, j) /= 0.0_dp) val = val + ns%schur_aN(i, j) * rp_2d(i, j + 1)
+          rp_2d(i, j) = (1.0_dp - omega) * rp_2d(i, j) + omega * (val / d)
+        end do
+      end do
+      if (need_sync) call sync_cell_scalar(mesh, rp_2d)
+      do j = ny, 1, -1
+        do i = nx, 1, -1
+          d = ns%schur_aP(i, j)
+          if (abs(d) < 1.0e-30_dp) d = 1.0_dp
+          val = zp_2d(i, j)
+          if (ns%schur_aW(i, j) /= 0.0_dp) val = val + ns%schur_aW(i, j) * rp_2d(i - 1, j)
+          if (ns%schur_aE(i, j) /= 0.0_dp) val = val + ns%schur_aE(i, j) * rp_2d(i + 1, j)
+          if (ns%schur_aS(i, j) /= 0.0_dp) val = val + ns%schur_aS(i, j) * rp_2d(i, j - 1)
+          if (ns%schur_aN(i, j) /= 0.0_dp) val = val + ns%schur_aN(i, j) * rp_2d(i, j + 1)
+          rp_2d(i, j) = (1.0_dp - omega) * rp_2d(i, j) + omega * (val / d)
+        end do
+      end do
+    end do
+  end subroutine ssor_solve_p
+
+  subroutine ssor_solve_u(ns, mesh, u_nx, ny, rhs_u, ru_2d, n_sweeps, omega, need_sync)
+    type(navier_stokes_t), intent(in) :: ns
+    type(mesh_2d_t), intent(in)       :: mesh
+    integer, intent(in)               :: u_nx, ny, n_sweeps
+    real(dp), intent(in)              :: rhs_u(:), omega
+    real(dp), intent(out)             :: ru_2d(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    logical, intent(in)               :: need_sync
+    integer  :: sweep, i, j, dof
+    real(dp) :: val, d
+
+    ru_2d = 0.0_dp
+    do sweep = 1, n_sweeps
+      if (need_sync .and. sweep > 1) call sync_u(mesh, ru_2d)
+      do j = 1, ny
+        do i = 1, u_nx
+          dof = (j - 1) * u_nx + i
+          d = ns%u_aP(dof)
+          if (abs(d) < 1.0e-30_dp) d = 1.0_dp
+          val = rhs_u(dof)
+          if (ns%u_aW(dof) /= 0.0_dp) val = val + ns%u_aW(dof) * ru_2d(i - 1, j)
+          if (ns%u_aE(dof) /= 0.0_dp) val = val + ns%u_aE(dof) * ru_2d(i + 1, j)
+          if (ns%u_aS(dof) /= 0.0_dp) val = val + ns%u_aS(dof) * ru_2d(i, j - 1)
+          if (ns%u_aN(dof) /= 0.0_dp) val = val + ns%u_aN(dof) * ru_2d(i, j + 1)
+          ru_2d(i, j) = (1.0_dp - omega) * ru_2d(i, j) + omega * (val / d)
+        end do
+      end do
+      if (need_sync) call sync_u(mesh, ru_2d)
+      do j = ny, 1, -1
+        do i = u_nx, 1, -1
+          dof = (j - 1) * u_nx + i
+          d = ns%u_aP(dof)
+          if (abs(d) < 1.0e-30_dp) d = 1.0_dp
+          val = rhs_u(dof)
+          if (ns%u_aW(dof) /= 0.0_dp) val = val + ns%u_aW(dof) * ru_2d(i - 1, j)
+          if (ns%u_aE(dof) /= 0.0_dp) val = val + ns%u_aE(dof) * ru_2d(i + 1, j)
+          if (ns%u_aS(dof) /= 0.0_dp) val = val + ns%u_aS(dof) * ru_2d(i, j - 1)
+          if (ns%u_aN(dof) /= 0.0_dp) val = val + ns%u_aN(dof) * ru_2d(i, j + 1)
+          ru_2d(i, j) = (1.0_dp - omega) * ru_2d(i, j) + omega * (val / d)
+        end do
+      end do
+    end do
+  end subroutine ssor_solve_u
+
+  subroutine ssor_solve_v(ns, mesh, nx, v_ny, rhs_v, rv_2d, n_sweeps, omega, need_sync)
+    type(navier_stokes_t), intent(in) :: ns
+    type(mesh_2d_t), intent(in)       :: mesh
+    integer, intent(in)               :: nx, v_ny, n_sweeps
+    real(dp), intent(in)              :: rhs_v(:), omega
+    real(dp), intent(out)             :: rv_2d(0:mesh%nx_local+1, 0:mesh%ny_local+1)
+    logical, intent(in)               :: need_sync
+    integer  :: sweep, i, j, dof
+    real(dp) :: val, d
+
+    rv_2d = 0.0_dp
+    do sweep = 1, n_sweeps
+      if (need_sync .and. sweep > 1) call sync_v(mesh, rv_2d)
+      do j = 1, v_ny
+        do i = 1, nx
+          dof = (j - 1) * nx + i
+          d = ns%v_aP(dof)
+          if (abs(d) < 1.0e-30_dp) d = 1.0_dp
+          val = rhs_v(dof)
+          if (ns%v_aW(dof) /= 0.0_dp) val = val + ns%v_aW(dof) * rv_2d(i - 1, j)
+          if (ns%v_aE(dof) /= 0.0_dp) val = val + ns%v_aE(dof) * rv_2d(i + 1, j)
+          if (ns%v_aS(dof) /= 0.0_dp) val = val + ns%v_aS(dof) * rv_2d(i, j - 1)
+          if (ns%v_aN(dof) /= 0.0_dp) val = val + ns%v_aN(dof) * rv_2d(i, j + 1)
+          rv_2d(i, j) = (1.0_dp - omega) * rv_2d(i, j) + omega * (val / d)
+        end do
+      end do
+      if (need_sync) call sync_v(mesh, rv_2d)
+      do j = v_ny, 1, -1
+        do i = nx, 1, -1
+          dof = (j - 1) * nx + i
+          d = ns%v_aP(dof)
+          if (abs(d) < 1.0e-30_dp) d = 1.0_dp
+          val = rhs_v(dof)
+          if (ns%v_aW(dof) /= 0.0_dp) val = val + ns%v_aW(dof) * rv_2d(i - 1, j)
+          if (ns%v_aE(dof) /= 0.0_dp) val = val + ns%v_aE(dof) * rv_2d(i + 1, j)
+          if (ns%v_aS(dof) /= 0.0_dp) val = val + ns%v_aS(dof) * rv_2d(i, j - 1)
+          if (ns%v_aN(dof) /= 0.0_dp) val = val + ns%v_aN(dof) * rv_2d(i, j + 1)
+          rv_2d(i, j) = (1.0_dp - omega) * rv_2d(i, j) + omega * (val / d)
+        end do
+      end do
+    end do
+  end subroutine ssor_solve_v
 
 end module module_linear_solvers
