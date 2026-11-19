@@ -1,5 +1,7 @@
 # Tutoriel 6 : Goutte Statique en Équilibre Capillaire et Loi de Young-Laplace
 
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_6_laplace_droplet/` *(validation rapide `Run_Valide-CASES`, cas 6)*.
+
 Ce tutoriel constitue le banc d'essai de référence de l'hydrostatique diphasique capillaire. Il valide le modèle de force superficielle continue CSF (*Continuum Surface Force*) à équilibre de forces (*Balanced-Force*), les lissages d'interface (diffusif et SVOF de Helmholtz), ainsi que l'option hybride par marqueurs lagrangiens CVI pour la maîtrise des courants parasites autour d'une goutte circulaire à l'équilibre.
 
 ---
@@ -156,8 +158,8 @@ mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_
    Vérifier la décroissance de $E_{\mathrm{rel}}(\Delta P)$ avec le raffinement du maillage ($N = 32 \to 256$).
 2. **Maîtrise des courants parasites et conservation du volume :**
    Calculer à $t_{\mathrm{final}}$ le nombre capillaire parasite $\mathrm{Ca}_{\mathrm{parasite}} = \mu \|\mathbf{u}\|_\infty / \sigma$ ainsi que la variation de volume $|\sum C_{i,j}(t_{\mathrm{final}}) - \sum C_{i,j}(0)| / \sum C_{i,j}(0)$ directement à partir de `PhaseIndicator` dans les `.vtr`. Comparer les variantes sans lissage, avec lissage diffusif, avec lissage SVOF et avec marqueurs CVI (`marker_curvature: true`).
-3. **Invariance des solveurs et parité C++17 / Fortran 2018 :**
-   Vérifier l'absence de dérive de pression moyenne (projection à moyenne nulle dans `BlockTriangularPreconditioner`) et comparer $\Delta P_{\mathrm{num}}$ ainsi que $\|\mathbf{u}\|_\infty$ entre `covof2d_cpp` et `covof2d_fortran`.
+3. **Invariance des solveurs, préconditionnement MPI et parité C++17 / Fortran 2018 :**
+   Vérifier l'absence de dérive de pression moyenne (projection globale à moyenne nulle dans `BlockTriangularPreconditioner` en MPI pur) et comparer $\Delta P_{\mathrm{num}}$ ainsi que $\|\mathbf{u}\|_\infty$ entre `covof2d_cpp` et `covof2d_fortran` *(note : utiliser `BICGSTAB2` ou `GMRES` avec `BLOCK_TRIANGULAR`, et réserver `MINRES` aux formulations strictement symétriques)*.
 
 ### 6.2 Fichiers Réellement Générés dans `output_dir`
 - `<case_name>_history.csv` : `step,time,dt,center_of_mass_y,rise_velocity,bubble_volume,kinetic_energy,max_u,max_div` (`9` colonnes C++ / `11` colonnes Fortran avec `avg_rho_gas,avg_p_gas`).

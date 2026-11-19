@@ -254,10 +254,10 @@ Après compilation des deux branches dans `/Users/elhadjiibrahimathiam/Documents
 
 2. **Test de vérification analytique rapide (Laplacien 2D en séquentiel et MPI) :**
    ```bash
-   ./COVOF_2D-C++/bin/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/cas_1_laplacian_32x32.json
-   mpirun -np 4 ./COVOF_2D-FORTRAN/bin/covof2d_fortran VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/cas_1_laplacian_32x32.json
+   ./COVOF_2D-C++/bin/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/case/cpp/cas_1_g32_bicgstab2.json
+   mpirun -np 4 ./COVOF_2D-FORTRAN/bin/covof2d_fortran VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/case/fortran/cas_1_g32_bicgstab2.json
    ```
-   *(Adapter le nom du fichier `.json` présent dans le dossier du cas de validation selon la grille souhaitée).*
+   *(Adapter le nom du fichier `.json` présent dans `case/{cpp,fortran}/` du cas de validation selon la grille souhaitée, ou lancer `bash VALIDATION_TOTALE/Run_Valide-CASES/run_all_validations.sh 1`).*
 
 3. **Suite de vérification automatique FC-WY-CVI-Marker (C++ & Fortran, `np=1` et `np=4`) :**
    ```bash

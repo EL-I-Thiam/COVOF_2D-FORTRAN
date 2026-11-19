@@ -1,4 +1,6 @@
-# Tutoriel 11 : Compression Isotrope d'une Bulle d'Air en Cavité Carrée
+# Tutoriel 21 : Compression Isotrope d'une Bulle d'Air en Cavité Carrée
+
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_CASES/validation_cas_9_compression_bulle/` *(campagne avancée `Run_CASES`)*.
 
 Ce tutoriel évalue la capacité de l'algorithme bas-Mach compressible (`C-AAL` / `MONOLITHIC` compressible) à traiter la compression multidimensionnelle d'une bulle de gaz immergée sous injection symétrique sur les quatre parois. L'évolution temporelle du rayon équivalent de la bulle, de sa masse volumique et de la pression est confrontée à la solution analytique exacte déduite du bilan de masse global.
 
@@ -158,7 +160,7 @@ mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_
 
 ```python
 #!/usr/bin/env python3
-"""Vérification dynamique du Tutoriel 11 (Compression isotrope de bulle)."""
+"""Vérification dynamique du Tutoriel 21 (Compression isotrope de bulle)."""
 import math
 import xml.etree.ElementTree as ET
 from pathlib import Path

@@ -1,4 +1,6 @@
-# Tutoriel 10 : Compression d'Air par Injection d'Eau (Piston Compressible Bas Mach)
+# Tutoriel 20 : Compression d'Air par Injection d'Eau (Piston Compressible Bas Mach)
+
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_CASES/validation_cas_8_piston_compressible/` *(campagne avancée `Run_CASES`)*.
 
 Ce tutoriel valide la formulation compressible à bas nombre de Mach (Lagrangien Augmenté Compressible `C-AAL` / `MONOLITHIC` compressible) sur un cas d'injection d'un liquide quasi-incompressible comprimant une poche de gaz dans une enceinte étanche. La montée en pression et en masse volumique est confrontée à la loi analytique exacte issue de la conservation de la masse.
 
@@ -162,7 +164,7 @@ mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_
 
 ```python
 #!/usr/bin/env python3
-"""Vérification dynamique du Tutoriel 10 (Piston compressible) sur fichiers .pvtr."""
+"""Vérification dynamique du Tutoriel 20 (Piston compressible) sur fichiers .pvtr."""
 import xml.etree.ElementTree as ET
 from pathlib import Path
 

@@ -97,8 +97,8 @@ Le tableau ci-dessous recense l'ensemble des modèles, discrétisations, solveur
 | **Convection & Temps** | Schémas convectifs | `UPWIND`, `CENTERED`, `TVD_SUPERBEE` | Discrétisation spatiale des flux de quantité de mouvement |
 | | Linéarisation convective | `PICARD`, `ADAMS_BASHFORTH` (`AB2`), `NEWTON` | Traitement du terme $(\mathbf{u}\cdot\nabla)\mathbf{u}$ dans le système implicite |
 | | Schémas temporels | `EULER`, `GEAR` / `BDF2` + `enable_ssp_rk3_momentum` | Euler implicite (ordre 1), BDF2/Gear (ordre 2, $\alpha_{\text{time}}=1.5$), transport inertiel SSP-RK3 |
-| **Solveurs & Préconditionneurs** | Solveurs linéaires | `BICGSTAB2`, `BICGSTAB`, `CG`, `GMRES`, `MINRES`, `DIRECT` | Implémentations Krylov *matrix-free* + LU directe LAPACK `dgetrf`/`dgetrs` (passerelles `MUMPS`/`PETSC`/`HYPRE` en C++) |
-| | Préconditionneurs | `JACOBI`, `SSOR`, `ILU0`, `BLOCK_TRIANGULAR` (`BT_SBP`), `CUSTOM`, `NONE` | Préconditionnement diagonal enrichi, SSOR, ILU(0) et bloc triangulaire à complément de Schur |
+| **Solveurs & Préconditionneurs** | Solveurs linéaires | `BICGSTAB2`, `BICGSTAB`, `CG`, `GMRES`, `MINRES`, `DIRECT` | Implémentations Krylov *matrix-free* MPI (`MINRES` pour systèmes symétriques, `BICGSTAB2`/`GMRES` pour systèmes convectifs ou bloc-triangulaires) + LU directe LAPACK `dgetrf`/`dgetrs` (passerelles `MUMPS`/`PETSC`/`HYPRE` en C++) |
+| | Préconditionneurs | `JACOBI`, `SSOR`, `ILU0`, `BLOCK_TRIANGULAR` (`BT_SBP`), `CUSTOM`, `NONE` | Préconditionnement diagonal enrichi, SSOR, ILU(0) et bloc triangulaire à complément de Schur CSR 100 % parallèle MPI |
 
 ---
 
@@ -152,8 +152,8 @@ L'exploitation de COVOF 2D suit un flux de travail unifié, identique pour les e
 - `COVOF_2D-C++/` : Code source C++17 (`include/covof/` : 15 fichiers `.hpp` ; `src/` : 13 fichiers `.cpp`), `CMakeLists.txt`, et binaires compilés dans `bin/` (`covof2d_cpp` et lien `covof2d`).
 - `COVOF_2D-FORTRAN/` : Code source Fortran 2018 (`src/` : 16 fichiers `.f90`), `CMakeLists.txt`, et binaire compilé dans `bin/covof2d_fortran`.
 - `VALIDATION_TOTALE/` : Dossier maître de vérification et validation regroupant :
-  - `Run_Valide-CASES/` : 14 cas de validation analytique et canonique pilotés par `run_all_validations.sh` (`validation_cas_1_laplacian` à `validation_cas_14_instabilite_interface_gravitaire`).
-  - `Run_CASES/` : Campagnes avancées (`validation_cas_9_50x100_newton_dual_code`, `validation_cas_10_liquid_sheet`, `validation_cas_14_marche_descendante` à `validation_cas_19_convection_poreux_darcy_brinkman`, `validation_cas_21_ascension_bulle_2d`, `validation_cas_24_viscous_jet_buckling`) ainsi que le sous-dossier `Run_FC-WY-CVI-Marker/` dédié aux 8 campagnes hybrides CVI-Marqueurs et au script `verify_cvi_markers.py`.
-  - `Theoritical_Description/` : Descriptions théoriques des 24 cas de validation et rapport consolidé `Validation_Description.pdf`.
-- `Guides_Tutos/` : Suite documentaire complète (Volumes I, II et III, script `verify_cvi_markers.py` dans `Run_FC-WY-CVI-Marker/`, synthèses théoriques `SYNTHESE_METHODE_FC_WY_CVI_MARQUEURS.pdf` et `FEUILLE_DE_ROUTE_IMPLEMENTATION_COVOF_CVI_MARQUEURS.pdf`).
+  - `Run_Valide-CASES/` : 12 cas de validation rapides pilotés par `run_all_validations.sh` (`validation_cas_1_laplacian` à `validation_cas_7_vortex_shear`, puis `validation_cas_8_cavite_entrainee` à `validation_cas_12_convection_poreux_darcy_brinkman`).
+  - `Run_CASES/` : 9 campagnes avancées ordonnées par complexité croissante (`validation_cas_1_obstacle_fin` à `validation_cas_9_compression_bulle`), incluant la chute libre du cylindre dense et les cas diphasiques/compressibles lourds, ainsi que le sous-dossier `RUN_FC-WY-CVI-Marker/` dédié aux 8 campagnes hybrides CVI-Marqueurs et au script `verify_cvi_markers.py`.
+  - `Theoritical_Description/` : Référentiel théorique consolidé (`Validation_Description.pdf`) et spécifications des cas de `Run_Valide-CASES/`, `Run_CASES/` et `RUN_FC-WY-CVI-Marker/`.
+- `Guides_Tutos/` : Suite documentaire complète (Volumes I, II et III, miroir `Run_FC-WY-CVI-Marker/` et `verify_cvi_markers.py`, synthèses théoriques `SYNTHESE_METHODE_FC_WY_CVI_MARQUEURS.pdf` et `FEUILLE_DE_ROUTE_IMPLEMENTATION_COVOF_CVI_MARQUEURS.pdf`).
 - `output/` : Répertoire de sortie par défaut généré lors des simulations si `output.output_dir` vaut `"output"`.

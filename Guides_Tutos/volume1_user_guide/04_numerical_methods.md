@@ -50,6 +50,8 @@ Le traitement du terme non linéaire $(\mathbf{u} \cdot \nabla)\mathbf{u}$ est c
 
 ### Schémas Spatiaux (`convective_scheme`)
 
+Chaque schéma ci-dessous est effectivement câblé dans l'opérateur complet *matrix-free* (`apply_system_matrix` en C++, `ns_apply_system_matrix` en Fortran) ; parallèlement, les blocs de préconditionnement `Fuu`/`Fvv` assemblent des diagonales dominantes de type M-matrice décentrée amont pour garantir la robustesse de Gauss-Seidel/SSOR :
+
 1. **Décentré Amont d'Ordre 1 (`"UPWIND"`) :**
    Inconditionnellement stable et monotone même à grand nombre de Reynolds de maille $Re_\Delta > 2$, au prix d'une diffusion numérique $\mathcal{O}(\Delta x)$.
 2. **Centré d'Ordre 2 (`"CENTERED"`) :**
@@ -191,8 +193,8 @@ COVOF 2D implémente une architecture **Matrix-Free** (l'opérateur complet $A \
 | `"BICGSTAB"` | BiCGSTAB standard (van der Vorst 1992) | Systèmes asymétriques modérément raides |
 | `"CG"` / `"CONJUGATE_GRADIENT"` | Gradient Conjugué Préconditionné | Opérateurs symétriques définis positifs (Stokes pur, Poisson, diffusion) |
 | `"GMRES"` | GMRES(30) redémarré (Arnoldi + Givens) | Systèmes fortement non normaux |
-| `"MINRES"` | Minimal Residual (Paige & Saunders 1975) | Systèmes point-selle symétriques indéfinis |
-| `"DIRECT"` / `"MUMPS"` | Factorisation LU LAPACK (`dgetrf`/`dgetrs`) | Petits maillages de référence ou validation exacte (avec mise en cache si $\Delta t$ constant) |
+| `"MINRES"` | Minimal Residual (Paige & Saunders 1975) | Systèmes point-selle symétriques indéfinis uniquement (Stokes pur ; **déconseillé** avec convection non nulle ou préconditionneur asymétrique `BLOCK_TRIANGULAR`, préférer `BICGSTAB2` ou `GMRES`) |
+| `"DIRECT"` / `"MUMPS"` | Factorisation LU LAPACK (`dgetrf`/`dgetrs`) | Petits maillages de référence ou validation exacte (avec mise en cache si $\Delta t$ constant, sur `mpirun -np 1`) |
 
 *(Remarque : C++ dispose également des passerelles `PetscSolverBridge` (`"PETSC"`) et `HypreSolverBridge` (`"HYPRE"`) qui basculent automatiquement sur `BiCGSTAB2Solver` si PETSc/HYPRE ne sont pas liés).*
 
@@ -200,9 +202,9 @@ COVOF 2D implémente une architecture **Matrix-Free** (l'opérateur complet $A \
 
 | Mot-Clé (et Alias) | Formulation | Recommandation |
 | :--- | :--- | :--- |
-| `"JACOBI"` / `"DIAGONAL"` (défaut) | Inversion de la diagonale locale enrichie (`diag_u`, `diag_v`, `diag_p`) | Optimal et 100 % parallèle pour `AAL` et `C-AAL` |
-| `"BLOCK_TRIANGULAR"` / `"BT_SBP"` / `"SCHUR"` | Factorisation par blocs triangulaires $P = \begin{pmatrix} D_u & G \\ 0 & S \end{pmatrix}$ avec 8 balayages SSOR sur le complément de Schur $S$ et 4 balayages sur $F_u, F_v$ | Indispensable pour le mode `"MONOLITHIC"` |
-| `"SSOR"` / `"GAUSS_SEIDEL"` | Lissage avant/arrière symétrique ($\omega = 1.0$) | Écoulements modérément visqueux |
+| `"JACOBI"` / `"DIAGONAL"` (défaut) | Inversion de la diagonale locale enrichie (`diag_u`, `diag_v`, `diag_p`) | Simple et 100 % parallèle pour `AAL` et `C-AAL` |
+| `"BLOCK_TRIANGULAR"` / `"BT_SBP"` / `"SCHUR"` | Factorisation par blocs triangulaires $P = \begin{pmatrix} F_u & G_x \\ 0 & S \end{pmatrix}$ avec 8 balayages SSOR MPI-parallèles sur le complément de Schur $S$ (CSR `SchurLaplace`, projection globale à moyenne nulle en incompressible) et 4 balayages sur $F_u, F_v$ (CSR `Fuu`, `Fvv`, viscosité harmonique $\mu_{\text{node}}$ et conditions aux limites pariétales physiques) | **Indispensable** et 100 % parallèle MPI pour le mode `"MONOLITHIC"` (et très performant aussi en `"AAL"`/`"AL"`) |
+| `"SSOR"` / `"GAUSS_SEIDEL"` | Lissage avant/arrière symétrique ($\omega = 1.0$) par sous-domaine MPI | Écoulements modérément visqueux |
 | `"ILU0"` / `"ILU"` | Factorisation incomplète ILU(0) locale par sous-domaine | Systèmes raides sur sous-domaines compacts |
 | `"CUSTOM"` | Hook utilisateur (`CustomPreconditioner::set_custom_operator` / `custom_precond_hook`) | Prototypage de nouveaux préconditionneurs |
 | `"NONE"` | Identité ($P = I$) | Diagnostic de conditionnement |

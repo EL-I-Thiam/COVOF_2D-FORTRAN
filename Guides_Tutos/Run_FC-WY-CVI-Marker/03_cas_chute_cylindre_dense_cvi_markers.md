@@ -6,9 +6,9 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 
 ### Interdictions absolues et règles de fidélité
 1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires.
-2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/03_cas_chute_cylindre_dense_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/03_cas_chute_cylindre_dense_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
 3. **ZÉRO TIMEOUT MASQUÉ, ZÉRO COMPARAISON À TEMPS DIFFÉRENTS** : Allouez un budget CPU réaliste (ou privilégiez MPI `np=4` pour les solveurs monolithiques si compatible, sans `STANDARD_PROJECTION` en MPI car son Poisson est séquentiel ; ou adaptez `dt` / `t_final` / grilles en le documentant explicitement dans les paramètres). Si une simulation n'atteint pas $t_{\mathrm{final}}$, il est **strictement interdit** de la comparer avec des simulations ayant atteint un autre temps dans les mêmes tableaux ou figures sans recalage temporel exact au pas commun maximal, et il faut explicitement la marquer `TIMEOUT / INCOMPLET`.
-4. **ZÉRO CONSTANTE CODÉE EN DUR** : Le champ `Iter Krylov` doit être lu **réellement** depuis la colonne 4 des `.log` stdout (jamais de valeur par défaut `12.0` ou `10.5` !). Sauvegardez `stdout`/`stderr` en flux continu dans `<cas>.log` même si un processus expire.
+4. **ZÉRO RÉSULTAT CODÉ EN DUR, ZÉRO CONSTANTE CODÉE EN DUR, FIDÉLITÉ AUX EXÉCUTIONS RÉELLES** : Il est strictement interdit d'écrire une valeur numérique prétendument observée, simulée ou pré-calculée dans les scripts ou le rapport. Le champ `Iter Krylov` doit être lu **réellement** depuis la colonne 4 des `.log` stdout (jamais de valeur par défaut `12.0` ou `10.5` !), et toutes les grandeurs doivent être calculées dynamiquement depuis `.json`, `*_history.csv`, `*.vtr`/`.pvtr` et `*_markers_*.vtk`. Sauvegardez `stdout`/`stderr` en flux continu dans `<cas>.log` même si un processus expire, et rapportez fidèlement tout échec, divergence ou écart C++/Fortran sans omission sélective.
 5. **NE PAS INVENTER D'EFFET DU LISSAGE DIFFUSIF À $\sigma = 0$** : Dans le code, `enable_diffusion_smoothing` (`C_tilde`) n'intervient **que** dans le calcul capillaire CSF quand `enable_surface_tension: true`. Puisque $\sigma = 0$ dans ce cas, seul **`enable_svof_smoothing`** ($C_s$) modifie $\rho(C_s)$ et $\mu(C_s)$. Ne créez donc pas de cas factice `enable_diffusion_smoothing` à $\sigma = 0$ en prétendant tester son effet rhéologique.
 
 ---
@@ -16,7 +16,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 ## 2. Arborescence et Spécification Réelle des Sorties
 
 ```text
-VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/03_cas_chute_cylindre_dense_cvi_markers/
+VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/03_cas_chute_cylindre_dense_cvi_markers/
 ├── case/{cpp,fortran}/
 ├── output/{cpp,fortran}/
 ├── figures/
@@ -80,7 +80,10 @@ Tous les essais utilisent `GEAR`, `ADAMS_BASHFORTH`, `CENTERED`, `WEYMOUTH_YUE`,
     "type": "CYLINDER",
     "center_x": 0.025,
     "center_y": 0.12,
-    "radius": 0.01
+    "radius": 0.01,
+    "axis_a": 0.01,
+    "axis_b": 0.01,
+    "pert_amp": 0.0
   },
   "time": {
     "time_scheme": "GEAR",

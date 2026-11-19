@@ -1,5 +1,7 @@
 # Tutoriel 7 : Advection d'une Tâche Circulaire dans un Tourbillon Cisaillé
 
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_7_vortex_shear/` *(validation rapide `Run_Valide-CASES`, cas 7)*.
+
 Ce tutoriel isole le transport cinématique pur de l'interface fluide VOF sans résolution hydrodynamique (mode `"VORTEX_ADVECTION"`). Une tâche circulaire est soumise à un champ de vitesse cisaillé instationnaire réversible qui l'étire en une fine spirale avant d'inverser le flux à $t = T/2$ pour reformer le disque initial à $t = T$.
 
 ---

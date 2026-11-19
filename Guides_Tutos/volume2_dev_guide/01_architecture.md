@@ -46,7 +46,7 @@ Les deux branches fonctionnent exclusivement en **parallélisme distribué MPI p
 | `Mesh.cpp` | `Mesh.hpp` | Création de la topologie cartésienne `MPI_Cart_create`, calcul de `nx_local`, `ny_local`, `i_offset`, `j_offset` et détection des bords physiques. |
 | `MpiComm.cpp` | `MpiComm.hpp` | Échanges non bloquants en 2 passes (X puis Y) des halos scalaires/MAC, application des CL et `MPI_Allreduce`. |
 | `CSRMatrix.cpp` | `CSRMatrix.hpp` | Construction CSR triée depuis triplets, SpMV local et solveur Jacobi. |
-| `Preconditioner.cpp` | `Preconditioner.hpp` | Mise à jour des diagonales/blocs et application (notamment 8 balayages SSOR sur $S$ + 4 sur $F_u, F_v$ dans `BlockTriangularPreconditioner`). |
+| `Preconditioner.cpp` | `Preconditioner.hpp` | Mise à jour des diagonales/blocs CSR (`Fuu`, `Fvv`, `SchurLaplace`) et application MPI-parallèle (8 balayages SSOR sur $S$ avec projection globale à moyenne nulle + 4 sur $F_u, F_v$ dans `BlockTriangularPreconditioner`). |
 | `LinearSolver.cpp` | `LinearSolver.hpp` | Boucles de Krylov distribuées et factorisation LU directe via `dgetrf_`/`dgetrs_`. |
 | `InterfaceReconstruction.cpp` | `InterfaceReconstruction.hpp` | Algorithme Sutherland-Hodgman + Shoelace, bisection `compute_alpha`, segment clipping et schémas SLIC/PLIC/ELVIRA/LVIRA. |
 | `InterfaceMarkers.cpp` | `InterfaceMarkers.hpp` | CVI Variante B exacte, advection RK2-Heun avec routage MPI 4 passes, migration 2 passes, élagage par sous-octants, régression parabolique $(\tau, \eta)$ avec halo $2.5 h$, export VTK PolyData. |

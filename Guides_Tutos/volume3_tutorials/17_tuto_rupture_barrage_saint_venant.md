@@ -1,4 +1,6 @@
-# Tutoriel 12 : Rupture de Barrage 2D sur Fond Sec (Solution de Saint-Venant)
+# Tutoriel 17 : Rupture de Barrage 2D sur Fond Sec (Solution de Saint-Venant)
+
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_CASES/validation_cas_5_rupture_barrage/` *(campagne avancée `Run_CASES`)*.
 
 Ce tutoriel aborde l'effondrement gravitationnel instantané d'une colonne d'eau sur fond sec (*Dam Break*). La cinématique d'avancée du front d'onde et le profil parabolique de la surface libre sont confrontés à la solution analytique des caractéristiques de Saint-Venant (solution de Ritter).
 
@@ -160,7 +162,7 @@ mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_
 
 ```python
 #!/usr/bin/env python3
-"""Vérification dynamique du Tutoriel 12 (Rupture de barrage / Saint-Venant)."""
+"""Vérification dynamique du Tutoriel 17 (Rupture de barrage / Saint-Venant)."""
 import math
 import xml.etree.ElementTree as ET
 from collections import defaultdict

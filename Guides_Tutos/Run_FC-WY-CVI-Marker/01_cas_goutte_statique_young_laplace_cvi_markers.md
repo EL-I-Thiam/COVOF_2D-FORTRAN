@@ -6,7 +6,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 
 ### Interdictions absolues et règles de fidélité
 1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires. Exécutez exclusivement les exécutables déjà compilés.
-2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Dans `COVOF_2D-FORTRAN`, `cfg%output_dir` est dimensionné à `512` caractères (`case_name <= 128`) et `COVOF_2D-C++` crée récursivement `output_dir` (`std::filesystem::create_directories`). Par bonne pratique et lisibilité, exécutez chaque simulation avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/01_cas_goutte_statique_young_laplace_cvi_markers`, créez au préalable `output/{cpp,fortran}/<cas>` via `os.makedirs(..., exist_ok=True)`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Dans `COVOF_2D-FORTRAN`, `cfg%output_dir` est dimensionné à `512` caractères (`case_name <= 128`) et `COVOF_2D-C++` crée récursivement `output_dir` (`std::filesystem::create_directories`). Par bonne pratique et lisibilité, exécutez chaque simulation avec `cwd = VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/01_cas_goutte_statique_young_laplace_cvi_markers`, créez au préalable `output/{cpp,fortran}/<cas>` via `os.makedirs(..., exist_ok=True)`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
 3. **SPÉCIFICATION EXPLICITE DE LA GÉOMÉTRIE (`axis_a`, `axis_b`, `pert_amp`)** : Spécifiez explicitement **`"axis_a": 0.25, "axis_b": 0.25, "pert_amp": 0.0`** dans `"initial_condition"` de tous les JSON afin de garantir de manière explicite et auto-documentée une goutte strictement circulaire de rayon $R_0 = 0.25\,\mathrm{m}$ (`is_circular_ic = true`).
 4. **ZÉRO RÉSULTAT CODÉ EN DUR, ZÉRO AFFIRMATION NON JUSTIFIÉE** : Il est strictement interdit d'écrire une valeur numérique simulée, une annotation graphique, un ordre de convergence ou une conclusion en dur dans les scripts ou le rapport. Toutes les grandeurs doivent être calculées dynamiquement depuis les fichiers d'entrée `.json` et les sorties brutes réelles (`*_history.csv`, `*.vtr`, `*_markers_*.vtk`, `*.log`).
 5. **FIDÉLITÉ AUX EXÉCUTIONS RÉELLES** : Vérifiez pour chaque run que `returncode == 0`, `t_end >= t_final - 0.5*dt`, et qu'aucun `NaN`/`Inf` n'est présent. En cas d'échec, de timeout, de non-convergence Krylov (`Iter Krylov == max_iter`) ou d'écart C++/Fortran, signalez-le explicitement sans fallback silencieux ni omission sélective. Comparez les méthodes **uniquement à des instants identiques**.
@@ -16,7 +16,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 ## 2. Arborescence Obligatoire et Spécification Réelle des Sorties
 
 ```text
-VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/01_cas_goutte_statique_young_laplace_cvi_markers/
+VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/01_cas_goutte_statique_young_laplace_cvi_markers/
 ├── case/{cpp,fortran}/
 ├── output/{cpp,fortran}/
 ├── figures/

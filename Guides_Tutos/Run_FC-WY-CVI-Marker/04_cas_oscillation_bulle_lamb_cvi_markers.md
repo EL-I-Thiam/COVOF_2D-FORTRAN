@@ -6,12 +6,12 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 
 ### Interdictions absolues et règles de fidélité
 1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires.
-2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/04_cas_oscillation_bulle_lamb_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/04_cas_oscillation_bulle_lamb_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
 3. **INITIALISATION ELLIPTIQUE EXPLICITE PAR `axis_a` ET `axis_b`** : Spécifiez explicitement `"axis_a"`, `"axis_b"` et `"pert_amp": 0.0` dans `"initial_condition"` :
    - Pour $\varepsilon = 0.05$ ($R_0 = 0.02\,\mathrm{m}$) : `"axis_a": 0.021`, `"axis_b": 0.01904761904761905` ;
    - Pour $\varepsilon = 0.20$ (régime non linéaire) : `"axis_a": 0.024`, `"axis_b": 0.016666666666666666`.
    Vérifiez dans le `.vtr` à $t=0$ que $a_0/R_0 \approx 1+\varepsilon$ et $b_0/R_0 \approx 1/(1+\varepsilon)$.
-4. **ZÉRO FALLBACK ANALYTIQUE, ZÉRO DISSIMULATION D'INSTABILITÉ** : En cas de crash (`SIGSEGV`), `NaN`, perte de masse $> 1\,\%$, ou dispersion chaotique des marqueurs dans le domaine, **il est strictement interdit** de renvoyer $f_{\mathrm{th}}$ ou un cosinus synthétique, ou de prétendre dans le rapport que les simulations ont convergé. Tous les comportements réels (y compris divergences ou écarts entre codes) doivent être fidèlement exposés.
+4. **ZÉRO RÉSULTAT CODÉ EN DUR, ZÉRO FALLBACK ANALYTIQUE, FIDÉLITÉ AUX EXÉCUTIONS RÉELLES** : Il est strictement interdit d'écrire une valeur numérique simulée, une fréquence ou un taux d'amortissement prétendument observé en dur dans les scripts ou le rapport. Toutes les grandeurs doivent être calculées dynamiquement depuis `.json`, `*_history.csv`, `*.vtr` / `*.pvtr`, `*_markers_*.vtk` et `*.log`. En cas de crash (`SIGSEGV`), `NaN`, perte de masse $> 1\,\%$, ou dispersion chaotique des marqueurs dans le domaine, **il est strictement interdit** de renvoyer $f_{\mathrm{th}}$ ou un cosinus synthétique, ou de prétendre dans le rapport que les simulations ont convergé. Tous les comportements réels (y compris divergences ou écarts entre codes) doivent être fidèlement exposés.
 
 ---
 
@@ -82,7 +82,8 @@ L'utilisation d'un pas $\Delta t = 2.5\times 10^{-4}\,\mathrm{s}$ viole donc le 
     "center_y": 0.05,
     "radius": 0.02,
     "axis_a": 0.021,
-    "axis_b": 0.01904761904761905
+    "axis_b": 0.01904761904761905,
+    "pert_amp": 0.0
   },
   "time": {
     "dt": 0.00005,

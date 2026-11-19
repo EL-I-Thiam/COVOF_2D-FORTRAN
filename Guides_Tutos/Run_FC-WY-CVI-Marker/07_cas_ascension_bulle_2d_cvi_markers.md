@@ -6,7 +6,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 
 ### Interdictions absolues et règles de fidélité
 1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires.
-2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/07_cas_ascension_bulle_2d_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/07_cas_ascension_bulle_2d_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
 3. **SPÉCIFICATION EXPLICITE DE LA GÉOMÉTRIE (`axis_a`, `axis_b`, `pert_amp`)** : Spécifiez explicitement **`"axis_a": 0.25, "axis_b": 0.25, "pert_amp": 0.0`** dans `"initial_condition"` de tous les JSON afin de garantir une bulle strictement circulaire ($R_0 = 0.25\,\mathrm{m}$) avec sous-échantillonnage net `16x16` dans toutes les configurations.
 4. **STABILITÉ CAPILLAIRE ET BUDGET CPU** : Sur $Bo = 125$ ($\rho_1=1000, \rho_2=1.0, \sigma=1.96$), vérifiez si $\Delta t$ respecte le critère capillaire côté gaz ($\Delta t_{\sigma,\mathrm{gaz}} = \sqrt{2\rho_2 h^3/(4\pi\sigma)} \approx 1.26\times 10^{-3}\,\mathrm{s}$ sur $80\times 160$ et $4.46\times 10^{-4}\,\mathrm{s}$ sur $160\times 320$). Sur `160x320`, privilégiez `np=4` en MPI (pour `MONOLITHIC` / `AAL`, jamais `STANDARD_PROJECTION`) si le temps séquentiel menace de dépasser le timeout, et rapportez tout timeout ou instabilité sans rien masquer.
 5. **ZÉRO RÉSULTAT EN DUR, ZÉRO FALLBACK** : Comparez toujours les méthodes au même instant exact ; relevez les itérations Krylov depuis `.log` et la conservation volumique depuis `.vtr`.
@@ -16,7 +16,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 ## 2. Arborescence et Théorie (Benchmark de Hysing et al., 2009)
 
 ```text
-VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/07_cas_ascension_bulle_2d_cvi_markers/
+VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/07_cas_ascension_bulle_2d_cvi_markers/
 ├── case/{cpp,fortran}/
 ├── output/{cpp,fortran}/
 ├── figures/

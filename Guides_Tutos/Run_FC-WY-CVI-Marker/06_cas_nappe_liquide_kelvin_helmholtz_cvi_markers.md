@@ -6,7 +6,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 
 ### Interdictions absolues et règles de fidélité
 1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires.
-2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
 3. **PARAMÈTRES CODÉS EN DUR DANS LES BINAIRES POUR `LIQUID_SHEET`** :
    Dans `Simulation.cpp` et `module_simulation.f90`, le profil de vitesse initial ($A_{\mathrm{gaz}} = 30.0\,\mathrm{m/s}$, $A_{\mathrm{liq}} = 2.0\,\mathrm{m/s}$, amplitude `0.04`) est codé en dur pour `LIQUID_SHEET`, et la fraction volumique initiale utilise un profil lissé sur `eps = 1.5*max(dx,dy)`, ce qui ensemence les marqueurs sur ~3 mailles d'épaisseur par interface. Reportez fidèlement ces valeurs réelles dans le rapport.
 4. **VÉRIFICATION PÉRIODIQUE ET DU LISSAGE SVOF** :
@@ -19,7 +19,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 ## 2. Arborescence et Théorie de la Nappe Liquide Cisaillée
 
 ```text
-VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers/
+VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers/
 ├── case/{cpp,fortran}/
 ├── output/{cpp,fortran}/
 ├── figures/

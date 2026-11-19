@@ -325,18 +325,18 @@ Au pas de temps $n \to n+1$ ($t^{n+1} = t^n + \Delta t$) :
 
 # 5. Synthèse des Cas de Validation de `COVOF_2D` Améliorés par la Méthode
 
-Le déploiement de cette méthode dans `COVOF_2D` cible huit campagnes majeures répertoriées dans `Validation_Totale/Run_CASES/` :
+Le déploiement de cette méthode dans `COVOF_2D` cible huit campagnes majeures répertoriées dans `VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/` :
 
-| Réf. Cas dans `Run_CASES` | Nom du Cas Test | Phénomène Physique Dominant | Verrou Actuel du VOF Seul | Gain Apporté par `FC + WY + CVI + Marqueurs` |
+| Réf. Cas dans `RUN_FC-WY-CVI-Marker` | Fichier d'Instructions | Phénomène Physique Dominant | Verrou Actuel du VOF Seul | Gain Apporté par `FC + WY + CVI + Marqueurs` |
 | :--- | :--- | :--- | :--- | :--- |
-| **Cas 10** | `validation_cas_10_liquid_sheet` | Cisaillement Kelvin-Helmholtz d'une nappe mince ($r_\rho = 1000$) | Rupture numérique du ligament dès que $\delta < \Delta x$ | Suivi continu sous-maille des deux interfaces de la nappe + conservation d'énergie cinétique FC |
-| **Cas 21** | `validation_cas_21_ascension_bulle_2d` | Ascension de bulle 2D ($Bo=10$ ellipsoïdal et $Bo=125$ à jupes) | Fragmentation des jupes fines à $Bo=125$ et bruit sur $\kappa$ | Courbure précise au nez de la bulle et maintien de l'intégrité des jupes latérales |
-| **Cas 24** | `validation_cas_24_viscous_jet_buckling` | Flambement d'un jet visqueux ($\mu_2/\mu_1 = 2.7\times 10^5$, $Re=0.17$) | Érosion des replis serrés de l'accordéon visqueux | Normales sous-maille fidèles dans les lobes de flambement + injection continue `JET_INLET` |
-| **Cas 25** | `validation_cas_25_laplace_droplet_cvi_markers` | Équilibre capillaire de Young-Laplace ($\Delta P = \sigma / R_0$) | Courants parasites $\|\mathbf{u}\|_\infty$ dus aux différences finies sur $\widetilde{C}$ | Convergence d'ordre 2 de $\kappa^{\text{marker}}$ et chute de 1 à 2 ordres de grandeur des courants parasites |
-| **Cas 26** | `validation_cas_26_oscillation_bulle_lamb_cvi_markers` | Oscillations capillaires amorties de Lamb ($r_\rho = 5950$) | Amortissement numérique excessif et décalage de fréquence $f_2$ | Restitution fidèle de la fréquence de Lamb et du décrément logarithmique visqueux |
-| **Cas 27** | `validation_cas_27_vortex_shear_cvi_markers` | Tourbillon cisaillé réversible de Rider-Kothe ($T = 6\,\text{s}$) | Fragmentation de la queue spiralée à $t = T/2 = 3\,\text{s}$ | Réversibilité lagrangienne CVI ($\nabla\cdot\mathbf{u}_{\text{CVI}}=0$) et réduction de l'erreur géométrique $L_1(T)$ |
-| **Cas 28** | `validation_cas_28_dense_cylinder_cvi_markers` | Chute libre d'un cylindre dense (Cas 3.1 *Fluids* 2021) | Facettage angulaire du cylindre sur maillage modéré | Maintien de la circularité géométrique et conservation exacte de l'aire ($\Delta V/V_0 < 10^{-12}$) |
-| **Cas 29** | `validation_cas_29_rayleigh_taylor_cvi_markers` | Instabilité gravitaire de Rayleigh-Taylor diphasique | Diffusion des enroulements secondaires du panache | Résolution fine des volutes de Kelvin-Helmholtz le long des flancs du champignon |
+| **Étude 01** | `01_cas_goutte_statique_young_laplace_cvi_markers.md` | Équilibre capillaire de Young-Laplace ($\Delta P = \sigma / R_0$) | Courants parasites $\|\mathbf{u}\|_\infty$ dus aux différences finies sur $\widetilde{C}$ | Convergence d'ordre 2 de $\kappa^{\text{marker}}$ et chute de 1 à 2 ordres de grandeur des courants parasites |
+| **Étude 02** | `02_cas_tourbillon_cisaille_rider_kothe_cvi_markers.md` | Tourbillon cisaillé réversible de Rider-Kothe ($T = 6\,\text{s}$) | Fragmentation de la queue spiralée à $t = T/2 = 3\,\text{s}$ | Réversibilité lagrangienne CVI ($\nabla\cdot\mathbf{u}_{\text{CVI}}=0$) et réduction de l'erreur géométrique $L_1(T)$ |
+| **Étude 03** | `03_cas_chute_cylindre_dense_cvi_markers.md` | Chute libre d'un cylindre dense (Cas 3.1 *Fluids* 2021) | Facettage angulaire du cylindre sur maillage modéré | Maintien de la circularité géométrique et conservation exacte de l'aire ($\Delta V/V_0 < 10^{-12}$) |
+| **Étude 04** | `04_cas_oscillation_bulle_lamb_cvi_markers.md` | Oscillations capillaires amorties de Lamb ($r_\rho = 5950$) | Amortissement numérique excessif et décalage de fréquence $f_2$ | Restitution fidèle de la fréquence de Lamb et du décrément logarithmique visqueux |
+| **Étude 05** | `05_cas_instabilite_rayleigh_taylor_cvi_markers.md` | Instabilité gravitaire de Rayleigh-Taylor diphasique | Diffusion des enroulements secondaires du panache | Résolution fine des volutes de Kelvin-Helmholtz le long des flancs du champignon |
+| **Étude 06** | `06_cas_nappe_liquide_kelvin_helmholtz_cvi_markers.md` | Cisaillement Kelvin-Helmholtz d'une nappe mince ($r_\rho = 1000$) | Rupture numérique du ligament dès que $\delta < \Delta x$ | Suivi continu sous-maille des deux interfaces de la nappe + conservation d'énergie cinétique FC |
+| **Étude 07** | `07_cas_ascension_bulle_2d_cvi_markers.md` | Ascension de bulle 2D ($Bo=10$ ellipsoïdal et $Bo=125$ à jupes) | Fragmentation des jupes fines à $Bo=125$ et bruit sur $\kappa$ | Courbure précise au nez de la bulle et maintien de l'intégrité des jupes latérales |
+| **Étude 08** | `08_cas_flambement_jet_visqueux_cvi_markers.md` | Flambement d'un jet visqueux ($\mu_2/\mu_1 = 2.7\times 10^5$, $Re=0.17$) | Érosion des replis serrés de l'accordéon visqueux | Normales sous-maille fidèles dans les lobes de flambement + injection continue `JET_INLET` |
 
 ---
 

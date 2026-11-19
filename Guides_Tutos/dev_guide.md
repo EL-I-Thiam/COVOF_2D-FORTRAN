@@ -46,7 +46,7 @@ Les deux branches fonctionnent exclusivement en **parallélisme distribué MPI p
 | `Mesh.cpp` | `Mesh.hpp` | Création de la topologie cartésienne `MPI_Cart_create`, calcul de `nx_local`, `ny_local`, `i_offset`, `j_offset` et détection des bords physiques. |
 | `MpiComm.cpp` | `MpiComm.hpp` | Échanges non bloquants en 2 passes (X puis Y) des halos scalaires/MAC, application des CL et `MPI_Allreduce`. |
 | `CSRMatrix.cpp` | `CSRMatrix.hpp` | Construction CSR triée depuis triplets, SpMV local et solveur Jacobi. |
-| `Preconditioner.cpp` | `Preconditioner.hpp` | Mise à jour des diagonales/blocs et application (notamment 8 balayages SSOR sur $S$ + 4 sur $F_u, F_v$ dans `BlockTriangularPreconditioner`). |
+| `Preconditioner.cpp` | `Preconditioner.hpp` | Mise à jour des diagonales/blocs CSR (`Fuu`, `Fvv`, `SchurLaplace`) et application MPI-parallèle (8 balayages SSOR sur $S$ avec projection globale à moyenne nulle + 4 sur $F_u, F_v$ dans `BlockTriangularPreconditioner`). |
 | `LinearSolver.cpp` | `LinearSolver.hpp` | Boucles de Krylov distribuées et factorisation LU directe via `dgetrf_`/`dgetrs_`. |
 | `InterfaceReconstruction.cpp` | `InterfaceReconstruction.hpp` | Algorithme Sutherland-Hodgman + Shoelace, bisection `compute_alpha`, segment clipping et schémas SLIC/PLIC/ELVIRA/LVIRA. |
 | `InterfaceMarkers.cpp` | `InterfaceMarkers.hpp` | CVI Variante B exacte, advection RK2-Heun avec routage MPI 4 passes, migration 2 passes, élagage par sous-octants, régression parabolique $(\tau, \eta)$ avec halo $2.5 h$, export VTK PolyData. |
@@ -463,7 +463,7 @@ Contrairement à l'opérateur complet $A \mathbf{x}$ qui est **100 % *matrix-fre
   - `col_idx` (`std::vector<int>`)
   - `values` (`std::vector<double>`)
   - `diag` (`std::vector<double>`, diagonale extraite explicitement pour Jacobi / Gauss-Seidel)
-  Elle fournit `set_from_triplets(r, c, rows, cols, vals)` (tri et fusion des doublons), `matvec(x, y)` (produit $y = Ax$ séquentiel par sous-domaine) et `solve_jacobi(b, x, num_iters)`. Dans `NavierStokesSolver::assemble_preconditioner_blocks`, elle assemble `Fuu`, `Fvv` et `SchurLaplace`.
+  Elle fournit `set_from_triplets(r, c, rows, cols, vals)` (tri et fusion des doublons), `matvec(x, y)` (produit $y = Ax$ par sous-domaine) et `solve_jacobi(b, x, num_iters)`. Dans `NavierStokesSolver::assemble_preconditioner_blocks`, elle assemble `Fuu`, `Fvv` et `SchurLaplace` (avec viscosité nodale harmonique $\mu_{\text{node}}$, convection amont M-matrice et conditions aux limites pariétales physiques) consommés en **MPI pur** par `BlockTriangularPreconditioner::apply` via balayages SSOR + synchronisation des halos (`MpiComm::sync_*`) et réduction globale de moyenne nulle.
 - **En Fortran (`module_navier_stokes.f90`) :**
   Il n'existe pas de module `module_csr_matrix.f90` séparé : `navier_stokes_t` stocke directement les stencils structurés à 5 points sous forme de tableaux 1D/2D contigus (`u_aE, u_aW, u_aN, u_aS, u_aP`, `v_aE, ..., v_aP`, `schur_aE, ..., schur_aP`), optimisés pour les balayages SSOR vectorisés dans `apply_preconditioner`.
 # Correspondance Théorie $\leftrightarrow$ Discrétisation $\leftrightarrow$ Code Source
@@ -670,10 +670,10 @@ Notice sur les conventions de signes : dans `InterfaceReconstruction`, les segme
 
 ### 4.7.2. Préconditionneur Triangulaire par Blocs BT-SBP
 
-- **Équation discrète :** Pour le système monolithique $\begin{pmatrix} F_u & 0 & G_x \\ 0 & F_v & G_y \\ D_x & D_y & -C_p \end{pmatrix}$, `BlockTriangularPreconditioner` résout d'abord le complément de Schur $S \mathbf{r}_p = \mathbf{z}_p$ (8 balayages de Gauss-Seidel symétrique sur les coefficients $a_W, a_E = \Delta y^2 / u_{aP}$, $a_S, a_N = \Delta x^2 / v_{aP}$, $a_P = \sum a_{\text{nb}} + \frac{\chi_T}{\Delta t}\Delta x\Delta y + 10^{-12}\Delta x\Delta y$, avec retrait du mode constant en incompressible), puis calcule $\text{rhs}_u = \mathbf{z}_u - G_x \mathbf{r}_p$, $\text{rhs}_v = \mathbf{z}_v - G_y \mathbf{r}_p$ et résout $F_u \mathbf{r}_u = \text{rhs}_u$ et $F_v \mathbf{r}_v = \text{rhs}_v$ par 4 balayages SSOR.
+- **Équation discrète :** Pour le système monolithique $\begin{pmatrix} F_u & 0 & G_x \\ 0 & F_v & G_y \\ D_x & D_y & -C_p \end{pmatrix}$, `BlockTriangularPreconditioner` résout en **MPI pur** d'abord le complément de Schur $S \mathbf{r}_p = \mathbf{z}_p$ (8 balayages SSOR sur le bloc CSR `SchurLaplace` avec masques aux bords physiques et échanges de halos MPI sur les coefficients $a_W, a_E = \Delta y^2 / u_{aP}$, $a_S, a_N = \Delta x^2 / v_{aP}$, $a_P = \sum a_{\text{nb}} + \frac{\chi_T}{\Delta t}\Delta x\Delta y + 10^{-12}\Delta x\Delta y$, suivis d'une projection globale à moyenne nulle via `MPI_Allreduce` en incompressible), puis calcule $\text{rhs}_u = \mathbf{z}_u - G_x \mathbf{r}_p$, $\text{rhs}_v = \mathbf{z}_v - G_y \mathbf{r}_p$ et résout $F_u \mathbf{r}_u = \text{rhs}_u$ et $F_v \mathbf{r}_v = \text{rhs}_v$ par 4 balayages SSOR parallèles sur les blocs CSR `Fuu`, `Fvv` (dotés de la viscosité nodale harmonique $\mu_{\text{node}}$ et d'une matrice convectrice M-matrice décentrée amont). En mode AL/AAL/C-AAL, l'étape de vitesse résout directement $F_u \mathbf{r}_u = \mathbf{z}_u$ et $F_v \mathbf{r}_v = \mathbf{z}_v$ sur `Fuu` et `Fvv`.
 - **Localisation :**
-  - C++17 : `COVOF_2D-C++/src/Preconditioner.cpp` $\rightarrow$ `BlockTriangularPreconditioner::update` (l. 210–382) et `apply` (l. 384–579).
-  - Fortran 2018 : `COVOF_2D-FORTRAN/src/module_navier_stokes.f90` $\rightarrow$ `ns_assemble_preconditioner_blocks` (l. 1287–1585) et `module_linear_solvers.f90` $\rightarrow$ `apply_preconditioner` (l. 47–489).
+  - C++17 : `COVOF_2D-C++/src/Preconditioner.cpp` $\rightarrow$ `BlockTriangularPreconditioner::update` (l. 265–294) et `apply` (l. 296–424), avec assemblage dans `NavierStokesSolver::assemble_preconditioner_blocks`.
+  - Fortran 2018 : `COVOF_2D-FORTRAN/src/module_navier_stokes.f90` $\rightarrow$ `ns_assemble_preconditioner_blocks` (l. 1262–1589) et `module_linear_solvers.f90` $\rightarrow$ `apply_preconditioner` (l. 48–318).
 # Référence Exhaustive de l'API Interne
 
 Ce chapitre documente de manière exhaustive les interfaces logicielles internes réellement définies dans les **15 fichiers d'en-tête C++17** (`COVOF_2D-C++/include/covof/*.hpp`) et les **16 fichiers sources Fortran 2018** (`COVOF_2D-FORTRAN/src/*.f90`).
@@ -821,7 +821,7 @@ L'architecture de vérification de COVOF 2D sépare la vérification mathématiq
 | :--- | :--- | :--- | :--- |
 | **Niveau 1 : Noyaux & Analytique** | Divergence CVI analytique & DF, opérateurs elliptiques, écoulements exacts | `verify_cvi_markers.py` (Palier 1), modes internes `"LAPLACIAN"`, `"CAS_3_7"`, `"CAS_3_8"`, `"VORTEX_ADVECTION"` | $\|\nabla\cdot\mathbf{u}\|_{\text{ana}} < 10^{-13}$, $\|\nabla\cdot\mathbf{u}\|_{\text{DF}} < 10^{-10}$, convergence $L^2 / L^\infty$ d'ordre 2 |
 | **Niveau 2 : Parité Dual-Code & MPI** | Régression capillaire (Young-Laplace), advection non-linéaire (Rider-Kothe), décomposition MPI | `verify_cvi_markers.py` (Paliers 2 & 3), `covof2d_cpp` vs `covof2d_fortran` (`np=1` vs `mpirun -np 4`) | $\Delta\kappa_{\text{MPI}} < 10^{-5}$, invariance exacte `n_markers(np=1) == n_markers(np=4)` |
-| **Niveau 3 : Campagnes V&V** | 14 cas canoniques + cas avancés (immersion Brinkman, diphasique compressible, jet visqueux) | `VALIDATION_TOTALE/Run_Valide-CASES/run_all_validations.sh`, `Run_CASES/`, `Run_FC-WY-CVI-Marker/` | Accord avec solutions analytiques / benchmarks (Faxén, Rayleigh-Plesset, Hinze, Popinet) |
+| **Niveau 3 : Campagnes V&V** | 12 cas rapides (`Run_Valide-CASES`) + 9 cas avancés (`Run_CASES`) + 8 campagnes CVI-Marqueurs | `VALIDATION_TOTALE/Run_Valide-CASES/run_all_validations.sh`, `Run_CASES/`, `RUN_FC-WY-CVI-Marker/` | Accord avec solutions analytiques / benchmarks (Ghia, Armaly, De Vahl Davis, Faxén, Lamb, Hinze) |
 
 > **Note sur l'infrastructure de test du dépôt :** COVOF 2D n'utilise pas de framework de test externe (ni Catch2, ni GoogleTest, ni pFUnit) et ne dispose pas de pipeline GitHub Actions sur le dépôt. Un binaire utilitaire compilé `COVOF_2D-C++/bin/test_solver` existe en complément, mais la suite officielle de non-régression pour le couplage marqueurs-VOF et le solveur dual-code repose sur les scripts Python/Shell et les modes de validation intégrés à `Simulation` / `module_simulation`.
 
@@ -856,8 +856,8 @@ Plusieurs configurations d'étude (`simulation_mode` ou `case_name` dédiés dan
 
 ```bash
 # Exécution directe d'un test analytique intégré en C++ et en Fortran
-./COVOF_2D-C++/bin/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/input.json
-./COVOF_2D-FORTRAN/bin/covof2d_fortran VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/input.json
+./COVOF_2D-C++/bin/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/case/cpp/cas_1_g32_bicgstab2.json
+./COVOF_2D-FORTRAN/bin/covof2d_fortran VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/case/fortran/cas_1_g32_bicgstab2.json
 ```
 
 ---
@@ -894,37 +894,39 @@ Cette double condition garantit que :
 
 ## 6.4 Niveau 3 : Campagnes `VALIDATION_TOTALE/`
 
-### 6.4.1 Les 14 cas canoniques (`Run_Valide-CASES/run_all_validations.sh`)
+### 6.4.1 Les 12 cas de validation rapides (`Run_Valide-CASES/run_all_validations.sh`)
 
-Le script `VALIDATION_TOTALE/Run_Valide-CASES/run_all_validations.sh` exécute de façon systématique **14 cas de validation analytiques et canoniques** couvrant l'ensemble de la physique du solveur :
+Le script `VALIDATION_TOTALE/Run_Valide-CASES/run_all_validations.sh` exécute de façon systématique **12 cas de validation rapides** couvrant les opérateurs elliptiques, écoulements internes/externes, immersion Brinkman, thermique Boussinesq/poreux et suivi d'interface :
 
 | Dossier dans `Run_Valide-CASES/` | Physique / Benchmark vérifié | Grandeurs mesurées |
 | :--- | :--- | :--- |
-| `validation_cas_1_laplacian` | Poisson avec conditions de Dirichlet (`CAS_3_1`) | Normes $L^2, L^\infty$ dans `laplacian_error.csv` |
-| `validation_cas_2_neumann` | Poisson avec conditions de Neumann (`CAS_3_2_NEUMANN`) | Compatibilité noyau pression moyenne nulle |
+| `validation_cas_1_laplacian` | Poisson avec conditions de Dirichlet (`CAS_1_DIRICHLET`) | Normes $L^1, L^2, L^\infty$ dans `laplacian_error.csv` |
+| `validation_cas_2_neumann` | Laplace avec conditions de Neumann (`CAS_3_2_NEUMANN`) | Compatibilité noyau et jauge de pression |
 | `validation_cas_3_poiseuille` | Écoulement de Poiseuille établi | Profil $u(y)$ (`profile_u_y.csv`), $\partial p/\partial x$ |
-| `validation_cas_4_poiseuille_instat` | Poiseuille transitoire impulsionnel | Convergence vers solution série temporelle (`poiseuille_unsteady_error.csv`) |
-| `validation_cas_5_poiseuille_visc_variable` | Écoulement de Poiseuille stratifié à viscosité variable | Saut de contrainte visqueuse à l'interface |
+| `validation_cas_4_poiseuille_instat` | Poiseuille transitoire impulsionnel | Convergence vers série temporelle (`poiseuille_unsteady_error.csv`) |
+| `validation_cas_5_poiseuille_visc_variable` | Écoulement de Poiseuille stratifié à viscosité variable | Convergence ordre 2 sur $\mu(z)$ |
 | `validation_cas_6_laplace_droplet` | Goutte statique de Young-Laplace | Saut $\Delta P = \sigma / R$ et courants parasites $u_{\max}$ |
-| `validation_cas_7_vortex_shear` | Vortex de cisaillement (Rider-Kothe) | Conservation de masse et erreur de forme $E_1$ |
-| `validation_cas_8_dense_cylinder` | Écoulement autour d'un cylindre rigide (Brinkman) | $C_D$, $C_L$, longueur de recirculation |
-| `validation_cas_9_sedimentation_faxen` | Sédimentation confinée & correction de paroi de Faxén | Vitesse terminale vs formule de Faxén |
-| `validation_cas_10_piston_compressible` | Piston compressible 1D (EOS compressible / NASG) | Compression isentropique / onde acoustique |
-| `validation_cas_11_compression_bulle` | Compression/collapsus de bulle compressible | Dynamique de Rayleigh-Plesset |
-| `validation_cas_12_rupture_barrage` | Rupture de barrage diphasique (*dam break*) | Position du front $x_{\text{front}}(t)$ et impact pariétal |
-| `validation_cas_13_oscillation_bulle_capillaire` | Oscillation capillaire d'une bulle elliptique | Fréquence propre $\omega_2$ de Lamb/Rayleigh |
-| `validation_cas_14_instabilite_interface_gravitaire` | Instabilité gravitaire de Rayleigh-Taylor | Taux de croissance et morphologie champignon |
+| `validation_cas_7_vortex_shear` | Vortex de cisaillement réversible (Rider-Kothe) | Conservation de masse et erreur de forme $E_1$ |
+| `validation_cas_8_cavite_entrainee` | Cavité carrée entraînée 2D ($Re = 1000$) | Extrema $\psi, \omega_z$ et profils médians (Ghia / Botella-Peyret) |
+| `validation_cas_9_marche_descendante` | Marche descendante laminaire ($Re = 100$ à $1000$, Brinkman `BOX`) | Longueurs de recollement $X_r/H, X_s/H, X_{rs}/H$ |
+| `validation_cas_10_sillage_cylindre` | Écoulement autour d'un cylindre rigide ($Re = 20$, Brinkman `CYLINDER`) | $C_d$, $|C_l|$, angle $\theta_s$, longueur de recirculation $L_r/D$ |
+| `validation_cas_11_cavite_chauffage_differentiel` | Convection naturelle de Boussinesq ($Pr = 0.71, Ra = 10^3\text{--}10^6$) | Nombre de Nusselt moyen $\overline{Nu}$ et centro-symétrie |
+| `validation_cas_12_convection_poreux_darcy_brinkman` | Convection naturelle en milieu poreux Darcy-Brinkman ($Ra_f = 10^7, Da = 10^{-6}$) | Convergence ordre 2 sur $\overline{Nu}$ et transition $Da$ |
 
-### 6.4.2 Cas avancés (`Run_CASES/`) et suite dédiée `Run_FC-WY-CVI-Marker/`
+### 6.4.2 Cas avancés (`Run_CASES/`) et suite dédiée `RUN_FC-WY-CVI-Marker/`
 
-En complément des 14 cas de base, le répertoire `VALIDATION_TOTALE/Run_CASES/` regroupe des configurations industrielles et multi-physiques plus complexes, notamment :
-* `validation_cas_9_50x100_newton_dual_code` (comparaison directe C++ vs Fortran) ;
-* `validation_cas_10_liquid_sheet` (atomisation/étirement de nappe liquide) ;
-* `validation_cas_14_marche_descendante` à `validation_cas_19_convection_poreux_darcy_brinkman` (écoulement sur marche descendante, cavité thermique, convection en milieu poreux Darcy-Brinkman) ;
-* `validation_cas_21_ascension_bulle_2d` (cas test de Hysing et al. : bulle ascendante, vitesse d'ascension $V_c$ et circularité) ;
-* `validation_cas_24_viscous_jet_buckling` (flambement gravitationnel de jet visqueux haute contrainte).
+Les cas coûteux en temps de calcul sont regroupés et ordonnés par complexité croissante dans `VALIDATION_TOTALE/Run_CASES/` :
+* `validation_cas_1_obstacle_fin` (écoulement laminaire autour d'un obstacle rectangulaire mince en canal, $Re = 82.5$) ;
+* `validation_cas_2_cylindre_dense_newton_aal` (campagne dual-code Newton/AB2/Picard, AAL et SVOF sur cylindre dense $50\times 100$) ;
+* `validation_cas_3_dense_cylinder` (chute libre galiléenne d'un cylindre dense, $r_\rho \approx 85\,000$, `MONOLITHIC`/`AL`/`AAL`/`SP` sur $100\times 200$ et $200\times 400$) ;
+* `validation_cas_4_sedimentation_faxen` (sédimentation confinée & correction de paroi de Faxén) ;
+* `validation_cas_5_rupture_barrage` (rupture de barrage diphasique sur fond sec, solution de Saint-Venant / Ritter) ;
+* `validation_cas_6_oscillation_bulle_capillaire` (oscillation capillaire amortie d'une bulle elliptique, fréquence de Lamb) ;
+* `validation_cas_7_instabilite_interface_gravitaire` (instabilité gravitaire de Rayleigh-Taylor diphasique) ;
+* `validation_cas_8_piston_compressible` (piston compressible 1D Bas-Mach `C-AAL`) ;
+* `validation_cas_9_compression_bulle` (compression isotrope 2D d'une bulle compressible `C-AAL`).
 
-La suite documentée `Guides_Tutos/Run_FC-WY-CVI-Marker/` contient 8 études ciblées (`01_cas_goutte_statique_young_laplace_cvi_markers.md` à `08_cas_flambement_jet_visqueux_cvi_markers.md`) servant de référence pour valider l'activation des marqueurs lagrangiens face au CSF classique.
+Les études dédiées aux marqueurs lagrangiens sont centralisées dans `VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/` (`01_cas_goutte_statique_young_laplace_cvi_markers.md` à `08_cas_flambement_jet_visqueux_cvi_markers.md`, avec miroir documentaire et script `verify_cvi_markers.py` dans `Guides_Tutos/Run_FC-WY-CVI-Marker/`).
 
 ---
 
@@ -937,7 +939,7 @@ $$p_{\text{obs}} = \frac{\ln\left( \|e_{2h}\|_{L^2} / \|e_h\|_{L^2} \right)}{\ln
 Un schéma centré MAC d'ordre 2 doit exhiber $p_{\text{obs}} \in [1{,}90 ; 2{,}05]$ en norme $L^2$ pour des champs lisses.
 
 Pour valider la **parité stricte C++17 $\leftrightarrow$ Fortran 2018** sur un cas diphasique complet, on compare en post-traitement :
-1. Les fichiers `<case_name>_history.csv` sur les 9 colonnes communes (`step`, `time`, `dt`, `max_u`, `max_v`, `max_div`, `mass_fluid1`, `kinetic_energy`, `solver_iters`).
+1. Les fichiers `<case_name>_history.csv` sur les 9 colonnes communes (`step`, `time`, `dt`, `center_of_mass_y`, `rise_velocity`, `bubble_volume`, `kinetic_energy`, `max_u`, `max_div`).
 2. Les tableaux CellData (`PhaseIndicator`, `PhaseIndicator_Smoothed`, `Pressure`, `Density`, `Viscosity`, `Divergence`, `Temperature`, `Curvature`, `Velocity`) des fichiers `<case_name>_p<rank>_<step:06d>.vtr` à l'aide de `pyvista` ou `vtk` en Python.
 
 ---
@@ -955,7 +957,7 @@ cmake -S COVOF_2D-C++ -B build_asan \
 cmake --build build_asan -j4
 
 # Exécution sous MPI pur (OpenMPI)
-mpirun -np 2 ./build_asan/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_6_laplace_droplet/input.json
+mpirun -np 2 ./build_asan/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_6_laplace_droplet/case/cpp/cas_6_axeA_wy_plic_n64.json
 ```
 
 ### 6.6.2 Build Fortran 2018 avec vérifications de bornes et IEEE
@@ -966,7 +968,7 @@ cmake -S COVOF_2D-FORTRAN -B build_fdebug \
   -DCMAKE_Fortran_FLAGS="-O0 -g -fcheck=all -fbacktrace -ffpe-trap=invalid,zero,overflow -Wall -Wextra"
 cmake --build build_fdebug -j4
 
-mpirun -np 2 ./build_fdebug/covof2d_fortran VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_6_laplace_droplet/input.json
+mpirun -np 2 ./build_fdebug/covof2d_fortran VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_6_laplace_droplet/case/fortran/cas_6_axeA_wy_plic_n64.json
 ```
 
 ### 6.6.3 Audit Valgrind et checklist avant commit
@@ -975,13 +977,13 @@ Pour inspecter d'éventuelles lectures hors-limites dans les routines d'échange
 
 ```bash
 mpirun -np 2 valgrind --leak-check=full --track-origins=yes \
-  ./build_asan/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/input.json
+  ./build_asan/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/case/cpp/cas_1_g32_bicgstab2.json
 ```
 
 **Checklist minimale avant validation d'une modification :**
 1. Compilation sans avertissement bloquant des deux cibles `covof2d_cpp` (C++17, `-Wall -Wextra -Wno-unused-parameter`) et `covof2d_fortran` (Fortran 2018).
 2. Passage intégral de `python3 Guides_Tutos/Run_FC-WY-CVI-Marker/verify_cvi_markers.py` (Paliers 1, 2 et 3).
-3. Exécution de `bash VALIDATION_TOTALE/Run_Valide-CASES/run_all_validations.sh` sans divergence ni régression sur les 14 cas canoniques.
+3. Exécution de `bash VALIDATION_TOTALE/Run_Valide-CASES/run_all_validations.sh` sans divergence ni régression sur les 12 cas rapides.
 4. Vérification de non-fuite mémoire sous `mpirun -np 4` en mode Debug (`-fsanitize=address` / `-fcheck=all`) sur au moins un cas avec `vof.use_markers = true`.
 # Standards de Codage, Profilage HPC et Guide d'Extension
 

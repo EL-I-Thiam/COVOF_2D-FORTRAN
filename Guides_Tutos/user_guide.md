@@ -97,8 +97,8 @@ Le tableau ci-dessous recense l'ensemble des modèles, discrétisations, solveur
 | **Convection & Temps** | Schémas convectifs | `UPWIND`, `CENTERED`, `TVD_SUPERBEE` | Discrétisation spatiale des flux de quantité de mouvement |
 | | Linéarisation convective | `PICARD`, `ADAMS_BASHFORTH` (`AB2`), `NEWTON` | Traitement du terme $(\mathbf{u}\cdot\nabla)\mathbf{u}$ dans le système implicite |
 | | Schémas temporels | `EULER`, `GEAR` / `BDF2` + `enable_ssp_rk3_momentum` | Euler implicite (ordre 1), BDF2/Gear (ordre 2, $\alpha_{\text{time}}=1.5$), transport inertiel SSP-RK3 |
-| **Solveurs & Préconditionneurs** | Solveurs linéaires | `BICGSTAB2`, `BICGSTAB`, `CG`, `GMRES`, `MINRES`, `DIRECT` | Implémentations Krylov *matrix-free* + LU directe LAPACK `dgetrf`/`dgetrs` (passerelles `MUMPS`/`PETSC`/`HYPRE` en C++) |
-| | Préconditionneurs | `JACOBI`, `SSOR`, `ILU0`, `BLOCK_TRIANGULAR` (`BT_SBP`), `CUSTOM`, `NONE` | Préconditionnement diagonal enrichi, SSOR, ILU(0) et bloc triangulaire à complément de Schur |
+| **Solveurs & Préconditionneurs** | Solveurs linéaires | `BICGSTAB2`, `BICGSTAB`, `CG`, `GMRES`, `MINRES`, `DIRECT` | Implémentations Krylov *matrix-free* MPI (`MINRES` pour systèmes symétriques, `BICGSTAB2`/`GMRES` pour systèmes convectifs ou bloc-triangulaires) + LU directe LAPACK `dgetrf`/`dgetrs` (passerelles `MUMPS`/`PETSC`/`HYPRE` en C++) |
+| | Préconditionneurs | `JACOBI`, `SSOR`, `ILU0`, `BLOCK_TRIANGULAR` (`BT_SBP`), `CUSTOM`, `NONE` | Préconditionnement diagonal enrichi, SSOR, ILU(0) et bloc triangulaire à complément de Schur CSR 100 % parallèle MPI |
 
 ---
 
@@ -152,10 +152,10 @@ L'exploitation de COVOF 2D suit un flux de travail unifié, identique pour les e
 - `COVOF_2D-C++/` : Code source C++17 (`include/covof/` : 15 fichiers `.hpp` ; `src/` : 13 fichiers `.cpp`), `CMakeLists.txt`, et binaires compilés dans `bin/` (`covof2d_cpp` et lien `covof2d`).
 - `COVOF_2D-FORTRAN/` : Code source Fortran 2018 (`src/` : 16 fichiers `.f90`), `CMakeLists.txt`, et binaire compilé dans `bin/covof2d_fortran`.
 - `VALIDATION_TOTALE/` : Dossier maître de vérification et validation regroupant :
-  - `Run_Valide-CASES/` : 14 cas de validation analytique et canonique pilotés par `run_all_validations.sh` (`validation_cas_1_laplacian` à `validation_cas_14_instabilite_interface_gravitaire`).
-  - `Run_CASES/` : Campagnes avancées (`validation_cas_9_50x100_newton_dual_code`, `validation_cas_10_liquid_sheet`, `validation_cas_14_marche_descendante` à `validation_cas_19_convection_poreux_darcy_brinkman`, `validation_cas_21_ascension_bulle_2d`, `validation_cas_24_viscous_jet_buckling`) ainsi que le sous-dossier `Run_FC-WY-CVI-Marker/` dédié aux 8 campagnes hybrides CVI-Marqueurs et au script `verify_cvi_markers.py`.
-  - `Theoritical_Description/` : Descriptions théoriques des 24 cas de validation et rapport consolidé `Validation_Description.pdf`.
-- `Guides_Tutos/` : Suite documentaire complète (Volumes I, II et III, script `verify_cvi_markers.py` dans `Run_FC-WY-CVI-Marker/`, synthèses théoriques `SYNTHESE_METHODE_FC_WY_CVI_MARQUEURS.pdf` et `FEUILLE_DE_ROUTE_IMPLEMENTATION_COVOF_CVI_MARQUEURS.pdf`).
+  - `Run_Valide-CASES/` : 12 cas de validation rapides pilotés par `run_all_validations.sh` (`validation_cas_1_laplacian` à `validation_cas_7_vortex_shear`, puis `validation_cas_8_cavite_entrainee` à `validation_cas_12_convection_poreux_darcy_brinkman`).
+  - `Run_CASES/` : 9 campagnes avancées ordonnées par complexité croissante (`validation_cas_1_obstacle_fin` à `validation_cas_9_compression_bulle`), incluant la chute libre du cylindre dense et les cas diphasiques/compressibles lourds, ainsi que le sous-dossier `RUN_FC-WY-CVI-Marker/` dédié aux 8 campagnes hybrides CVI-Marqueurs et au script `verify_cvi_markers.py`.
+  - `Theoritical_Description/` : Référentiel théorique consolidé (`Validation_Description.pdf`) et spécifications des cas de `Run_Valide-CASES/`, `Run_CASES/` et `RUN_FC-WY-CVI-Marker/`.
+- `Guides_Tutos/` : Suite documentaire complète (Volumes I, II et III, miroir `Run_FC-WY-CVI-Marker/` et `verify_cvi_markers.py`, synthèses théoriques `SYNTHESE_METHODE_FC_WY_CVI_MARQUEURS.pdf` et `FEUILLE_DE_ROUTE_IMPLEMENTATION_COVOF_CVI_MARQUEURS.pdf`).
 - `output/` : Répertoire de sortie par défaut généré lors des simulations si `output.output_dir` vaut `"output"`.
 # Installation, Compilation et Déploiement HPC
 
@@ -413,10 +413,10 @@ Après compilation des deux branches dans `/Users/elhadjiibrahimathiam/Documents
 
 2. **Test de vérification analytique rapide (Laplacien 2D en séquentiel et MPI) :**
    ```bash
-   ./COVOF_2D-C++/bin/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/cas_1_laplacian_32x32.json
-   mpirun -np 4 ./COVOF_2D-FORTRAN/bin/covof2d_fortran VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/cas_1_laplacian_32x32.json
+   ./COVOF_2D-C++/bin/covof2d_cpp VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/case/cpp/cas_1_g32_bicgstab2.json
+   mpirun -np 4 ./COVOF_2D-FORTRAN/bin/covof2d_fortran VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/case/fortran/cas_1_g32_bicgstab2.json
    ```
-   *(Adapter le nom du fichier `.json` présent dans le dossier du cas de validation selon la grille souhaitée).*
+   *(Adapter le nom du fichier `.json` présent dans `case/{cpp,fortran}/` du cas de validation selon la grille souhaitée, ou lancer `bash VALIDATION_TOTALE/Run_Valide-CASES/run_all_validations.sh 1`).*
 
 3. **Suite de vérification automatique FC-WY-CVI-Marker (C++ & Fortran, `np=1` et `np=4`) :**
    ```bash
@@ -658,6 +658,8 @@ Le traitement du terme non linéaire $(\mathbf{u} \cdot \nabla)\mathbf{u}$ est c
 
 ### Schémas Spatiaux (`convective_scheme`)
 
+Chaque schéma ci-dessous est effectivement câblé dans l'opérateur complet *matrix-free* (`apply_system_matrix` en C++, `ns_apply_system_matrix` en Fortran) ; parallèlement, les blocs de préconditionnement `Fuu`/`Fvv` assemblent des diagonales dominantes de type M-matrice décentrée amont pour garantir la robustesse de Gauss-Seidel/SSOR :
+
 1. **Décentré Amont d'Ordre 1 (`"UPWIND"`) :**
    Inconditionnellement stable et monotone même à grand nombre de Reynolds de maille $Re_\Delta > 2$, au prix d'une diffusion numérique $\mathcal{O}(\Delta x)$.
 2. **Centré d'Ordre 2 (`"CENTERED"`) :**
@@ -799,8 +801,8 @@ COVOF 2D implémente une architecture **Matrix-Free** (l'opérateur complet $A \
 | `"BICGSTAB"` | BiCGSTAB standard (van der Vorst 1992) | Systèmes asymétriques modérément raides |
 | `"CG"` / `"CONJUGATE_GRADIENT"` | Gradient Conjugué Préconditionné | Opérateurs symétriques définis positifs (Stokes pur, Poisson, diffusion) |
 | `"GMRES"` | GMRES(30) redémarré (Arnoldi + Givens) | Systèmes fortement non normaux |
-| `"MINRES"` | Minimal Residual (Paige & Saunders 1975) | Systèmes point-selle symétriques indéfinis |
-| `"DIRECT"` / `"MUMPS"` | Factorisation LU LAPACK (`dgetrf`/`dgetrs`) | Petits maillages de référence ou validation exacte (avec mise en cache si $\Delta t$ constant) |
+| `"MINRES"` | Minimal Residual (Paige & Saunders 1975) | Systèmes point-selle symétriques indéfinis uniquement (Stokes pur ; **déconseillé** avec convection non nulle ou préconditionneur asymétrique `BLOCK_TRIANGULAR`, préférer `BICGSTAB2` ou `GMRES`) |
+| `"DIRECT"` / `"MUMPS"` | Factorisation LU LAPACK (`dgetrf`/`dgetrs`) | Petits maillages de référence ou validation exacte (avec mise en cache si $\Delta t$ constant, sur `mpirun -np 1`) |
 
 *(Remarque : C++ dispose également des passerelles `PetscSolverBridge` (`"PETSC"`) et `HypreSolverBridge` (`"HYPRE"`) qui basculent automatiquement sur `BiCGSTAB2Solver` si PETSc/HYPRE ne sont pas liés).*
 
@@ -808,9 +810,9 @@ COVOF 2D implémente une architecture **Matrix-Free** (l'opérateur complet $A \
 
 | Mot-Clé (et Alias) | Formulation | Recommandation |
 | :--- | :--- | :--- |
-| `"JACOBI"` / `"DIAGONAL"` (défaut) | Inversion de la diagonale locale enrichie (`diag_u`, `diag_v`, `diag_p`) | Optimal et 100 % parallèle pour `AAL` et `C-AAL` |
-| `"BLOCK_TRIANGULAR"` / `"BT_SBP"` / `"SCHUR"` | Factorisation par blocs triangulaires $P = \begin{pmatrix} D_u & G \\ 0 & S \end{pmatrix}$ avec 8 balayages SSOR sur le complément de Schur $S$ et 4 balayages sur $F_u, F_v$ | Indispensable pour le mode `"MONOLITHIC"` |
-| `"SSOR"` / `"GAUSS_SEIDEL"` | Lissage avant/arrière symétrique ($\omega = 1.0$) | Écoulements modérément visqueux |
+| `"JACOBI"` / `"DIAGONAL"` (défaut) | Inversion de la diagonale locale enrichie (`diag_u`, `diag_v`, `diag_p`) | Simple et 100 % parallèle pour `AAL` et `C-AAL` |
+| `"BLOCK_TRIANGULAR"` / `"BT_SBP"` / `"SCHUR"` | Factorisation par blocs triangulaires $P = \begin{pmatrix} F_u & G_x \\ 0 & S \end{pmatrix}$ avec 8 balayages SSOR MPI-parallèles sur le complément de Schur $S$ (CSR `SchurLaplace`, projection globale à moyenne nulle en incompressible) et 4 balayages sur $F_u, F_v$ (CSR `Fuu`, `Fvv`, viscosité harmonique $\mu_{\text{node}}$ et conditions aux limites pariétales physiques) | **Indispensable** et 100 % parallèle MPI pour le mode `"MONOLITHIC"` (et très performant aussi en `"AAL"`/`"AL"`) |
+| `"SSOR"` / `"GAUSS_SEIDEL"` | Lissage avant/arrière symétrique ($\omega = 1.0$) par sous-domaine MPI | Écoulements modérément visqueux |
 | `"ILU0"` / `"ILU"` | Factorisation incomplète ILU(0) locale par sous-domaine | Systèmes raides sur sous-domaines compacts |
 | `"CUSTOM"` | Hook utilisateur (`CustomPreconditioner::set_custom_operator` / `custom_precond_hook`) | Prototypage de nouveaux préconditionneurs |
 | `"NONE"` | Identité ($P = I$) | Diagnostic de conditionnement |
@@ -1137,8 +1139,8 @@ Chaque sous-objet `boundary_conditions.<face>` (où `<face>` $\in \{\text{left},
 | Clé JSON | Type | Défaut (C++ / Fortran) | Options / Alias / Plage | Description Physique et Numérique |
 | :--- | :--- | :--- | :--- | :--- |
 | `solver.type` | `string` | `"AUGMENTED_LAGRANGIAN"` | `"AUGMENTED_LAGRANGIAN"`, `"AAL"` (`"ADAPTATIVE_AUGMENTED_LAGRANGIAN"`, `"ADAPTIVE_AUGMENTED_LAGRANGIAN"`), `"C-AAL"` (`"CAAL"`, `"COMPRESSIBLE_AAL"`), `"MONOLITHIC"` (`"FULLY_COUPLED"`, `"FC"`), `"STANDARD_PROJECTION"` (`"PROJECTION"`), `"DIRECT"` (`"MUMPS"`), `"CONJUGATE_GRADIENT"` (Fortran) | Formulation de couplage vitesse-pression. `"AAL"` et `"C-AAL"` activent automatiquement `adaptative_al = true` (`"C-AAL"` active aussi `compressible = true`). |
-| `solver.linear_solver` | `string` | `"BICGSTAB2"` | `"BICGSTAB2"`, `"BICGSTAB"`, `"CG"` (`"CONJUGATE_GRADIENT"`), `"GMRES"`, `"MINRES"`, `"DIRECT"` (`"MUMPS"`), et `"PETSC"`/`"HYPRE"` en C++ | Algorithme de résolution du système linéaire (par défaut `"DIRECT"` si `solver.type = "DIRECT"`). |
-| `solver.precond_type` (alias `preconditioner`) | `string` | `"JACOBI"` | `"JACOBI"` (`"DIAGONAL"`), `"BLOCK_TRIANGULAR"` (`"SCHUR"`, `"BT_SBP"`, `"BT-SBP"`, `"BLOCK"`, `"BLOCK_PRECONDITIONER"`), `"SSOR"` (`"GAUSS_SEIDEL"`), `"ILU0"` (`"ILU"`), `"CUSTOM"`, `"NONE"` | Préconditionneur appliqué à gauche ($P^{-1} A \mathbf{x} = P^{-1} \mathbf{b}$). |
+| `solver.linear_solver` | `string` | `"BICGSTAB2"` | `"BICGSTAB2"`, `"BICGSTAB"`, `"CG"` (`"CONJUGATE_GRADIENT"`), `"GMRES"`, `"MINRES"`, `"DIRECT"` (`"MUMPS"`), et `"PETSC"`/`"HYPRE"` en C++ | Algorithme de résolution du système linéaire (`"DIRECT"` par défaut si `solver.type = "DIRECT"` ; `"MINRES"` réservé aux opérateurs symétriques sans convection ni préconditionneur asymétrique). |
+| `solver.precond_type` (alias `preconditioner`) | `string` | `"JACOBI"` | `"JACOBI"` (`"DIAGONAL"`), `"BLOCK_TRIANGULAR"` (`"SCHUR"`, `"BT_SBP"`, `"BT-SBP"`, `"BLOCK"`, `"BLOCK_PRECONDITIONER"`), `"SSOR"` (`"GAUSS_SEIDEL"`), `"ILU0"` (`"ILU"`), `"CUSTOM"`, `"NONE"` | Préconditionneur appliqué à gauche ($P^{-1} A \mathbf{x} = P^{-1} \mathbf{b}$). `BLOCK_TRIANGULAR` est 100 % parallèle MPI et utilise les blocs CSR `Fuu`, `Fvv`, `SchurLaplace` avec viscosité harmonique $\mu_{\text{node}}$. |
 | `solver.tol` | `double` | `1.0e-7` / `1.0e-5` | $]0.0, 1.0[$ | Tolérance relative d'arrêt du solveur de Krylov $\|\mathbf{r}_k\|_2 / \|\mathbf{r}_0\|_2$. |
 | `solver.max_iter` | `integer` | `1000` / `300` | $\ge 1$ | Nombre maximal d'itérations de Krylov par résolution linéaire. |
 | `solver.r_al` | `double` | `500.0` / `100.0` | $> 0.0\,\text{Pa}\cdot\text{s}$ | Paramètre scalaire de pénalité AL (ou valeur de repli si AAL produit $0$). |
@@ -1349,7 +1351,7 @@ Les exécutables **C++17** (`covof2d_cpp` et son lien `covof2d`) et **Fortran 20
 ### Syntaxe d'Exécution
 
 ```bash
-# Exécution séquentielle (1 processus MPI) :
+# Exécution sur 1 processus MPI (mode séquentiel) :
 ./COVOF_2D-C++/bin/covof2d_cpp chemin/vers/mon_cas.json
 ./COVOF_2D-FORTRAN/bin/covof2d_fortran chemin/vers/mon_cas.json
 
@@ -1574,7 +1576,7 @@ plt.savefig("history_diagnostics.png")
 
 | Symptôme Observé | Cause Physique / Numérique Probable | Action Corrective Recommandée |
 | :--- | :--- | :--- |
-| **Divergence de Krylov (`Iter Krylov` = `max_iter`, `NaN` dans les logs)** | 1. Pas de temps $\Delta t$ violant la CFL convective ou capillaire ($\Delta t_\sigma$).<br>2. Saut $\rho_1/\rho_2$ ou $\mu_1/\mu_2$ brutal sans lissage SVOF.<br>3. Préconditionneur inadapté au mode `MONOLITHIC`. | 1. Activer `time.adaptive_dt = true` avec `time.cfl_max = 0.35`.<br>2. Activer `physics.enable_svof_smoothing = true` (`svof_filter_width = 0.5`).<br>3. Avec `solver.type = "MONOLITHIC"`, utiliser impérativement `solver.precond_type = "BLOCK_TRIANGULAR"`. |
+| **Divergence de Krylov (`Iter Krylov` = `max_iter`, `NaN` dans les logs)** | 1. Pas de temps $\Delta t$ violant la CFL convective ou capillaire ($\Delta t_\sigma$).<br>2. Saut $\rho_1/\rho_2$ ou $\mu_1/\mu_2$ brutal sans lissage SVOF.<br>3. Préconditionneur inadapté au mode `MONOLITHIC` ou `max_iter` insuffisant. | 1. Activer `time.adaptive_dt = true` avec `time.cfl_max = 0.35`.<br>2. Activer `physics.enable_svof_smoothing = true` (`svof_filter_width` $\in [0.5, 1.0]$).<br>3. Avec `solver.type = "MONOLITHIC"`, utiliser impérativement `solver.precond_type = "BLOCK_TRIANGULAR"` (100 % parallèle MPI) avec `BICGSTAB2` ou `GMRES` et `max_iter >= 500` sur maillages fins à forts contrastes. |
 | **Divergence maximale `Div Max` élevée ($> 10^{-4}$)** | Trop peu d'itérations d'Uzawa en mode AL/AAL ou tolérance linéaire trop relâchée. | Passer `solver.type = "MONOLITHIC"` (ou `"AAL"` avec `uzawa_iter = 5`, `uzawa_tol = 1.0e-8`) et abaisser `solver.tol` à `1.0e-9` ou `1.0e-10`. |
 | **Courants parasites intenses autour d'une goutte statique** | Courbure CSF bruitée par différentiation finie de $C$. | Activer la méthode hybride CVI-Marqueurs (`vof.use_markers = true`, `vof.marker_curvature = true`, `vof.marker_advection_scheme = "CVI_RK2"`) et la reconstruction `"ELVIRA"`. |
 | **Fragmentation d'un filament mince ou d'une jupe de bulle** | Sous-résolution sous-maille ($\delta < \Delta x$) ou perte de cohérence de normale. | Activer `vof.use_markers = true`, `vof.marker_normals_plic = true` et `vof.advection_method = "WEYMOUTH_YUE"` avec `cfl_vof <= 0.35`. |

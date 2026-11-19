@@ -121,6 +121,6 @@ Contrairement à l'opérateur complet $A \mathbf{x}$ qui est **100 % *matrix-fre
   - `col_idx` (`std::vector<int>`)
   - `values` (`std::vector<double>`)
   - `diag` (`std::vector<double>`, diagonale extraite explicitement pour Jacobi / Gauss-Seidel)
-  Elle fournit `set_from_triplets(r, c, rows, cols, vals)` (tri et fusion des doublons), `matvec(x, y)` (produit $y = Ax$ séquentiel par sous-domaine) et `solve_jacobi(b, x, num_iters)`. Dans `NavierStokesSolver::assemble_preconditioner_blocks`, elle assemble `Fuu`, `Fvv` et `SchurLaplace`.
+  Elle fournit `set_from_triplets(r, c, rows, cols, vals)` (tri et fusion des doublons), `matvec(x, y)` (produit $y = Ax$ par sous-domaine) et `solve_jacobi(b, x, num_iters)`. Dans `NavierStokesSolver::assemble_preconditioner_blocks`, elle assemble `Fuu`, `Fvv` et `SchurLaplace` (avec viscosité nodale harmonique $\mu_{\text{node}}$, convection amont M-matrice et conditions aux limites pariétales physiques) consommés en **MPI pur** par `BlockTriangularPreconditioner::apply` via balayages SSOR + synchronisation des halos (`MpiComm::sync_*`) et réduction globale de moyenne nulle.
 - **En Fortran (`module_navier_stokes.f90`) :**
   Il n'existe pas de module `module_csr_matrix.f90` séparé : `navier_stokes_t` stocke directement les stencils structurés à 5 points sous forme de tableaux 1D/2D contigus (`u_aE, u_aW, u_aN, u_aS, u_aP`, `v_aE, ..., v_aP`, `schur_aE, ..., schur_aP`), optimisés pour les balayages SSOR vectorisés dans `apply_preconditioner`.

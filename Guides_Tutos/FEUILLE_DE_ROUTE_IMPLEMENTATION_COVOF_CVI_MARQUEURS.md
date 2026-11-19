@@ -7,7 +7,7 @@ L'intégration de la méthode hybride **VOF-PLIC (Weymouth & Yue) + Interpolatio
 
 1. **Préservation à 100 % des méthodes existantes (Rétrocompatibilité bit-à-bit)** :
    - Tous les paramètres du nouveau module sont désactivés par défaut (`use_markers = .false.` / `false`, `marker_curvature = .false.` / `false`, `marker_normals_plic = .false.` / `false`).
-   - Lorsque `use_markers = false`, aucun tableau de marqueurs n'est parcouru dans la boucle temporelle, et les sorties numériques (`.vtk` et `.csv`) des 14 cas de validation analytiques (`Run_Valide-CASES`) et des cas multiphysiques (`Run_CASES`) demeurent **strictement identiques bit-à-bit** à l'existant.
+   - Lorsque `use_markers = false`, aucun tableau de marqueurs n'est parcouru dans la boucle temporelle, et les sorties numériques (`.vtk` et `.csv`) des 12 cas de validation rapides (`Run_Valide-CASES`) et des 9 cas avancés (`Run_CASES`) demeurent **strictement identiques bit-à-bit** à l'existant.
    - Toutes les méthodes déjà codées restent intactes et combinables :
      - **Solveurs vitesse-pression** : `MONOLITHIC` (FC), `AUGMENTED_LAGRANGIAN` (AL), `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (AAL), `CAAL`, `STANDARD_PROJECTION`.
      - **Solveurs linéaires et préconditionneurs** : `DIRECT_LU`, `BICGSTAB`, `BICGSTAB2`, `GMRES`, `MINRES`, `CG` avec `NONE`, `JACOBI`, `SSOR`, `ILU0`, `BLOCK_TRIANGULAR`, `BT_SBP`, `CUSTOM`.

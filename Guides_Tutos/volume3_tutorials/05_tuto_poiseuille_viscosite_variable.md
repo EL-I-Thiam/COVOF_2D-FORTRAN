@@ -1,5 +1,7 @@
 # Tutoriel 5 : Écoulement de Poiseuille Plan à Viscosité Variable Exponentielle
 
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_5_poiseuille_visc_variable/` *(validation rapide `Run_Valide-CASES`, cas 5)*.
+
 Ce tutoriel explore l'effet d'une hétérogénéité spatiale continue de la viscosité dynamique $\mu(y) = \mu_0 \exp\big(a (y - e)^2 / e^2\big)$ sur un écoulement de Poiseuille. Il valide l'évaluation conservative des contraintes visqueuses aux nœuds de vorticité sur grille MAC ainsi que le comportement des solveurs et préconditionneurs à coefficients variables.
 
 ---

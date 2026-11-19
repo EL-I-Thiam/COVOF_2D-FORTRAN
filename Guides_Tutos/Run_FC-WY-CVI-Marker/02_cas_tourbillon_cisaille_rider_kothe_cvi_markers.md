@@ -6,7 +6,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 
 ### Interdictions absolues et règles de fidélité
 1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires.
-2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez chaque simulation avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/02_cas_tourbillon_cisaille_rider_kothe_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`. Purge totale requise avant lancement (aucun fichier doublon `* 2.*`).
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez chaque simulation avec `cwd = VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/02_cas_tourbillon_cisaille_rider_kothe_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`. Purge totale requise avant lancement (aucun fichier doublon `* 2.*`).
 3. **SPÉCIFICATION EXPLICITE DE LA GÉOMÉTRIE (`axis_a`, `axis_b`, `pert_amp`)** : En mode `VORTEX_ADVECTION`, spécifiez explicitement **`"axis_a": 0.125, "axis_b": 0.125, "pert_amp": 0.0`** dans `"initial_condition"` avec `"type": "DROPLET"` (pour comparer de manière strictement iso-IC à $t=0$). Vérifiez à $t=0$ dans les `.vtr` que le disque initial est identique pour toutes les configurations.
 4. **COMPARAISON NON BIAISÉE SUR L'AXE B (`CVI_RK2` vs `BILINEAR_RK2`)** : Gardez strictement la même valeur de `marker_normals_plic` (testez d'abord `false` pour isoler purement l'effet CVI vs Bilinéaire sur les trajectoires, puis éventuellement `true`) entre `CVI_RK2` et `BILINEAR_RK2`.
 5. **ZÉRO RÉSULTAT EN DUR, ZÉRO CHERRY-PICKING** : Ne supprimez jamais de lignes ni de colonnes défavorables des tableaux CSV dans le rapport final. Reportez systématiquement $E_{R,\mathrm{mean}}$, $E_{R,\max}$, la distance de Hausdorff exacte $d_H$, les écarts C++/Fortran et les écarts `NP=1` vs `NP=4` tels qu'ils sortent des simulations.
@@ -16,7 +16,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 ## 2. Arborescence et Spécification Réelle des Sorties en Mode `VORTEX_ADVECTION`
 
 ```text
-VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/02_cas_tourbillon_cisaille_rider_kothe_cvi_markers/
+VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/02_cas_tourbillon_cisaille_rider_kothe_cvi_markers/
 ├── case/{cpp,fortran}/
 ├── output/{cpp,fortran}/
 ├── figures/

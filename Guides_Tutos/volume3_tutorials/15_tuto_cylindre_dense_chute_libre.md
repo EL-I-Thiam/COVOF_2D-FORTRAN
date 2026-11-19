@@ -1,4 +1,6 @@
-# Tutoriel 8 : Chute Libre d'un Cylindre Dense dans le Vide (Forts Contrastes)
+# Tutoriel 15 : Chute Libre d'un Cylindre Dense dans le Vide (Forts Contrastes)
+
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_CASES/validation_cas_3_dense_cylinder/` *(campagne avancée `Run_CASES`)*.
 
 Ce tutoriel valide le couplage fluide-solide par approche 1-fluide à fort contraste de masse volumique et de viscosité ($\rho_2 / \rho_1 \approx 85\,000$, $\mu_2 / \mu_1 \approx 5.4\times 10^9$). Il démontre que l'inclusion cylindrique dense suit rigoureusement la cinématique galiléenne de chute libre dans le vide sans dispersion ni amortissement numérique parasite.
 
@@ -36,8 +38,9 @@ $$U_c^{\mathrm{ex}}(0.144\,\mathrm{s}) = -1.41264\,\mathrm{m/s}, \qquad Y_c^{\ma
 
 Les briques numériques clés activées pour ce cas sont :
 1. **Schéma temporel Gear / BDF2** (`"time_scheme": "GEAR"`) et linéarisation convective d'Adams-Bashforth (`"convective_linearization": "ADAMS_BASHFORTH"`).
-2. **Lissage SVOF de Helmholtz** (`(I - k\Delta x\Delta y \Delta)C_s = C`) avec moyenne harmonique nodale de la viscosité de cisaillement.
-3. **Couplages comparés :** `MONOLITHIC` (FC), `AUGMENTED_LAGRANGIAN` (AL), `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (AAL avec facteur `k_aal` et critère `uzawa_tol`) et `STANDARD_PROJECTION` (SP).
+2. **Lissage SVOF de Helmholtz** (`(I - k\Delta x\Delta y \Delta)C_s = C`) malgré $\sigma = 0$ : régularise le saut extrême $r_\rho \approx 85\,000, r_\mu \approx 5.4\times 10^9$ avec moyenne harmonique nodale $\mu_{\mathrm{node}}$ (à comparer impérativement avec `enable_svof_smoothing: false`).
+3. **Schéma convectif `CENTERED` et budget Krylov :** `convective_scheme` est câblé dans l'opérateur complet (`CENTERED` recommandé selon *Fluids* 2021, à comparer à `UPWIND` et `TVD_SUPERBEE`), et `BLOCK_TRIANGULAR` (100 % parallèle MPI via CSR `Fuu`/`Fvv`/`SchurLaplace`) requiert `max_iter >= 500` sur $100\times 200$ (`800` sur $200\times 400$).
+4. **Couplages comparés :** `MONOLITHIC` (FC), `AUGMENTED_LAGRANGIAN` (AL), `ADAPTATIVE_AUGMENTED_LAGRANGIAN` (AAL avec facteur `k_aal` et critère `uzawa_tol`) et `STANDARD_PROJECTION` (SP).
 
 ---
 
@@ -50,7 +53,7 @@ Les briques numériques clés activées pour ce cas sont :
 | Domaine et Cylindre | $\Omega$, $(x_c, Y_0)$, $R$ | $[0, 0.1]\times[0, 0.2]\,\mathrm{m}^2$, $(0.05, 0.15)\,\mathrm{m}$, $R = 0.0125\,\mathrm{m}$ (`axis_a = axis_b = 0.0125`, `pert_amp = 0.0`) |
 | Maillages et Pas de temps | $(N_x \times N_y)$, $\Delta t$, $t_{\mathrm{final}}$ | $100\times 200$ et $200\times 400$, $\Delta t = 6.25\times 10^{-5}\,\mathrm{s}$, $t_{\mathrm{final}} = 0.144\,\mathrm{s}$ (2304 pas) |
 | Conditions aux limites | Gauche/Droite ; Bas/Haut | `FREE_SLIP` sur $x=0, 0.1$ ; `DIRICHLET` ($u=v=0$) sur $y=0, 0.2$ |
-| Solveurs et Préconditionneurs | Couplage, Krylov, Précond. | `MONOLITHIC` (FC), `AUGMENTED_LAGRANGIAN` (AL), `AAL` (`k_aal` $\in \{10, 100, 1000\}$), `STANDARD_PROJECTION` ; `BICGSTAB2`, `GMRES`, `BICGSTAB` ; `BLOCK_TRIANGULAR`, `JACOBI`, `SSOR`, `ILU0` |
+| Solveurs et Préconditionneurs | Couplage, Krylov, Précond. | `MONOLITHIC` (FC), `AUGMENTED_LAGRANGIAN` (AL), `AAL` (`k_aal` $\in \{10, 100, 1000\}$, réf. `10` / `100`, `max_iter = 500`/`800`), `STANDARD_PROJECTION` ; `BICGSTAB2`, `GMRES`, `BICGSTAB` ; `BLOCK_TRIANGULAR`, `JACOBI`, `SSOR`, `ILU0` |
 
 ---
 
@@ -73,7 +76,7 @@ Les briques numériques clés activées pour ce cas sont :
     "enable_two_phase": true,
     "enable_surface_tension": false,
     "enable_convection": true,
-    "convective_scheme": "UPWIND",
+    "convective_scheme": "CENTERED",
     "convective_linearization": "ADAMS_BASHFORTH",
     "enable_svof_smoothing": true,
     "svof_filter_width": 1.0,
@@ -110,7 +113,7 @@ Les briques numériques clés activées pour ce cas sont :
     "type": "MONOLITHIC",
     "linear_solver": "BICGSTAB2",
     "tol": 1e-06,
-    "max_iter": 120,
+    "max_iter": 500,
     "r_al": 0.0,
     "uzawa_iter": 1,
     "use_precond": true,
@@ -120,7 +123,8 @@ Les briques numériques clés activées pour ce cas sont :
     "advection_method": "WEYMOUTH_YUE",
     "reconstruction_method": "PLIC",
     "tvd_limiter": "NONE",
-    "cfl_vof": 0.5
+    "cfl_vof": 0.5,
+    "use_markers": false
   },
   "output": {
     "output_dir": "output/cpp/fc_100x200",
@@ -139,10 +143,10 @@ Pour activer le Lagrangien Augmenté Adaptatif (`AAL`), remplacer le bloc `"solv
     "type": "ADAPTATIVE_AUGMENTED_LAGRANGIAN",
     "linear_solver": "BICGSTAB2",
     "tol": 1e-06,
-    "max_iter": 200,
+    "max_iter": 500,
     "r_al": 0.0,
     "adaptative_al": true,
-    "k_aal": 100.0,
+    "k_aal": 10.0,
     "uzawa_iter": 5,
     "uzawa_tol": 1e-06,
     "use_precond": true,
@@ -189,7 +193,7 @@ mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_
 
 ```python
 #!/usr/bin/env python3
-"""Vérification dynamique du Tutoriel 8 (Chute libre cylindre dense) depuis *_history.csv."""
+"""Vérification dynamique du Tutoriel 15 (Chute libre cylindre dense) depuis *_history.csv."""
 import csv
 import math
 from pathlib import Path

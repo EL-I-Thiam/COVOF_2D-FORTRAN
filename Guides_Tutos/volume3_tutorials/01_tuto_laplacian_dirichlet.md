@@ -1,5 +1,7 @@
 # Tutoriel 1 : Opérateur Laplacien avec Conditions de Dirichlet Homogènes
 
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_1_laplacian/` *(validation rapide `Run_Valide-CASES`, cas 1)*.
+
 Ce premier tutoriel constitue le point de départ fondamental de la vérification de COVOF 2D. Il permet de valider la discrétisation spatiale à l'ordre 2 de l'opérateur Laplacien scalaire 2D (équation de Poisson) avec conditions aux limites de Dirichlet homogènes sur grille cartésienne structurée.
 
 ---

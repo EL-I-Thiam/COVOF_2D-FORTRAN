@@ -1,4 +1,6 @@
-# Tutoriel 13 : Oscillations Capillaires Amorties d'une Bulle de Gaz (Théorie de Lamb)
+# Tutoriel 18 : Oscillations Capillaires Amorties d'une Bulle de Gaz (Théorie de Lamb)
+
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_CASES/validation_cas_6_oscillation_bulle_capillaire/` *(campagne avancée `Run_CASES`)*.
 
 Ce tutoriel met en œuvre une bulle de gaz initialement déformée en ellipse selon le mode quadrupolaire $n = 2$ dans un métal liquide dense, sous l'action combinée de la tension superficielle et de la dissipation visqueuse. La fréquence propre d'oscillation et l'amortissement sont confrontés à la théorie linéaire de Rayleigh-Lamb.
 
@@ -163,7 +165,7 @@ mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_
 
 ```python
 #!/usr/bin/env python3
-"""Vérification dynamique du Tutoriel 13 (Oscillation de bulle / Lamb)."""
+"""Vérification dynamique du Tutoriel 18 (Oscillation de bulle / Lamb)."""
 import csv
 import math
 import xml.etree.ElementTree as ET

@@ -1,5 +1,7 @@
 # Tutoriel 2 : Opérateur Laplacien avec Conditions de Neumann Non Homogènes et Jauge de Pression
 
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_2_neumann/` *(validation rapide `Run_Valide-CASES`, cas 2)*.
+
 Ce tutoriel aborde la résolution d'une équation de Laplace sous conditions aux limites de Neumann pur. Il met en lumière deux aspects cruciaux du calcul CFD : le traitement rigoureux des flux pariétaux sur grille structurée et la levée du mode singulier à constante (jauge de pression) pour garantir l'unicité de la solution et la convergence du solveur.
 
 ---

@@ -6,7 +6,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 
 ### Interdictions absolues et règles de fidélité
 1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires.
-2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/08_cas_flambement_jet_visqueux_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/08_cas_flambement_jet_visqueux_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
 3. **VÉRIFICATION DES MARQUEURS ET DU RÉ-ENSEMENCEMENT À L'INJECTEUR `JET_INLET`** :
    Dans les binaires C++ et Fortran actualisés, lorsque `vof.use_markers` est activé, la condition initiale `"VISCOUS_JET"` utilise un sous-échantillonnage $16\times 16$ par cellule autour du bouchon d'injection (`center_x`, `jet_width`) et `prune_and_reseed` ré-ensemence les flancs du jet entrant au bord supérieur `JET_INLET` ($y = L_y$).
    **Obligation absolue :** Le script de post-traitement doit vérifier et rapporter l'évolution réelle `n_markers(t)` depuis `*_markers_*.vtk` et vérifier que les marqueurs suivent bien le développement du jet entrant (ou signaler tout comportement réel observé).
@@ -18,7 +18,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 ## 2. Arborescence et Théorie du Flambement Visqueux
 
 ```text
-VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/08_cas_flambement_jet_visqueux_cvi_markers/
+VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/08_cas_flambement_jet_visqueux_cvi_markers/
 ├── case/{cpp,fortran}/
 ├── output/{cpp,fortran}/
 ├── figures/

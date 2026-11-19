@@ -1,5 +1,7 @@
 # Tutoriel 3 : Écoulement de Poiseuille Plan Laminaire Stationnaire
 
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_3_poiseuille/` *(validation rapide `Run_Valide-CASES`, cas 3)*.
+
 Ce tutoriel traite de l'écoulement laminaire cisaillé 1D stationnaire en canal plan entre deux parois immobiles, entraîné par un profil parabolique imposé en entrée et équilibré par un gradient de pression longitudinal. Il valide la discrétisation de Navier-Stokes incompressible sur maillage décalé MAC et l'extrapolation quadratique à 3 points dans les mailles fantômes pariétales.
 
 ---
@@ -119,7 +121,7 @@ En injectant cette relation dans le stencil visqueux centré au premier nœud in
 
 ## 5. Procédure d'Exécution (Moteurs C++17 et Fortran 2018)
 
-Les deux moteurs utilisent **MPI pur**. Avec les solveurs de Krylov (`BICGSTAB2`, `GMRES`, `BICGSTAB`, `MINRES`), le calcul s'exécute en parallèle sur plusieurs rangs MPI (`mpirun -np 4`) ; avec `DIRECT` ou `STANDARD_PROJECTION`, utiliser `mpirun -np 1`.
+Les deux moteurs utilisent **MPI pur**. Avec les solveurs de Krylov (`BICGSTAB2`, `GMRES`, `BICGSTAB`, et `MINRES` uniquement sur systèmes symétriques sans convection ni préconditionneur asymétrique `BLOCK_TRIANGULAR`), le calcul s'exécute en parallèle sur plusieurs rangs MPI (`mpirun -np 4`) ; avec `DIRECT` ou `STANDARD_PROJECTION`, utiliser `mpirun -np 1`.
 
 ```bash
 # 1. Créer les répertoires de sortie relatifs courts
@@ -144,7 +146,7 @@ mpirun -np 1 /chemin/vers/COVOF_2D-C++/bin/covof2d_cpp case/cpp/cas_3_poiseuille
    À partir de `poiseuille_error.csv`, vérifier sur toutes les grilles ($16\times 16$ à $128\times 128$) que $E_{L_1}, E_{L_2}, E_{L_\infty} < 10^{-11}\,\mathrm{m/s}$ et que la composante transversale satisfait $\|v\|_\infty < 10^{-13}\,\mathrm{m/s}$.
    Vérifier également que le gradient axial de pression numérique $G_{x,\mathrm{num}}$ restitué dans `profile_p_x.csv` coïncide avec $G_{x,\mathrm{ex}} = 12\mu V_0 / H^2$ (`err_grad_p` relatif $< 10^{-9}$).
 2. **Invariance des schémas convectifs et comparaison des couplages :**
-   Puisque $\partial u_{\mathrm{ex}}/\partial x = 0$ et $v_{\mathrm{ex}} = 0$, vérifier l'invariance vis-à-vis de `"convective_scheme"` (`UPWIND`, `CENTERED`, `TVD_SUPERBEE`) et `"convective_linearization"` (`PICARD`, `ADAMS_BASHFORTH`, `NEWTON`), ainsi que la suprématie de `BLOCK_TRIANGULAR` sur `JACOBI`, `SSOR` et `ILU0`.
+   Puisque $\partial u_{\mathrm{ex}}/\partial x = 0$ et $v_{\mathrm{ex}} = 0$, vérifier l'invariance vis-à-vis de `"convective_scheme"` (`UPWIND`, `CENTERED`, `TVD_SUPERBEE` — tous trois effectivement câblés dans `apply_system_matrix`) et `"convective_linearization"` (`PICARD`, `ADAMS_BASHFORTH`, `NEWTON`), ainsi que la suprématie du préconditionneur MPI-parallèle `BLOCK_TRIANGULAR` sur `JACOBI`, `SSOR` et `ILU0`.
 3. **Parité C++17 / Fortran 2018 :**
    Vérifier que $\|u^{\mathrm{C++}} - u^{\mathrm{Fortran}}\|_\infty < 10^{-12}\,\mathrm{m/s}$ et $\|p^{\mathrm{C++}} - p^{\mathrm{Fortran}}\|_\infty < 10^{-12}\,\mathrm{Pa}$.
 

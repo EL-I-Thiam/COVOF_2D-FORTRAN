@@ -1,4 +1,6 @@
-# Tutoriel 14 : Instabilité Interfaciale Diphasique de Rayleigh-Taylor (Dispersion Linéaire)
+# Tutoriel 19 : Instabilité Interfaciale Diphasique de Rayleigh-Taylor (Dispersion Linéaire)
+
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_CASES/validation_cas_7_instabilite_interface_gravitaire/` *(campagne avancée `Run_CASES`)*.
 
 Ce dernier tutoriel simule l'instabilité hydrodynamique de Rayleigh-Taylor se développant à l'interface entre un fluide lourd superposé à un fluide léger soumis à la gravité. Le taux de croissance exponentiel en régime linéaire et le seuil de stabilisation capillaire sont confrontés à la relation de dispersion analytique hydro-capillaire.
 
@@ -162,7 +164,7 @@ mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_
 
 ```python
 #!/usr/bin/env python3
-"""Vérification dynamique du Tutoriel 14 (Rayleigh-Taylor) depuis les .pvtr."""
+"""Vérification dynamique du Tutoriel 19 (Rayleigh-Taylor) depuis les .pvtr."""
 import math
 import xml.etree.ElementTree as ET
 from pathlib import Path

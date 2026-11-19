@@ -1,5 +1,7 @@
 # Tutoriel 4 : Écoulement de Poiseuille Plan Instationnaire (Démarrage Impulsionnel)
 
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_Valide-CASES/validation_cas_4_poiseuille_instat/` *(validation rapide `Run_Valide-CASES`, cas 4)*.
+
 Ce tutoriel aborde le régime transitoire d'établissement visqueux d'un écoulement de Poiseuille plan à partir du repos sous l'effet soudain d'un forçage gravitationnel axial constant. La solution analytique en série de Fourier de Szymanski permet de valider avec une haute précision les schémas d'intégration en temps (`EULER` et `GEAR` / BDF2) et la convergence spatio-temporelle.
 
 ---

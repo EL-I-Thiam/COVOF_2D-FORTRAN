@@ -7,7 +7,7 @@ Les exécutables **C++17** (`covof2d_cpp` et son lien `covof2d`) et **Fortran 20
 ### Syntaxe d'Exécution
 
 ```bash
-# Exécution séquentielle (1 processus MPI) :
+# Exécution sur 1 processus MPI (mode séquentiel) :
 ./COVOF_2D-C++/bin/covof2d_cpp chemin/vers/mon_cas.json
 ./COVOF_2D-FORTRAN/bin/covof2d_fortran chemin/vers/mon_cas.json
 
@@ -232,7 +232,7 @@ plt.savefig("history_diagnostics.png")
 
 | Symptôme Observé | Cause Physique / Numérique Probable | Action Corrective Recommandée |
 | :--- | :--- | :--- |
-| **Divergence de Krylov (`Iter Krylov` = `max_iter`, `NaN` dans les logs)** | 1. Pas de temps $\Delta t$ violant la CFL convective ou capillaire ($\Delta t_\sigma$).<br>2. Saut $\rho_1/\rho_2$ ou $\mu_1/\mu_2$ brutal sans lissage SVOF.<br>3. Préconditionneur inadapté au mode `MONOLITHIC`. | 1. Activer `time.adaptive_dt = true` avec `time.cfl_max = 0.35`.<br>2. Activer `physics.enable_svof_smoothing = true` (`svof_filter_width = 0.5`).<br>3. Avec `solver.type = "MONOLITHIC"`, utiliser impérativement `solver.precond_type = "BLOCK_TRIANGULAR"`. |
+| **Divergence de Krylov (`Iter Krylov` = `max_iter`, `NaN` dans les logs)** | 1. Pas de temps $\Delta t$ violant la CFL convective ou capillaire ($\Delta t_\sigma$).<br>2. Saut $\rho_1/\rho_2$ ou $\mu_1/\mu_2$ brutal sans lissage SVOF.<br>3. Préconditionneur inadapté au mode `MONOLITHIC` ou `max_iter` insuffisant. | 1. Activer `time.adaptive_dt = true` avec `time.cfl_max = 0.35`.<br>2. Activer `physics.enable_svof_smoothing = true` (`svof_filter_width` $\in [0.5, 1.0]$).<br>3. Avec `solver.type = "MONOLITHIC"`, utiliser impérativement `solver.precond_type = "BLOCK_TRIANGULAR"` (100 % parallèle MPI) avec `BICGSTAB2` ou `GMRES` et `max_iter >= 500` sur maillages fins à forts contrastes. |
 | **Divergence maximale `Div Max` élevée ($> 10^{-4}$)** | Trop peu d'itérations d'Uzawa en mode AL/AAL ou tolérance linéaire trop relâchée. | Passer `solver.type = "MONOLITHIC"` (ou `"AAL"` avec `uzawa_iter = 5`, `uzawa_tol = 1.0e-8`) et abaisser `solver.tol` à `1.0e-9` ou `1.0e-10`. |
 | **Courants parasites intenses autour d'une goutte statique** | Courbure CSF bruitée par différentiation finie de $C$. | Activer la méthode hybride CVI-Marqueurs (`vof.use_markers = true`, `vof.marker_curvature = true`, `vof.marker_advection_scheme = "CVI_RK2"`) et la reconstruction `"ELVIRA"`. |
 | **Fragmentation d'un filament mince ou d'une jupe de bulle** | Sous-résolution sous-maille ($\delta < \Delta x$) ou perte de cohérence de normale. | Activer `vof.use_markers = true`, `vof.marker_normals_plic = true` et `vof.advection_method = "WEYMOUTH_YUE"` avec `cfl_vof <= 0.35`. |

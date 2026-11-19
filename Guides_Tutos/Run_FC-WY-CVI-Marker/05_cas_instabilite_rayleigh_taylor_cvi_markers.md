@@ -6,7 +6,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 
 ### Interdictions absolues et règles de fidélité
 1. **INTERDICTION DE MODIFIER LE CODE SOURCE OU LES BINAIRES** : Ne modifiez aucun fichier dans `COVOF_2D-C++/` ni `COVOF_2D-FORTRAN/` et ne recompilez pas les binaires.
-2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/05_cas_instabilite_rayleigh_taylor_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
+2. **CONFORMITÉ DES CHEMINS (`output_dir <= 512` car.)** : Exécutez avec `cwd = VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/05_cas_instabilite_rayleigh_taylor_cvi_markers`, pré-créez `output/{cpp,fortran}/<cas>`, et utilisez des chemins courts relatifs `"output/cpp/<cas>"` et `"output/fortran/<cas>"`.
 3. **VÉRIFICATION OBLIGATOIRE DES MARQUEURS SUR L'INITIALISATION `RAYLEIGH_TAYLOR`** :
    Dans les binaires C++ et Fortran actualisés, lorsque `vof.use_markers` est activé, la condition initiale `"RAYLEIGH_TAYLOR"` utilise un sous-échantillonnage $16\times 16$ par cellule afin de générer des cellules mixtes (`0.01 < C < 0.99`) et d'ensemencer des marqueurs dès $t = 0$.
    **Obligation absolue :** Le script de post-traitement doit compter et rapporter le nombre réel `n_markers(t)` dans `*_markers_*.vtk` pour chaque simulation (`n_markers(0) > 0` attendu lorsque `use_markers: true`). Si `n_markers(t) == 0` sur une exécution donnée, signalez-le explicitement sans attribuer aux marqueurs CVI un résultat issu de `WY + PLIC (+ SVOF)` seul.
@@ -18,7 +18,7 @@ Vous êtes un agent autonome chargé de préparer, d'exécuter, de vérifier et 
 ## 2. Arborescence et Théorie de l'Instabilité de Rayleigh-Taylor
 
 ```text
-VALIDATION_TOTALE/Run_CASES/Run_FC-WY-CVI-Marker/05_cas_instabilite_rayleigh_taylor_cvi_markers/
+VALIDATION_TOTALE/Run_CASES/RUN_FC-WY-CVI-Marker/05_cas_instabilite_rayleigh_taylor_cvi_markers/
 ├── case/{cpp,fortran}/
 ├── output/{cpp,fortran}/
 ├── figures/

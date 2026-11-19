@@ -1,4 +1,6 @@
-# Tutoriel 9 : Sédimentation Confinée 2D d'une Inclusion Cylindrique et Loi de Faxén
+# Tutoriel 16 : Sédimentation Confinée 2D d'une Inclusion Cylindrique et Loi de Faxén
+
+> **Référence dépôt :** `VALIDATION_TOTALE/Run_CASES/validation_cas_4_sedimentation_faxen/` *(campagne avancée `Run_CASES`)*.
 
 Ce tutoriel modélise la sédimentation gravitaire d'un cylindre solide en régime rampant de Stokes ($\mathrm{Re}_p \ll 1$) entre deux parois planes verticales. La vitesse terminale quasi-stationnaire obtenue numériquement est confrontée à la loi analytique de Faxén intégrant l'effet de confinement pariétal.
 
@@ -164,7 +166,7 @@ mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_
 
 ```python
 #!/usr/bin/env python3
-"""Vérification dynamique du Tutoriel 9 (Sédimentation de Faxén) depuis les .pvtr."""
+"""Vérification dynamique du Tutoriel 16 (Sédimentation de Faxén) depuis les .pvtr."""
 import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
