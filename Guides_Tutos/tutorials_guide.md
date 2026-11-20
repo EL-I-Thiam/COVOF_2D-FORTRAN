@@ -1757,7 +1757,7 @@ Références externes de la littérature (Dennis & Chang 1970 ; Fornberg 1980 ; 
 
 | Catégorie | Paramètre | Valeur / Spécification |
 | :----------------------- | :----------------------- | :------------------------------------------------------- |
-| Domaine et maillages | `mesh.{nx,ny,lx,ly}` | $L_x = 30.0\,\mathrm{m}$, $L_y = 15.0\,\mathrm{m}$ ; $200\times 100$, $400\times 200$, $800\times 400$ |
+| Domaine et maillages | `mesh.{nx,ny,lx,ly}` | $L_x = 30.0\,\mathrm{m}$, $L_y = 15.0\,\mathrm{m}$ ; maillages isotropes $50\times 25$, $100\times 50$, $200\times 100$ *(soit $N_y \times N_x = 25\times 50$, $50\times 100$, $100\times 200$)* |
 | Cylindre immergé | `obstacles[0]` | `{"type": "CYLINDER", "xc": 7.5, "yc": 7.5, "radius": 0.5, "permeability": 1e-14}` |
 | Fluide et convection | `physics` | `enable_two_phase: false`, $\rho=1.0$, $\mu=0.05$, `CENTERED` vs `TVD_SUPERBEE`, `NEWTON` vs `AB2` |
 | Temps | `time.{time_scheme,dt,t_final}` | `"GEAR"`, $\Delta t = 0.05\,\mathrm{s}$, $t_{\mathrm{final}} = 50.0\,\mathrm{s}$ |
@@ -1768,15 +1768,15 @@ Références externes de la littérature (Dennis & Chang 1970 ; Fornberg 1980 ; 
 
 ## 4. Fichier de Configuration JSON Pas à Pas
 
-### 4.1 Prototype `case/cpp/cas_10_sillage_re20_400x200.json`
-*(Pour Fortran 2018, utiliser une copie dans `case/fortran/` avec `"output_dir": "output/fortran/grid_400x200"`.)*
+### 4.1 Prototype `case/cpp/cas_10_sillage_re20_200x100.json`
+*(Pour Fortran 2018, utiliser une copie dans `case/fortran/` avec `"output_dir": "output/fortran/grid_200x100"`.)*
 
 ```json
 {
   "mode": "NAVIER_STOKES",
   "mesh": {
-    "nx": 400,
-    "ny": 200,
+    "nx": 200,
+    "ny": 100,
     "lx": 30.0,
     "ly": 15.0
   },
@@ -1821,8 +1821,8 @@ Références externes de la littérature (Dennis & Chang 1970 ; Fornberg 1980 ; 
     "precond_type": "BLOCK_TRIANGULAR"
   },
   "output": {
-    "output_dir": "output/cpp/grid_400x200",
-    "case_name": "cas_10_sillage_re20_400x200",
+    "output_dir": "output/cpp/grid_200x100",
+    "case_name": "cas_10_sillage_re20_200x100",
     "vtk_interval": 200,
     "log_interval": 20,
     "write_csv_history": true
@@ -1836,13 +1836,13 @@ Références externes de la littérature (Dennis & Chang 1970 ; Fornberg 1980 ; 
 
 ```bash
 # 1. Créer les répertoires de sortie relatifs courts
-mkdir -p output/cpp/grid_400x200 output/fortran/grid_400x200
+mkdir -p output/cpp/grid_200x100 output/fortran/grid_200x100
 
 # 2. Exécution parallèle MPI avec le moteur C++17
-mpirun -np 4 /chemin/vers/COVOF_2D-C++/bin/covof2d_cpp case/cpp/cas_10_sillage_re20_400x200.json
+mpirun -np 4 /chemin/vers/COVOF_2D-C++/bin/covof2d_cpp case/cpp/cas_10_sillage_re20_200x100.json
 
 # 3. Exécution parallèle MPI avec le moteur Fortran 2018
-mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_10_sillage_re20_400x200.json
+mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_10_sillage_re20_200x100.json
 ```
 
 ---
@@ -1851,8 +1851,8 @@ mpirun -np 4 /chemin/vers/COVOF_2D-FORTRAN/bin/covof2d_fortran case/fortran/cas_
 
 ### 6.1 Critères de Vérification Dynamique
 1. **Longueur du sillage $L_r/D$ :** Identifier sur la ligne médiane $y = y_c = 7.5\,\mathrm{m}$ en aval du bord arrière ($x > 8.0\,\mathrm{m}$) l'abscisse $x_{\mathrm{stag}}$ où $u(x, y_c)$ s'annule et calculer $L_r/D = (x_{\mathrm{stag}} - 8.0) / 1.0$.
-2. **Traînée de Brinkman $C_d$ et symétrie $|C_l|$ :** Intégrer $(\mu/\mathcal{K}) u\,\Delta x\Delta y$ et $(\mu/\mathcal{K}) v\,\Delta x\Delta y$ sur les cellules contenues dans $(x-x_c)^2+(y-y_c)^2 \le R^2$ et contrôler la symétrie transverse $|u(x, y_c+\eta) - u(x, y_c-\eta)|$.
-3. **Convergence et parité C++17 / Fortran 2018 :** Étudier la convergence sur $200\times 100 \to 400\times 200 \to 800\times 400$ et vérifier la cohérence inter-codes et inter-solveurs.
+2. **Traînée $C_d$ et symétrie $|C_l|$ :** Pour $K > 10^{-12}$, intégrer $(\mu/\mathcal{K}) u\,\Delta x\Delta y$ et $(\mu/\mathcal{K}) v\,\Delta x\Delta y$ sur $(x-x_c)^2+(y-y_c)^2 \le R^2$ ; pour l'obstacle rigide ($K \le 10^{-12}$), évaluer le bilan de quantité de mouvement sur une boîte de contrôle entourant le cylindre, et contrôler la symétrie transverse $|u(x, y_c+\eta) - u(x, y_c-\eta)|$.
+3. **Convergence et parité C++17 / Fortran 2018 :** Étudier la convergence sur $50\times 25 \to 100\times 50 \to 200\times 100$ (soit $N_y \times N_x = 25\times 50 \to 50\times 100 \to 100\times 200$) et vérifier la cohérence inter-codes et inter-solveurs.
 
 ### 6.2 Script Python de Vérification Dynamique
 
@@ -1893,11 +1893,11 @@ def analyze_wake(pvtr_path: str, lx: float = 30.0, ly: float = 15.0,
     print(f"[{pvtr_path}] Cd = {cd:.4f} | Lr/D = {lr:.4f}")
 
 if __name__ == "__main__":
-    analyze_wake("output/cpp/grid_400x200/cas_10_sillage_re20_400x200_001000.pvtr")
+    analyze_wake("output/cpp/grid_200x100/cas_10_sillage_re20_200x100_001000.pvtr")
 ```
 
 ### 6.3 Visualisation sous ParaView
-1. Ouvrir `output/cpp/grid_400x200/cas_10_sillage_re20_400x200_001000.pvtr` dans ParaView.
+1. Ouvrir `output/cpp/grid_200x100/cas_10_sillage_re20_200x100_001000.pvtr` dans ParaView.
 2. Superposer le champ `Pressure` et les lignes de courant (**Stream Tracer**) autour de $(7.5, 7.5)$ pour observer les deux lobes tourbillonnaires symétriques attachés en aval du cylindre.
 # Tutoriel 11 : Convection Naturelle Laminaire en Cavité Différentiellement Chauffée ($Pr = 0.71, Ra = 10^3$ à $10^6$)
 
